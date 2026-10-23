@@ -205,11 +205,13 @@ export function updateRegisters(c: PageChrome, m: Machine | null): void {
     const v = m ? m.regs[i]! : 0n;
     const hex = cell.querySelector<HTMLElement>(".reg-hex")!;
     hex.textContent = hex64(v);
+    hex.title = hex64(v);
     cell.querySelector<HTMLElement>(".reg-dec")!.textContent = BigInt.asIntN(64, v).toString();
     cell.classList.toggle("changed", m !== null && m.changed.has(i));
   });
   const rv = m ? m.rip : 0n;
   c.ripCell.querySelector<HTMLElement>(".reg-hex")!.textContent = hex64(rv);
+  c.ripCell.querySelector<HTMLElement>(".reg-hex")!.title = hex64(rv);
   c.ripCell.querySelector<HTMLElement>(".reg-dec")!.textContent = BigInt.asIntN(64, rv).toString();
   c.ripCell.classList.toggle("changed", m !== null && m.changed.has(16));
 }

@@ -362,7 +362,7 @@ function splitCommas(toks: Tok[], ln: number): Tok[][] {
 
 interface RawInsn {
   ln: number; text: string; mne: string; ops: POp[]; shiftCl: boolean; size: 8 | 4;
-  branchSym: string | null; branchAbs: bigint | null; width: 8 | 32;
+  branchSym: string | null; branchAbs: bigint | null; branchTerms: Term[] | null; width: 8 | 32;
 }
 interface DataCell { ln: number; str?: string; terms?: Term[] }
 interface RawData { ln: number; kind: "db" | "dq"; cells: DataCell[] }
@@ -840,17 +840,22 @@ function assembleProgram(src: string): Program {
     const size = validateInsn(m, ops, shiftCl, ln);
     let branchSym: string | null = null;
     let branchAbs: bigint | null = null;
+    let branchTerms: Term[] | null = null;
     if (m === "jmp" || m === "call" || CC[m] !== undefined) {
       const o = ops[0]!;
       if (o.k === "imm") {
         if (o.terms.length === 1 && o.terms[0]!.kind === "sym") branchSym = o.terms[0]!.name ?? null;
-        else {
-          if (!o.terms.every((t) => t.kind === "num")) throw new AsmError(ln, `the target of '${m}' must be a .text label or a plain address`);
+        else if (o.terms.every((t) => t.kind === "num")) {
           branchAbs = o.terms.reduce((a, t) => a + BigInt(t.sign) * t.v!, 0n);
+        } else if (o.terms.every((t) => t.kind === "num" || t.kind === "here")) {
+          // e.g. `jmp $` (own address) or `jmp $+8` — resolved once addresses are known
+          branchTerms = o.terms;
+        } else {
+          throw new AsmError(ln, `the target of '${m}' must be a .text label or a plain address`);
         }
       }
     }
-    insns.push({ ln, text, mne: m, ops, shiftCl, size, branchSym, branchAbs, width: 8 });
+    insns.push({ ln, text, mne: m, ops, shiftCl, size, branchSym, branchAbs, branchTerms, width: 8 });
   });
 
   if (insns.length === 0) throw new AsmError(1, "no instructions found — add some to the .text section");
@@ -881,7 +886,7 @@ function assembleProgram(src: string): Program {
     });
   const probeInsn = (raw: RawInsn, width: 8 | 32): EInsn => ({
     ln: raw.ln, mne: raw.mne, ops: dummyOps(raw), shiftCl: raw.shiftCl, size: raw.size,
-    target: null, branch: raw.branchSym !== null || raw.branchAbs !== null, cc: CC[raw.mne] ?? null, width,
+    target: null, branch: raw.branchSym !== null || raw.branchAbs !== null || raw.branchTerms !== null, cc: CC[raw.mne] ?? null, width,
   });
   const probeBytes: number[][] = insns.map((raw, i) => encodeInsn(probeInsn(raw, widths[i]!), TEXT_BASE));
   let addrs: number[] = [];
@@ -904,13 +909,18 @@ function assembleProgram(src: string): Program {
     const textEnd = a;
     for (let i = 0; i < n; i++) {
       const ins = insns[i]!;
-      if (ins.branchSym === null && ins.branchAbs === null) continue;
+      if (ins.branchSym === null && ins.branchAbs === null && ins.branchTerms === null) continue;
       let to: bigint;
       if (ins.branchSym !== null) {
         const def = labelByName.get(ins.branchSym);
         if (def === undefined) throw new AsmError(ins.ln, `unknown symbol '${ins.branchSym}'`);
         if (def.sec !== "text") throw new AsmError(ins.ln, `branch target '${ins.branchSym}' must be a label in .text`);
         to = BigInt(addrs[def.idx] ?? textEnd);
+      } else if (ins.branchTerms !== null) {
+        // `$` = this instruction's own address
+        to = ins.branchTerms.reduce(
+          (a, t) => a + BigInt(t.sign) * (t.kind === "here" ? BigInt(addrs[i]!) : t.v!), 0n,
+        );
       } else {
         to = ins.branchAbs!;
       }
@@ -978,12 +988,14 @@ function assembleProgram(src: string): Program {
       if (def === undefined) throw new AsmError(raw.ln, `unknown symbol '${raw.branchSym}'`);
       if (def.sec !== "text") throw new AsmError(raw.ln, `branch target '${raw.branchSym}' must be a label in .text`);
       target = textLabelAddr(def);
+    } else if (raw.branchTerms !== null) {
+      target = evalTerms(raw.branchTerms, raw.ln, hereVal);
     } else if (raw.branchAbs !== null) {
       target = raw.branchAbs;
     }
     const einsn: EInsn = {
       ln: raw.ln, mne: raw.mne, ops, shiftCl: raw.shiftCl, size: raw.size,
-      target, branch: raw.branchSym !== null || raw.branchAbs !== null, cc: CC[raw.mne] ?? null, width: widths[i]!,
+      target, branch: raw.branchSym !== null || raw.branchAbs !== null || raw.branchTerms !== null, cc: CC[raw.mne] ?? null, width: widths[i]!,
     };
     const bytes = encodeInsn(einsn, addr);
     if (bytes.length !== probeBytes[i]!.length) {

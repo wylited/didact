@@ -99,6 +99,24 @@ function setEditorMarks(b: Block, scroll = false): void {
   b.view.dispatch({ effects });
 }
 
+/** Refresh the status chip to reflect the given (newly active) block's own state. */
+function syncStatusFor(b: Block): void {
+  if (b.machine === null && b.errorLine !== null) {
+    setStatus("error", b.errEl.textContent ?? `line ${b.errorLine}: assembly error`);
+    return;
+  }
+  const m = b.machine;
+  if (m === null) {
+    setStatus("idle", "not loaded");
+  } else if (m.status === "error") {
+    setStatus("error", m.error ?? "runtime error");
+  } else if (m.status === "finished") {
+    setStatus("done", `finished · ${m.finishNote ?? "done"} · ${m.steps} steps`);
+  } else {
+    setStatus("ok", `loaded · ${m.prog.insns.length} instructions`);
+  }
+}
+
 function setActive(b: Block): void {
   if (active === b) return;
   const prev = active;
@@ -111,6 +129,7 @@ function setActive(b: Block): void {
   b.blockEl.setAttribute("data-active", "true");
   setEditorMarks(b);
   refreshPanels();
+  syncStatusFor(b);
 }
 
 function showAsmError(b: Block, line: number, message: string): void {

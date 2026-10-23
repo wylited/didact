@@ -91,6 +91,10 @@ negative, character literals.
 moves; `movsb`-style string ops; FPU/SSE; `ret imm`; multiple instructions per
 line. Memory operands without a register or size specifier default to qword.
 
+`cqo`/`cdq` are not in the subset: for a negative dividend, sign-extend by
+hand (e.g. `mov rdx, -1`) before `idiv`. `idiv`/`div` guard against
+divide-by-zero and the INT64_MIN/−1 overflow with `#DE`-style runtime errors.
+
 Encodings are real x86-64: the disassembly panel shows the computed address
 and the actual emitted bytes (REX + opcode + ModRM/SIB + disp + imm), branches
 relax between rel8/rel32, and `mov r64, imm` picks `C7 /0 imm32` when the
