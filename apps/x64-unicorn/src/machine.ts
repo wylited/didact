@@ -31,12 +31,12 @@ export const GPR_NAMES = [
 ] as const;
 
 export const FLAG_DEFS: ReadonlyArray<{ name: string; bit: bigint; title: string }> = [
-  { name: 'CF', bit: 1n << 0n, title: 'carry' },
-  { name: 'PF', bit: 1n << 2n, title: 'parity' },
-  { name: 'AF', bit: 1n << 4n, title: 'auxiliary carry' },
   { name: 'ZF', bit: 1n << 6n, title: 'zero' },
+  { name: 'CF', bit: 1n << 0n, title: 'carry' },
   { name: 'SF', bit: 1n << 7n, title: 'sign' },
   { name: 'OF', bit: 1n << 11n, title: 'overflow' },
+  { name: 'PF', bit: 1n << 2n, title: 'parity' },
+  { name: 'AF', bit: 1n << 4n, title: 'auxiliary carry' },
 ];
 
 export interface Registers {

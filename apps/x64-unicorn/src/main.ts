@@ -119,7 +119,7 @@ loadEngines()
     machine = new Machine(engines.unicorn, new engines.capstone.Capstone(engines.capstone.ARCH_X86, engines.capstone.MODE_64), {
       onNote: (text) => setStatus(text, 'accent'),
     });
-    setStatus('ready — press ▶ Run or ⤵ Step', 'ok');
+    setStatus('ready', 'muted');
     renderPanel();
   })
   .catch((err: unknown) => {
@@ -226,7 +226,7 @@ function doReset(): void {
     machine.reset();
     setStatus(`loaded · ${machine.rows.length} instructions`, 'ok');
   } else {
-    setStatus(machine ? 'ready — not loaded' : 'engines are still loading…', machine ? 'ok' : 'muted');
+    setStatus(machine ? 'ready' : 'engines are still loading…', 'muted');
   }
   renderPanel();
 }
@@ -323,7 +323,7 @@ function renderDisasm(): void {
     if (i === current) div.dataset.test = 'current-instr';
     const addr = document.createElement('span');
     addr.className = 'daddr';
-    addr.textContent = '0x' + row.addr.toString(16).padStart(6, '0');
+    addr.textContent = '0x' + row.addr.toString(16).padStart(8, '0');
     const bytes = document.createElement('span');
     bytes.className = 'dbytes';
     bytes.textContent = Array.from(row.bytes)
@@ -337,12 +337,14 @@ function renderDisasm(): void {
     if (i === current) requestAnimationFrame(() => div.scrollIntoView({ block: 'nearest' }));
   }
 }
-
 function renderMemory(): void {
   memoryEl.replaceChildren();
   if (!machine) return;
+  // Below 1100px the machine pane is too narrow for 16 bytes plus the ASCII
+  // column; re-flow to 8 bytes/row so nothing scrolls horizontally.
+  const perRow = narrowViewport.matches ? 8 : 16;
   const view = machine.dataView();
-  for (let base = 0; base < view.length; base += 16) {
+  for (let base = 0; base < view.length; base += perRow) {
     const row = document.createElement('div');
     row.className = 'mrow';
     const addr = document.createElement('span');
@@ -350,13 +352,13 @@ function renderMemory(): void {
     addr.textContent = '0x' + (DATA_BASE + base).toString(16);
     const hex = document.createElement('span');
     hex.className = 'mhex';
-    hex.textContent = Array.from(view.slice(base, base + 16))
+    hex.textContent = Array.from(view.slice(base, base + perRow))
       .map((b) => b.toString(16).padStart(2, '0'))
       .join(' ');
     const ascii = document.createElement('span');
     ascii.className = 'mascii';
     let text = '';
-    for (let j = 0; j < 16 && base + j < view.length; j++) {
+    for (let j = 0; j < perRow && base + j < view.length; j++) {
       const b = view[base + j];
       text += b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '.';
     }
@@ -365,6 +367,11 @@ function renderMemory(): void {
     memoryEl.appendChild(row);
   }
 }
+
+// Machine-pane breakpoint shared with styles.css: below 1100px the memory
+// viewer re-flows to 8 bytes/row (see the @media (max-width: 1100px) block).
+const narrowViewport = window.matchMedia('(max-width: 1100px)');
+narrowViewport.addEventListener('change', () => renderMemory());
 
 // Zeroed panel before the first run (design.md: machine UI always renders).
 setStatus('loading engines…', 'muted');
