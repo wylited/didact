@@ -1,0 +1,23 @@
+{
+  "name": "riscv-lite",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Literate assembly prototype: custom RV32I(+M) assembler + simulator, org-mode lessons, 100% client-side",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@codemirror/language": "^6.0.0",
+    "@codemirror/state": "^6.0.0",
+    "@codemirror/view": "^6.0.0",
+    "codemirror": "^6.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vite": "^6.0.0"
+  }
+}
