@@ -127,3 +127,13 @@ Implementation: a small hand-written org-subset parser (~150–250 LOC TS)
 inside each app — no unified/ecosystem dependency — validated against the
 sample lesson. Parser behavior is part of the shared contract: same lesson
 org text renders identically (modulo ISA-specific blocks) in all prototypes.
+
+## E2E test hooks (binding)
+
+Every app exposes stable hooks so automated user-flow testing is uniform:
+`data-test` attributes on: toolbar buttons `run`, `step`, `reset`; status chip
+`status`; register cells `reg-<name>` (lowercase ISA names, e.g. `reg-rax`,
+`reg-a0`, plus `reg-pc`/`reg-rip`); output console `output`; disassembly
+current row `current-instr`; each executable block's run button
+`block-run`; the editor host `editor`. Vite `base: './'` so `dist/` serves
+from any static path.
