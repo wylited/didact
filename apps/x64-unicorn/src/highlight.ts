@@ -4,7 +4,7 @@
 
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
-import { StateEffect, StateField, type Extension } from '@codemirror/state';
+import { StateEffect, StateField, type Extension, type StateEffectType } from '@codemirror/state';
 import { Decoration, EditorView, type DecorationSet } from '@codemirror/view';
 
 interface AsmLineState {
@@ -97,30 +97,42 @@ export const editorTheme = EditorView.theme(
 
 export interface LineHighlighter {
   extension: Extension;
+  /** Effect to set/clear the highlight — for composing into one transaction. */
+  effect: StateEffectType<number | null>;
   set(view: EditorView, line: number | null): void;
 }
 
 /**
  * A Decoration.line-based marker that highlights one 1-based document line.
- * `set(view, null)` clears it.
+ * `set(view, null)` clears it. The exposed `effect` lets callers compose the
+ * highlight with other effects (e.g. scrollIntoView) in a single transaction.
  */
 export function makeLineHighlight(cls: string): LineHighlighter {
   const effect = StateEffect.define<number | null>();
   const field = StateField.define<DecorationSet>({
     create: () => Decoration.none,
-    update(_value, tr) {
+    update(value, tr) {
+      // Start from the previous decoration mapped through any document
+      // changes so the highlight survives unrelated transactions (scrolls,
+      // other plugins, editor typing).
+      let next = value.map(tr.changes);
       for (const e of tr.effects) {
         if (!e.is(effect)) continue;
         const line = e.value;
-        if (line === null || line < 1 || line > tr.state.doc.lines) return Decoration.none;
-        const pos = tr.state.doc.line(line).from;
-        return Decoration.set([Decoration.line({ class: cls }).range(pos)]);
+        if (line === null || line < 1 || line > tr.state.doc.lines) {
+          next = Decoration.none;
+        } else {
+          const pos = tr.state.doc.line(line).from;
+          next = Decoration.set([Decoration.line({ class: cls }).range(pos)]);
+        }
       }
-      return Decoration.none;
+      return next;
     },
+    provide: (f) => EditorView.decorations.from(f),
   });
   return {
     extension: field,
+    effect,
     set(view: EditorView, line: number | null): void {
       view.dispatch({ effects: effect.of(line) });
     },

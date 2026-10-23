@@ -324,9 +324,10 @@ export class Machine {
         uc.emu_stop();
         return;
       }
-      this.totalInsns++;
       if (this.stepMode) {
         if (this.stepArmed) {
+          // Second hook hit of the run: stop BEFORE this instruction executes,
+          // so it is only peeked at and must not be counted.
           uc.emu_stop();
           return;
         }
@@ -334,7 +335,9 @@ export class Machine {
       } else if (this.budgetLeft !== null && --this.budgetLeft < 0) {
         this.budgetExceeded = true;
         uc.emu_stop();
+        return;
       }
+      this.totalInsns++;
     } catch {
       try {
         uc.emu_stop();
@@ -416,7 +419,11 @@ export class Machine {
   }
 
   isFlagSet(bit: bigint): boolean {
-    return (toUnsigned64(this.regsNow.eflags) & bit) !== 0n;
+    // Read EFLAGS live from the instance on every call: the snapshot taken in
+    // afterRun can briefly lag the emulated CPU when Unicorn materializes
+    // lazy eflags late after a hook stop (stale-flag glitch D4).
+    const raw = this.uc ? this.uc.reg_read_i64(this.reg('eflags')) : this.regsNow.eflags;
+    return (toUnsigned64(raw) & bit) !== 0n;
   }
 
   currentRowIndex(): number {

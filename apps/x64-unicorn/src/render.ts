@@ -7,11 +7,12 @@ import { basicSetup } from 'codemirror';
 import { EditorView } from '@codemirror/view';
 import type { OrgDoc, OrgNode, SrcNode } from './org';
 import { syntaxHighlighting } from '@codemirror/language';
-import { asmHighlightStyle, asmLanguage, editorTheme, makeLineHighlight } from './highlight';
+import { asmHighlightStyle, asmLanguage, editorTheme, makeLineHighlight, type LineHighlighter } from './highlight';
 
 export interface BlockEvents {
   onRun: (block: BlockHandle) => void;
   onActivate: (block: BlockHandle) => void;
+  onResetCode: (block: BlockHandle) => void;
 }
 
 export interface BlockHandle {
@@ -253,13 +254,15 @@ function makeExecutableBlock(node: SrcNode, host: HTMLElement, events: BlockEven
       const at = line !== null ? `line ${line}: ` : '';
       errorBox.textContent = `${at}${message}`;
       if (line !== null) {
-        errorHighlight.set(editor, line);
-        scrollEditorToLine(editor, line);
+        highlightAndScroll(editor, errorHighlight, line);
       }
     },
     markCurrent(line) {
-      currentHighlight.set(editor, line);
-      if (line !== null) scrollEditorToLine(editor, line);
+      if (line === null) {
+        currentHighlight.set(editor, null);
+        return;
+      }
+      highlightAndScroll(editor, currentHighlight, line);
     },
     showOutput(text: string) {
       outputPre.textContent = text;
@@ -288,15 +291,24 @@ function makeExecutableBlock(node: SrcNode, host: HTMLElement, events: BlockEven
     handle.setSource(node.code);
     handle.markError(null, null);
     handle.markCurrent(null);
+    events.onResetCode(handle);
   });
   editorHost.addEventListener('focusin', () => events.onActivate(handle));
 
   return handle;
 }
 
-function scrollEditorToLine(editor: EditorView, line: number): void {
+/**
+ * Set the line highlight and scroll the line into view in ONE transaction:
+ * separate dispatches would leave a window where the scroll-only transaction
+ * interacts with the highlight state, and one transaction is cheaper anyway.
+ */
+function highlightAndScroll(editor: EditorView, highlighter: LineHighlighter, line: number): void {
   const clamped = Math.min(Math.max(line, 1), editor.state.doc.lines);
   editor.dispatch({
-    effects: EditorView.scrollIntoView(editor.state.doc.line(clamped).from, { y: 'center' }),
+    effects: [
+      highlighter.effect.of(clamped),
+      EditorView.scrollIntoView(editor.state.doc.line(clamped).from, { y: 'center' }),
+    ],
   });
 }
