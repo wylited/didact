@@ -1,0 +1,12 @@
+{
+  "name": "literate-website",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Client-side literate-programming website prototypes: org-mode lessons with executable, steppable assembly blocks",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev:x64-unicorn": "pnpm --dir apps/x64-unicorn dev",
+    "dev:x64-lite": "pnpm --dir apps/x64-lite dev",
+    "dev:riscv-lite": "pnpm --dir apps/riscv-lite dev"
+  }
+}
