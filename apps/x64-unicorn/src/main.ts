@@ -105,6 +105,7 @@ let machineBlock: BlockHandle | null = null;
 const blocks: BlockHandle[] = renderLesson(doc, lessonHost, ASM_LANG, {
   onRun: (block) => doRun(block),
   onActivate: (block) => activate(block),
+  onResetCode: (block) => doResetCode(block),
 });
 if (blocks.length > 0) activeBlock = blocks[0];
 
@@ -228,6 +229,23 @@ function doReset(): void {
     setStatus(machine ? 'ready — not loaded' : 'engines are still loading…', machine ? 'ok' : 'muted');
   }
   renderPanel();
+}
+
+/**
+ * "Reset code" restored a block's sample: re-assemble and load it so the
+ * status chip and machine panel reflect the restored (error-free) source
+ * instead of keeping a stale error state.
+ */
+function doResetCode(block: BlockHandle): void {
+  activeBlock = block;
+  if (!machine || !assembler) {
+    setStatus('engines are still loading…', 'muted');
+    return;
+  }
+  if (assembleAndLoad(block)) {
+    setStatus(`loaded · ${machine.rows.length} instructions`, 'ok');
+    renderPanel();
+  }
 }
 
 function activate(block: BlockHandle): void {
