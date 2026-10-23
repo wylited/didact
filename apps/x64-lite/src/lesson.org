@@ -15,10 +15,11 @@ Try this workflow:
 
 - Click into a code block and *edit it* — it is a full editor with syntax
   highlighting.
-- Press ▶ Run once to *assemble* the block: the status chip reports =loaded ·
-  N instructions= and the disassembly panel fills with addresses and bytes.
-- Press ▶ Run again to run to completion, or ⤵ Step to execute *exactly one*
-  instruction and watch registers, flags, memory and output update.
+- Press ▶ Run to assemble *and* run the block: the disassembly panel fills
+  with addresses and bytes, output streams below, and the status chip ends at
+  =finished · exit(0) · N steps=. Press ▶ Run again to re-run from the start.
+- Press ⤵ Step instead to execute *exactly one* instruction at a time and
+  watch registers, flags, memory and output update.
 - ⟲ Reset restores the machine to its just-assembled state; the =Reset code=
   link on a block restores the original sample.
 - The right-hand panel always mirrors the *active* block — the one you last

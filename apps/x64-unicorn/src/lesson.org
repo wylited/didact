@@ -40,8 +40,8 @@ string in the data region (mapped at address =0x601000= in this machine), and
 =msg_len= is computed with an =equ= constant using =$= (the current address)
 minus the label =msg=.
 
-Edit the string, the length, or the registers — then press ▶ Run twice: the
-first click assembles and loads, the second runs to completion. Or step
+Edit the string, the length, or the registers — then press ▶ Run to assemble
+and run to completion. Or step
 through it one instruction at a time with ⤵ Step and watch =rax=, =rsi= and
 =rdx= change.
 

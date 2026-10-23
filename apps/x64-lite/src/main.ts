@@ -187,18 +187,21 @@ function afterExecution(b: Block): void {
   refreshPanels();
 }
 
-/** ▶ Run: first click assembles + loads; further clicks run to completion. */
+/** ▶ Run: (re)assemble, restart from initial state, run to completion. */
 function doRun(): void {
   if (active === null) return;
   const b = active;
   const src = b.view.state.doc.toString();
-  const loaded = b.machine !== null && b.machine.status === "loaded" && b.loadedSource === src;
-  if (loaded) {
-    b.machine!.run();
-    afterExecution(b);
-  } else {
-    ensureLoaded(b);
+  const wasLoaded = b.machine !== null && b.loadedSource === src;
+  if (!ensureLoaded(b)) return;
+  // Same source as before: restart from initial machine state + clear output.
+  if (wasLoaded) {
+    b.machine!.reset();
+    b.resultsEl.hidden = true;
+    b.resultPre.textContent = "";
   }
+  b.machine!.run();
+  afterExecution(b);
 }
 
 /** ⤵ Step: assemble if needed, then execute exactly one instruction. */

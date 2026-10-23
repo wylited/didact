@@ -109,10 +109,10 @@ programs were exercised by a scratch harness (all green) before delivery.
 and `editor` (per executable block), plus `memory`, `branch-context`,
 `disassembly`, `registers`, `results`.
 
-Behavior notes: first `▶ Run` assembles + loads (status `loaded · N
-instructions`); a second click (unchanged code) runs to completion under a
-1,000,000-instruction budget; the per-block `▶ Run` always assembles fresh
-and runs. `⤵ Step` assembles when needed, then executes exactly one
+Behavior notes: `▶ Run` (toolbar or per-block) assembles and immediately runs
+to completion under a 1,000,000-instruction budget; pressing Run again
+re-runs from the initial state. `⤵ Step` assembles when needed, then
+executes exactly one
 instruction; changed registers keep an accent until the next step; editor
 and disassembly auto-scroll to the current instruction. `⟲ Reset` restores
 initial state, clears output, keeps the code. `#+RESULTS:` slots are

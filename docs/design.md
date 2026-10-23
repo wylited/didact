@@ -13,6 +13,29 @@ CPU state and supports single-stepping instruction by instruction.
 
 No server. Everything (assembling, executing, stepping) happens in the browser.
 
+## Behavior (all prototypes)
+
+1. **Assemble + run on Run.** `▶ Run` assembles the active block and,
+   on success, executes to program end immediately (instruction budget
+   below). If already loaded with unchanged source, Run restarts from the
+   initial state and runs to completion. On load error: status chip red,
+   offending line highlighted in the editor with the error message
+   (line number + reason) shown inline under the block — nothing executes.
+2. **Step.** `⤵ Step` executes exactly ONE instruction, then: registers,
+   flags, memory, output, disassembly current-line marker, and editor line
+   highlight all update. Registers that changed since the previous step are
+   visually marked (accent color). Editor + disassembly auto-scroll to the
+   current instruction.
+3. **Run-to-end UX.** No per-step animation required — final state shown,
+   output console streams everything the program wrote; status chip ends at
+   `finished · <exit summary> · N steps` (or a budget-exceeded error state).
+4. **Reset.** `⟲ Reset` restores initial state, clears output, keeps code.
+5. **Output.** Programs print via the ISA's convention (x86-64: `syscall`
+   with rax=1/write; RISC-V: `ecall`); bytes are appended to the output
+   console as UTF-8 text.
+6. **Step when not loaded** = assemble then execute first instruction.
+7. Machine state UI must always render even before first run (zeroed).
+
 ## Layout
 
 Two-pane, full viewport, no page scroll on desktop (panes scroll internally).
@@ -36,43 +59,22 @@ Two-pane, full viewport, no page scroll on desktop (panes scroll internally).
 - Right pane ~45%: sticky machine panel, sections stacked, each with a
   monospace body and small uppercase section label.
 
-## Behavior (all prototypes)
-
-1. **Assemble on Run.** `▶ Run` assembles the active block. On success:
-   machine state initialized, program loaded, PC set to entry, disassembly
-   listing populated, status chip shows "loaded · N instructions".
-   On error: status chip red, offending line highlighted in the editor with
-   the error message (line number + reason) shown inline under the block.
-2. **Step.** `⤵ Step` executes exactly ONE instruction, then: registers,
-   flags, memory, output, disassembly current-line marker, and editor line
-   highlight all update. Registers that changed since the previous step are
-   visually marked (accent color). Editor + disassembly auto-scroll to the
-   current instruction.
-3. **Run to completion.** A second click of `▶ Run` (or a separate control)
-   executes until program end (exit syscall/ret from entry), animating no
-   per-step updates required — final state shown, output console streams
-   everything the program wrote.
-4. **Reset.** `⟲ Reset` restores initial state, clears output, keeps code.
-5. **Output.** Programs print via the ISA's convention (x86-64: `syscall`
-   with rax=1/write; RISC-V: `ecall`); bytes are appended to the output
-   console as UTF-8 text.
-6. **Step when not loaded** = assemble then execute first instruction.
-7. Machine state UI must always render even before first run (zeroed).
-
 ## Visual language
 
 - Dark theme, high contrast, teaching-friendly. Font: system UI for prose;
   `ui-monospace/SF Mono/Menlo/monospace` for code, registers, memory.
 - Colors via CSS custom properties (`--bg`, `--fg`, `--muted`, `--accent`,
-  `--changed`, `--error`) so siblings look like one family.
+  `--changed`, `--error`) so siblings look like one family. Changed-register
+  marker is family amber `#e3b341`; the primary `▶ Run` button is
+  accent-filled (Step/Reset secondary); status chip is monospace.
 - Register grid: 16–17 cells (GPRs + PC), each `name` over `hex value`
   (`0x0000000000000042`-style, ISA-appropriate width) with signed decimal
-  subtitle. Changed registers get accent left-border + tinted background
-  until next step.
+  subtitle. Changed registers get the amber marker until the next step.
 - Flags: chips `ZF CF SF OF` (+ `PF AF` for x86), lit when set.
+  (RISC-V has no flags — omit the section.)
 - Disassembly: `addr | bytes | mnemonic operands`; current row highlighted.
 - Memory viewer: hex dump of a fixed region around `.data` (or a `dump`
-  register choice), 16 bytes/row, ASCII column.
+  register choice), 16 bytes/row (8 below ~1100px viewport), ASCII column.
 - Executable code block: subtle border, "▶ Run" button top-right of block,
   output area appears beneath the block after run (duplicated in right-pane
   console is fine and expected).

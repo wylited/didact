@@ -171,11 +171,9 @@ function doRun(block: BlockHandle): void {
   }
   if (needsLoad(block)) {
     if (!assembleAndLoad(block)) return;
-    setStatus(`loaded · ${machine.rows.length} instructions`, 'ok');
-    renderPanel();
-    return; // first click assembles and loads; a second click executes
+  } else if (machine.finished) {
+    machine.reset(); // re-click: restart from the initial state and run again
   }
-  if (machine.finished) machine.reset();
   setStatus('running…', 'busy');
   machine.run(RUN_BUDGET);
   afterExecution(block);
