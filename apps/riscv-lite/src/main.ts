@@ -156,11 +156,11 @@ function refreshMachine(b: BlockState): void {
   const cpu = b.cpu;
   machine.setProgram(b.program);
   if (cpu !== null) {
-    machine.updateRegisters(cpu.regs, cpu.pc, NO_CHANGE);
+    machine.updateRegisters(cpu.regs, cpu.pc, NO_CHANGE, false);
     machine.updateBranch(cpu.lastBranch);
     machine.updateMemory(byteReader(cpu), b.program!.hasData ? b.program!.dataStart : null);
   } else {
-    machine.updateRegisters(ZEROS, 0, NO_CHANGE);
+    machine.updateRegisters(ZEROS, 0, NO_CHANGE, false);
     machine.updateBranch(null);
     machine.updateMemory(null, null);
   }
@@ -201,7 +201,7 @@ function assembleBlock(b: BlockState): boolean {
     b.output = "";
     showError(b, r.error.line, r.error.message);
     machine.setProgram(null);
-    machine.updateRegisters(ZEROS, 0, NO_CHANGE);
+    machine.updateRegisters(ZEROS, 0, NO_CHANGE, false);
     machine.updateBranch(null);
     machine.updateMemory(null, null);
     machine.setCurrent(null);
@@ -246,10 +246,11 @@ function doStep(): void {
     return;
   }
   if (cpu.steps === 0) b.inst.resultsBody.textContent = ""; // fresh session replaces canned/prior results
+  const prevPc = cpu.pc;
   const r = cpu.step(true);
   drainOutput(b, cpu);
 
-  machine.updateRegisters(cpu.regs, cpu.pc, new Set(r.changed));
+  machine.updateRegisters(cpu.regs, cpu.pc, new Set(r.changed), cpu.pc !== prevPc);
   machine.updateBranch(cpu.lastBranch);
   machine.setCurrent(currentAddr(b));
   machine.updateMemory(byteReader(cpu), b.program!.hasData ? b.program!.dataStart : null);
@@ -328,7 +329,7 @@ async function runAll(b: BlockState): Promise<void> {
   }
   drainOutput(b, cpu);
 
-  machine.updateRegisters(cpu.regs, cpu.pc, NO_CHANGE);
+  machine.updateRegisters(cpu.regs, cpu.pc, NO_CHANGE, false);
   machine.updateBranch(cpu.lastBranch);
   machine.setCurrent(currentAddr(b));
   machine.updateMemory(byteReader(cpu), b.program!.hasData ? b.program!.dataStart : null);

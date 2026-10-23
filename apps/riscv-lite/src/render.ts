@@ -23,7 +23,7 @@ export interface Shell {
 const SHELL_HTML = `
   <header class="toolbar">
     <button class="tb-btn primary" data-test="run" title="Assemble, then run to completion">&#9654; Run</button>
-    <button class="tb-btn" data-test="step" title="Execute exactly one instruction">&#10515; Step</button>
+    <button class="tb-btn" data-test="step" title="Execute exactly one instruction">&#10549; Step</button>
     <button class="tb-btn" data-test="reset" title="Restore initial machine state">&#10226; Reset</button>
     <span class="tb-spacer"></span>
     <span class="chip" data-test="status">idle</span>
@@ -333,14 +333,10 @@ export function renderLesson(
 
         const results = document.createElement("div");
         results.className = "results";
-        const resultsLabel = document.createElement("span");
-        resultsLabel.className = "results-label";
-        resultsLabel.textContent = "#+RESULTS:";
         const resultsBody = document.createElement("div");
         resultsBody.className = "results-body";
         resultsBody.setAttribute("data-test", "results");
         resultsBody.textContent = block.results ?? "";
-        results.appendChild(resultsLabel);
         results.appendChild(resultsBody);
         frame.appendChild(results);
 
@@ -382,6 +378,7 @@ export class MachineUI {
   private readonly regCells: RegCell[] = [];
   private readonly pcHex: HTMLElement;
   private readonly pcDec: HTMLElement;
+  private readonly pcCell: HTMLElement;
   private readonly branchEl: HTMLElement;
   private readonly disasmEl: HTMLElement;
   private readonly memoryEl: HTMLElement;
@@ -448,18 +445,19 @@ export class MachineUI {
     pcCell.appendChild(this.pcHex);
     pcCell.appendChild(this.pcDec);
     grid.appendChild(pcCell);
+    this.pcCell = pcCell;
 
     this.branchEl = root.querySelector<HTMLElement>('[data-test="branch-context"]')!;
     this.disasmEl = root.querySelector<HTMLElement>('[data-test="disassembly"]')!;
     this.memoryEl = root.querySelector<HTMLElement>('[data-test="memory"]')!;
     this.consoleEl = root.querySelector<HTMLElement>('[data-test="output"]')!;
 
-    this.updateRegisters(new Int32Array(32), 0, new Set<number>());
+    this.updateRegisters(new Int32Array(32), 0, new Set<number>(), false);
     this.setProgram(null);
     this.updateMemory(null, null);
   }
 
-  updateRegisters(regs: Int32Array, pc: number, changed: ReadonlySet<number>): void {
+  updateRegisters(regs: Int32Array, pc: number, changed: ReadonlySet<number>, pcChanged: boolean): void {
     for (let i = 0; i < 32; i++) {
       const c = this.regCells[i]!;
       c.hexEl.textContent = hex32(regs[i]!);
@@ -468,6 +466,7 @@ export class MachineUI {
     }
     this.pcHex.textContent = hex32(pc);
     this.pcDec.textContent = String(pc >>> 0);
+    this.pcCell.classList.toggle("changed", pcChanged);
   }
 
   updateBranch(info: BranchInfo | null): void {
@@ -538,12 +537,13 @@ export class MachineUI {
   updateMemory(read: ((addr: number) => number) | null, start: number | null): void {
     this.memoryEl.innerHTML = "";
     if (read === null || start === null) {
-      const empty = document.createElement("div");
-      empty.className = "empty-note";
-      empty.textContent = "\u2014 no .data section \u2014";
-      this.memoryEl.appendChild(empty);
+      this.renderMemoryRows(() => 0, 0x1000);
       return;
     }
+    this.renderMemoryRows(read, start);
+  }
+
+  private renderMemoryRows(read: (addr: number) => number, start: number): void {
     const base = start & ~0xf;
     for (let row = 0; row < 8; row++) {
       const addr = base + row * 16;

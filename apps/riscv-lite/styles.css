@@ -11,7 +11,7 @@
   --fg: #e6edf3;
   --muted: #8b98a9;
   --accent: #58a6ff;
-  --changed: #d29922;
+  --changed: #e3b341;
   --ok: #3fb950;
   --error: #f85149;
   --warn: #d29922;
@@ -104,8 +104,8 @@ body {
 }
 
 .chip.ok {
-  color: var(--ok);
-  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .chip.busy {
@@ -119,8 +119,9 @@ body {
 }
 
 .chip.err {
-  color: var(--error);
-  border-color: color-mix(in srgb, var(--error) 55%, transparent);
+  color: #ffffff;
+  background: color-mix(in srgb, var(--error) 25%, transparent);
+  border-color: var(--error);
 }
 
 /* ───────────────────────── layout ───────────────────────── */
@@ -338,12 +339,6 @@ h3.org-heading {
   background: var(--panel);
 }
 
-.results-label {
-  display: block;
-  font: 11px var(--mono);
-  color: var(--muted);
-  margin-bottom: 3px;
-}
 
 .results-body {
   font-family: var(--mono);
@@ -496,7 +491,7 @@ h3.org-heading {
 }
 
 .dis-bytes {
-  color: #4f6076;
+  color: color-mix(in srgb, var(--fg) 55%, var(--muted));
 }
 
 .dis-mn {
