@@ -1,0 +1,168 @@
+#+TITLE: x86-64 Assembly, Step by Step
+#+SUBTITLE: Real emulation in your browser — Unicorn engine · assembled by Keystone · disassembled by Capstone
+
+This page is a *literate program*: the prose explains an idea, and the code
+blocks below it are /real, editable, executable/ x86-64 assembly. Nothing is
+pre-recorded — press ▶ Run or ⤵ Step and a genuine CPU emulator in your
+browser executes your code, one instruction at a time.
+
+The right-hand panel is your *machine state*: all sixteen general-purpose
+registers, the condition flags, a disassembly listing, a hex view of the
+=.data= section, and a console for output. Registers that change between
+steps light up in blue.
+
+* Registers and the syscall convention
+
+An x86-64 CPU has sixteen 64-bit general-purpose registers. A few have a
+convention on Linux:
+
+- =rax= :: the syscall /number/ while executing =syscall=, and its return value
+- =rdi=, =rsi=, =rdx= :: the first three syscall arguments
+- =rsp= :: the stack pointer — points near the top of a private 1 MiB stack
+
+Requests to the kernel are made with the =syscall= instruction. The two you
+need today:
+
+| syscall  | rax | arguments                      |
+|----------|-----|--------------------------------|
+| =write=  | 1   | rdi fd, rsi buffer, rdx count  |
+| =exit=   | 60  | rdi exit code                 |
+
+=write= copies =rdx= bytes from the buffer at =rsi= to the file descriptor
+=rdi= (1 is standard output) and returns the number of bytes written in =rax=.
+=exit= stops the program — our emulator marks it *finished* and stops the
+stepper.
+
+* Your first syscall: =write=
+
+Here is the classic first program. The =section .data= directive places the
+string in the data region (mapped at address =0x601000= in this machine), and
+=msg_len= is computed with an =equ= constant using =$= (the current address)
+minus the label =msg=.
+
+Edit the string, the length, or the registers — then press ▶ Run twice: the
+first click assembles and loads, the second runs to completion. Or step
+through it one instruction at a time with ⤵ Step and watch =rax=, =rsi= and
+=rdx= change.
+
+#+NAME: hello
+#+BEGIN_SRC asm
+; hello.asm — your first syscall
+; Linux x86-64: syscall number in rax, args in rdi, rsi, rdx.
+
+section .text
+start:
+    mov rax, 1            ; sys_write
+    mov rdi, 1            ; fd 1 = stdout
+    mov rsi, msg          ; rsi <- address of the string
+    mov rdx, msg_len      ; rdx <- how many bytes to write
+    syscall               ; write(1, msg, 14) -> rax = 14
+
+    mov rax, 60           ; sys_exit
+    xor rdi, rdi          ; exit code 0
+    syscall               ; the machine stops here
+
+section .data
+msg:     db "Hello, world!", 10    ; 10 = '\n'
+msg_len  equ $ - msg
+#+END_SRC
+
+#+RESULTS:
+: Hello, world!
+
+Try stepping to the =syscall= line: notice that =rip= (the instruction
+pointer, shown as the highlighted row in the disassembly) moves *two* bytes
+for the =syscall= instruction, and =rax= becomes =14= — the count returned by
+the kernel.
+
+* Loops, flags and digits
+
+Printing a /number/ means converting it to ASCII yourself: the digit =5= is
+the byte =0x35=. This program accumulates the numbers 1 through 10 in =rax=
+with a loop — the total is 55 — then splits 55 into two digits with =div=,
+stores them into a buffer in =.data=, and writes the buffer.
+
+Watch the flags while stepping: =cmp rbx, 10= sets ZF/CF just like a real
+CPU, and =jbe= (jump if below-or-equal) keeps the loop going while the
+counter is at most 10. The loop runs ten times — a perfect excuse to press
+⤵ Step repeatedly and see =rbx= and =rax= evolve.
+
+#+NAME: sum-loop
+#+BEGIN_SRC asm
+; sum.asm — sum 1..10 and print the result
+; 1 + 2 + ... + 10 = 55, which is exactly two ASCII digits.
+
+section .text
+start:
+    xor rax, rax          ; sum = 0
+    mov rbx, 1            ; i = 1
+next:
+    add rax, rbx          ; sum += i
+    inc rbx               ; i++
+    cmp rbx, 10           ; flags: i vs 10
+    jbe next              ; loop while i <= 10 (short backward jump)
+
+    ; split 55 into digits: 55 / 10 = 5 remainder 5
+    mov rcx, 10
+    xor rdx, rdx          ; rdx must be 0 before div (rdx:rax / rcx)
+    div rcx               ; rax = 5 (tens), rdx = 5 (ones)
+    add al, '0'           ; 5 -> ASCII '5'
+    add dl, '0'
+    mov [digits], al      ; store tens digit into the buffer
+    mov [digits+1], dl    ; store ones digit
+    mov byte [digits+2], 10   ; newline
+
+    mov rax, 1            ; write(1, digits, 3)
+    mov rdi, 1
+    mov rsi, digits
+    mov rdx, 3
+    syscall
+
+    mov rax, 60           ; exit(0)
+    xor rdi, rdi
+    syscall
+
+section .data
+digits:  db "00", 10      ; scratch buffer, overwritten at run time
+#+END_SRC
+
+#+RESULTS:
+: 55
+
+After the program runs, look at the *Memory · .data* panel: the buffer at
+=0x601000= really changed from =0x30 0x30 0x0a= (="00\n"=) to =0x35 0x35
+0x0a= (="55\n"=). Press ⟲ Reset and watch the memory image spring back to
+its initial bytes.
+
+* What the C compiler would have written
+
+For contrast, the same sum program in C — the =printf= call hides the digit
+conversion and the =write= syscall that you just did by hand:
+
+#+NAME: sum-c
+#+BEGIN_SRC c
+#include <stdio.h>
+int main(void) {
+    int sum = 0;
+    for (int i = 1; i <= 10; i++) sum += i;
+    printf("%d\n", sum);
+    return 0;
+}
+#+END_SRC
+
+* Supported syntax cheat sheet
+
+- Intel syntax only: =mov rax, 42= (destination first), as accepted by Keystone
+- Labels: =name:= (and NASM-style =.local= labels scoped to the last global label)
+- Sections: =section .text= / =section .data= (or bare =.text= / =.data=)
+- Data: =db=, =dw=, =dd=, =dq= with numbers, characters, quoted strings, commas
+- Constants: =name equ expression=, or the shorter form with a single
+  equals sign after the name
+- Expressions: =+ - * /=, parentheses, hex =0x=, binary =0b=, characters ='a'=
+- Comments: everything after =;=
+- Memory operands: =[digits+1]=, =byte [digits+2]=, =[rax]=, =[rsp+8]=
+- Branches and calls may use labels; they are resolved to real addresses by a
+  two-pass assembler front-end before Keystone encodes them
+
+Anything the engine cannot assemble is reported on the exact source line, in
+red, both in the editor and under the block.

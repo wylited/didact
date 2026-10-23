@@ -1,0 +1,27 @@
+{
+  "name": "x64-unicorn",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Literate assembly prototype: real x86-64 execution via Unicorn-engine WASM, Keystone assembler, Capstone disassembler",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@alexaltea/capstone-js": "5.0.9",
+    "@alexaltea/keystone-js": "0.9.2",
+    "@alexaltea/unicorn-js": "2.1.4",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "@lezer/highlight": "1.2.1",
+    "codemirror": "6.0.2"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  }
+}
