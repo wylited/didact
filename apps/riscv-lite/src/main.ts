@@ -245,6 +245,7 @@ function doStep(): void {
     setStatusFor(b);
     return;
   }
+  if (cpu.steps === 0) b.inst.resultsBody.textContent = ""; // fresh session replaces canned/prior results
   const r = cpu.step(true);
   drainOutput(b, cpu);
 
@@ -309,6 +310,7 @@ async function runAll(b: BlockState): Promise<void> {
   running = true;
   setControls(false);
   setStatus("running\u2026", "busy");
+  if (cpu.steps === 0) b.inst.resultsBody.textContent = ""; // fresh session replaces canned/prior results
 
   while (cpu.halted === null && cpu.error === null && cpu.steps < RUN_BUDGET) {
     for (let k = 0; k < SLICE && cpu.halted === null && cpu.error === null; k++) {

@@ -359,6 +359,8 @@ export function renderLesson(
           cannedResults: block.results,
         };
         frame.addEventListener("focusin", () => cb.onFocus(inst));
+        runBtn.addEventListener("click", () => cb.onRun(inst));
+        resetLink.addEventListener("click", () => cb.onResetCode(inst));
         blocks.push(inst);
         break;
       }
