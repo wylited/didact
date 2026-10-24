@@ -11,6 +11,8 @@
   --lw-hover: #f4f4f4;       /* register/flag hover tint (neutral) */
   --lw-error: #8b1a1a;       /* error ink: status + line-mapped errors */
   --lw-serif: "Atkinson Hyperlegible", Georgia, "Times New Roman", serif;
+  --lw-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+             "Liberation Mono", "DejaVu Sans Mono", monospace;
 }
 
 *, *::before, *::after {
