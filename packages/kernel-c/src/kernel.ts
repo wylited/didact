@@ -7,6 +7,7 @@ import { CSession } from './session';
 export const cKernel: Kernel = {
   id: 'c',
   label: 'C · clang wasm',
+  editorSyntax: 'c',
   features: { stepping: false },
   createSession: () => new CSession(),
 };

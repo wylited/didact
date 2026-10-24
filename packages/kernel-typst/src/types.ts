@@ -67,5 +67,13 @@ export interface Kernel {
   readonly label: string;             // 'Typst · wasm'
   /** UI capabilities; a missing/false flag hides the affordance. */
   readonly features?: { breakpoints?: boolean; stepping?: boolean };
+  /** Editor syntax for this kernel's blocks (defaults to 'plain'). */
+  readonly editorSyntax?:
+    | 'asm-intel'
+    | 'asm-riscv'
+    | 'asm-mips'
+    | 'c'
+    | 'python'
+    | 'plain';
   createSession(): Session;
 }

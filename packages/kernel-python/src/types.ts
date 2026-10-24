@@ -71,5 +71,13 @@ export interface Kernel {
     /** False for kernels that can only execute to completion (no steps). */
     stepping?: boolean;
   };
+  /** Editor syntax for this kernel's blocks (defaults to 'plain'). */
+  readonly editorSyntax?:
+    | 'asm-intel'
+    | 'asm-riscv'
+    | 'asm-mips'
+    | 'c'
+    | 'python'
+    | 'plain';
   createSession(): Session;
 }

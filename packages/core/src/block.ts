@@ -22,7 +22,7 @@ import {
 } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
 import { ayuLight } from 'thememirror';
-import { intelAsm } from './asm';
+import { editorLanguage } from './languages';
 import type { Kernel, Panel, RunResult, Session } from './kernel';
 import type { OrgNode } from './org';
 
@@ -273,7 +273,7 @@ export class BlockRuntime {
           })
         : lineNumbers(),
       keymap.of(defaultKeymap),
-      intelAsm,
+      editorLanguage(kernel.editorSyntax) ?? [],
       ayuLight,
       marksField,
       markDecos,

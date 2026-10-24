@@ -6,6 +6,7 @@ import { RiscvSession } from './session';
 export const riscvKernel: Kernel = {
   id: 'riscv',
   label: 'RV32IM · interpreter',
+  editorSyntax: 'asm-riscv',
   features: { breakpoints: true },
   createSession: () => new RiscvSession(),
 };

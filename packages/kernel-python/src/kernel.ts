@@ -6,6 +6,7 @@ import { PythonSession } from './session';
 export const pythonKernel: Kernel = {
   id: 'python',
   label: 'Python · Pyodide',
+  editorSyntax: 'python',
   features: { stepping: false, breakpoints: false },
   createSession: () => new PythonSession(),
 };

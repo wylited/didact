@@ -6,6 +6,7 @@ import { MipsSession } from './session';
 export const mipsKernel: Kernel = {
   id: 'mips',
   label: 'MIPS32 · interpreter',
+  editorSyntax: 'asm-mips',
   features: { breakpoints: true },
   createSession: () => new MipsSession(),
 };
