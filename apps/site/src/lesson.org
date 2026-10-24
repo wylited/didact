@@ -96,9 +96,9 @@ keeps the loop going while the counter is at most 10. The loop runs ten
 times — a perfect excuse to press ⤵ Step repeatedly and see =rbx= and =rax=
 evolve.
 
-Both blocks run independently: attach the panel to one, run the other, and
-each keeps its own machine. The attach/detach button in the panel header
-(or clicking a block) moves the under-the-hood view between them.
+Both blocks run independently: each keeps its own machine, status, and
+results. Running or stepping a block attaches the under-the-hood view to it;
+the detach button in the panel header disconnects it again.
 
 #+NAME: sum-loop
 #+BEGIN_SRC asm

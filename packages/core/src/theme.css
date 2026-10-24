@@ -37,6 +37,7 @@
   position: sticky;
   top: 1.5rem;
   max-height: calc(100vh - 3rem);
+  overflow-y: auto;
   min-width: 0;
 }
 
@@ -241,8 +242,6 @@ code.lw-inline {
 
 .lw-panel-idle { padding: 1rem 0.75rem; font-style: italic; opacity: 0.7; }
 
-.lw-sections { overflow-y: auto; }
-
 .lw-section { border-bottom: 1px solid var(--lw-hairline); padding: 0.6rem 0.75rem; }
 .lw-section:last-child { border-bottom: none; }
 
@@ -288,28 +287,35 @@ code.lw-inline {
 .lw-text { font-weight: 700; }
 .lw-row-current td { background: var(--lw-tint); border-top: 1px solid var(--lw-ink); border-bottom: 1px solid var(--lw-ink); }
 
+/* Narrow panes (<900px): disassembly rows wrap instead of widening the panel
+   (hexdump keeps 16 bytes/row behind its own horizontal scroll). */
+@media (max-width: 899px) {
+  .lw-listing td { white-space: normal; overflow-wrap: anywhere; }
+}
+
 .lw-hexdump, .lw-console {
+  font-family: var(--lw-mono);
   margin: 0;
   white-space: pre;
   overflow-x: auto;
   line-height: 1.45;
 }
-.lw-console { white-space: pre-wrap; }
 
 /* ---- tooltip */
 
 .lw-tip {
-  position: absolute;
+  position: fixed;
   z-index: 1000;
   max-width: 22rem;
-  background: var(--lw-ink);
-  color: var(--lw-paper);
+  background: var(--lw-paper);
+  color: var(--lw-ink);
+  border: 1px solid var(--lw-hairline);
   font-family: var(--lw-serif);
   font-size: 0.78rem;
   line-height: 1.45;
   padding: 0.4rem 0.6rem;
   pointer-events: none;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 
 /* ---- font fallback when mountSite({ fonts: false }) */

@@ -80,7 +80,7 @@ export function installTooltips(scope: ParentNode = document): Disposer {
   scope.addEventListener('pointerout', onOut);
   scope.addEventListener('focusin', onFocusIn);
   scope.addEventListener('focusout', onFocusOut);
-  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('scroll', onScroll, { passive: true, capture: true });
   window.addEventListener('resize', onScroll);
   window.addEventListener('keydown', onKeyDown);
 
@@ -90,7 +90,7 @@ export function installTooltips(scope: ParentNode = document): Disposer {
     scope.removeEventListener('pointerout', onOut);
     scope.removeEventListener('focusin', onFocusIn);
     scope.removeEventListener('focusout', onFocusOut);
-    window.removeEventListener('scroll', onScroll);
+    window.removeEventListener('scroll', onScroll, { capture: true });
     window.removeEventListener('resize', onScroll);
     window.removeEventListener('keydown', onKeyDown);
     tip.remove();

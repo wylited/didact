@@ -1,141 +1,90 @@
-# Literate Assembly Website — Shared Design Contract
+# Literate Website — Design Contract (v0.2 refactor)
 
-All prototypes MUST implement this contract so the three are comparable on
-execution technology, not on UI divergence. Deviations allowed only where the
-ISA requires it (register names, flags, syscall convention).
+One product, kernel-extensible, textbook-styled. Binding for all packages.
 
-## Concept
+## Product
 
-An org-babel/Jupyter-like teaching page, 100% client-side. The page is a
-*literate document*: prose explains a concept, then an executable code block
-lets the student edit and run real assembly. A persistent "machine" panel shows
-CPU state and supports single-stepping instruction by instruction.
+An org-babel-like teaching site, 100% client-side. The page is a *literate
+document*: serif prose explaining a concept, then executable code blocks the
+student edits and runs. Languages are provided by **kernels** registered per
+org `#+BEGIN_SRC` language tag. Each kernel contributes an **under-the-hood
+view** (machine panel) with hover tooltips explaining what is going on.
 
-No server. Everything (assembling, executing, stepping) happens in the browser.
+First kernel: x86-64 assembly via Unicorn/Keystone/Capstone WASM (from v0.1
+`apps/x64-unicorn`). The system must make adding kernels (python, typst, …)
+a matter of implementing one package against `docs/architecture.md`.
 
-## Behavior (all prototypes)
+## Behavior
 
-1. **Assemble + run on Run.** `▶ Run` assembles the active block and,
-   on success, executes to program end immediately (instruction budget
-   below). If already loaded with unchanged source, Run restarts from the
-   initial state and runs to completion. On load error: status chip red,
-   offending line highlighted in the editor with the error message
-   (line number + reason) shown inline under the block — nothing executes.
-2. **Step.** `⤵ Step` executes exactly ONE instruction, then: registers,
-   flags, memory, output, disassembly current-line marker, and editor line
-   highlight all update. Registers that changed since the previous step are
-   visually marked (accent color). Editor + disassembly auto-scroll to the
-   current instruction.
-3. **Run-to-end UX.** No per-step animation required — final state shown,
-   output console streams everything the program wrote; status chip ends at
-   `finished · <exit summary> · N steps` (or a budget-exceeded error state).
-4. **Reset.** `⟲ Reset` restores initial state, clears output, keeps code.
-5. **Output.** Programs print via the ISA's convention (x86-64: `syscall`
-   with rax=1/write; RISC-V: `ecall`); bytes are appended to the output
-   console as UTF-8 text.
-6. **Step when not loaded** = assemble then execute first instruction.
-7. Machine state UI must always render even before first run (zeroed).
+1. **No global toolbar.** Every executable block owns its controls, inline in
+   its header: `▶ Run`, `⤵ Step`, `⟲ Reset`, and a monospace status text.
+2. **Run** = assemble + execute to completion (kernel budget bounded). The
+   block being executed gets a visible *running* highlight; when finished,
+   status shows `finished · exit summary · N steps`. Load errors: red status
+   + line-mapped message under the block; nothing executes.
+3. **Step** = assemble if needed, then execute exactly ONE unit (instruction).
+   The executed line is highlighted in the block's editor; the corresponding
+   listing row in the under-the-hood view is highlighted and scrolled to.
+4. **Block Reset** restores that block's machine to its just-assembled state
+   and clears its output; code is kept.
+5. **Under-the-hood panel** is a single right-hand pane attached to at most
+   ONE block at a time — the last block that ran/stepped. Its header shows
+   the attached block (`#name` or `Block N`) and kernel label, plus a
+   **detach** button that disconnects the panel from any block (panel goes
+   idle-empty; blocks keep running independently; next run/step re-attaches).
+6. **Output.** Program output renders in the block's results slot (`#+RESULTS:`
+   convention) and in the panel's console when attached.
+7. **Tooltips.** Every meaningful element in the under-the-hood view
+   (registers, flags, panel sections, listing rows) and block status carries
+   a short teaching explanation on hover (`data-tip`). Plain CSS/JS tooltip,
+   no dependency.
+8. Machine state UI renders even before first run (zeroed / idle states).
 
-## Layout
+## Visual language — "textbook, light"
 
-Two-pane, full viewport, no page scroll on desktop (panes scroll internally).
+- **Light mode only.** Prose: near-black `#1a1a1a` on white `#ffffff`.
+  No accent color: emphasis via weight, italic, and hairline rules.
+- **No rounded corners anywhere** (`border-radius: 0` globally).
+- Fonts: prose **Atkinson Hyperlegible** (self-hosted via
+  `@fontsource/atkinson-hyperlegible`, regular/italic/bold); code, status,
+  machine panel: `ui-monospace, SF Mono, Menlo, monospace`.
+- Code editor theme: **Ayu Light** (use `thememirror`'s ayu theme; if its
+  export name differs, hand-roll the small Ayu Light tag palette — verify
+  against installed package, do not ship a guess).
+- Structure: hairline `#d0d0d0` borders, generous whitespace, small-caps
+  section labels. Changed registers marked with a left rule + tint, not
+  color-coded text. Status/error states: error text may use dark red
+  `#8b1a1a`; success states stay black-on-white (no green).
+- Layout: two panes — lesson left (~55%), under-the-hood panel right (~45%),
+  sticky, internally scrolling; panes stack vertically < 900px. No page-level
+  chrome beyond a plain document title header.
 
-```
-┌──────────────────────────────┬──────────────────────────┐
-│  Toolbar: ▶ Run  ⤵ Step  ⟲ Reset        [status chip]  │
-├──────────────────────────────┼──────────────────────────┤
-│                              │  Registers (grid)        │
-│  Lesson document             │  Flags (row of chips)    │
-│  ─ prose, headings           │  Disassembly (scroll)    │
-│  ─ executable code block     │  Memory (hex viewer)     │
-│    (CodeMirror 6, editable)  │  Output (console)        │
-│  ─ inline result/output      │                          │
-│                              │                          │
-└──────────────────────────────┴──────────────────────────┘
-```
+## Org-mode compatibility (binding, unchanged from v0.1)
 
-- Left pane ~55%: the literate lesson. Multiple executable blocks allowed;
-  the "active" block (last focused/run) is what the machine panel reflects.
-- Right pane ~45%: sticky machine panel, sections stacked, each with a
-  monospace body and small uppercase section label.
+Org-first content: lessons are real `.org` files imported via Vite `?raw`,
+parsed client-side by the core org-subset parser (grammar in this file).
+`#+BEGIN_SRC <lang>` blocks are executable when `lang` matches a registered
+kernel id (`asm` for the x86-64 kernel); other languages render read-only.
+The org file must remain valid org-babel source in Emacs.
 
-## Visual language
+### Org-subset grammar
 
-- Dark theme, high contrast, teaching-friendly. Font: system UI for prose;
-  `ui-monospace/SF Mono/Menlo/monospace` for code, registers, memory.
-- Colors via CSS custom properties (`--bg`, `--fg`, `--muted`, `--accent`,
-  `--changed`, `--error`) so siblings look like one family. Changed-register
-  marker is family amber `#e3b341`; the primary `▶ Run` button is
-  accent-filled (Step/Reset secondary); status chip is monospace.
-- Register grid: 16–17 cells (GPRs + PC), each `name` over `hex value`
-  (`0x0000000000000042`-style, ISA-appropriate width) with signed decimal
-  subtitle. Changed registers get the amber marker until the next step.
-- Flags: chips `ZF CF SF OF` (+ `PF AF` for x86), lit when set.
-  (RISC-V has no flags — omit the section.)
-- Disassembly: `addr | bytes | mnemonic operands`; current row highlighted.
-- Memory viewer: hex dump of a fixed region around `.data` (or a `dump`
-  register choice), 16 bytes/row (8 below ~1100px viewport), ASCII column.
-- Executable code block: subtle border, "▶ Run" button top-right of block,
-  output area appears beneath the block after run (duplicated in right-pane
-  console is fine and expected).
-
-## Sample lesson content (per prototype)
-
-Each prototype ships one real lesson with ≥2 executable blocks:
-
-1. **Hello**: write a string via syscall/ecall → proves output plumbing.
-2. **Sum/Fibonacci loop**: initialize, loop with compare+branch, accumulate
-   in a register → proves stepping shows register evolution, flags changing,
-   and program exit.
-
-Blocks are editable; samples are restorable via a "Reset code" link on the
-block (restore default sample).
-
-## Scaffolding rules
-
-- Vite + TypeScript, vanilla DOM (no UI framework), CodeMirror 6 editor.
-- App fully self-contained after build: `vite build` output must work from a
-  static file server with no network (wasm assets bundled/vendored locally).
-- No telemetry, no external fonts/CDNs at runtime.
-
-## Org-mode compatibility (binding requirement)
-
-The system is org-first: lesson content is authored as **Emacs org-mode
-text** and rendered by the site. Each prototype embeds its lesson as a real
-`.org` document (Vite `?raw` import of `src/lesson.org`) parsed client-side.
-The org file must stay valid org-babel source in Emacs (headings, prose,
-`#+BEGIN_SRC` blocks, `#+NAME:`, `#+RESULTS:`), so authors can edit the same
-file in Emacs later.
-
-### Org-subset grammar all prototypes implement (identical behavior)
-
-- `*`, `**`, … line starts → headings, depth = star count.
-- `#+TITLE:` / `#+SUBTITLE:` → page header.
-- `#+NAME: <id>` → names the immediately-following block (id for focus/deep-link).
-- `#+BEGIN_SRC <lang> [headers…]` / `#+END_SRC` → executable block when
-  `<lang>` is the app's asm language (`asm` for x86 prototypes, `asm-riscv`
-  for the RISC-V one); other languages render read-only. Babel headers
-  (`:results`, `:exports`, `:var`, …) are parsed and ignored for now, never
-  rejected.
-- `#+RESULTS:` → a following block/paragraph is the canned results slot;
-  on run, live output replaces its rendered content (document DOM only —
-  we never mutate the authored org text in memory).
-- Paragraphs = blank-line-separated text; inline markup: `*bold*`,
-  `/italic/`, `=code=`, `~verbatim~`.
-- `- item` → bullet list; org table rows (`| a | b |`) → HTML table.
-- `# comment` (no `#+`) → hidden.
-
-Implementation: a small hand-written org-subset parser (~150–250 LOC TS)
-inside each app — no unified/ecosystem dependency — validated against the
-sample lesson. Parser behavior is part of the shared contract: same lesson
-org text renders identically (modulo ISA-specific blocks) in all prototypes.
+- `*`… headings (depth = stars); `#+TITLE:`/`#+SUBTITLE:` page header.
+- `#+NAME: <id>` names the next block.
+- `#+BEGIN_SRC <lang> [headers]` / `#+END_SRC`; babel headers parsed+ignored.
+- `#+RESULTS:` slot replaced by live output on run (DOM only).
+- Paragraphs with `*bold*` `/italic/` `=code=` `~verbatim~`; `- ` bullet
+  lists; `| a | b |` tables; `# ` comments hidden.
 
 ## E2E test hooks (binding)
 
-Every app exposes stable hooks so automated user-flow testing is uniform:
-`data-test` attributes on: toolbar buttons `run`, `step`, `reset`; status chip
-`status`; register cells `reg-<name>` (lowercase ISA names, e.g. `reg-rax`,
-`reg-a0`, plus `reg-pc`/`reg-rip`); output console `output`; disassembly
-current row `current-instr`; each executable block's run button
-`block-run`; the editor host `editor`. Vite `base: './'` so `dist/` serves
-from any static path.
+Per block: `block-run`, `block-step`, `block-reset`, `block-status`,
+`editor`, `block` (root), `block-error`, `results`. Panel: `uth` (root),
+`uth-title`, `uth-detach`; panel sections `uth-sections`; register cells
+`reg-<name>`; disassembly current row `current-instr`; console `output`.
+Vite `base: './'`.
+
+## Non-goals
+
+No framework, no runtime network, no dark mode, no deprecated shims — when
+something is replaced it is deleted.

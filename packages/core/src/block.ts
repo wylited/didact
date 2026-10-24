@@ -6,6 +6,7 @@ import { EditorState, Range, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
 import { ayuLight } from 'thememirror';
+import { intelAsm } from './asm';
 import type { Kernel, Panel, RunResult, Session } from './kernel';
 import type { OrgNode } from './org';
 
@@ -147,6 +148,7 @@ export class BlockRuntime {
         extensions: [
           lineNumbers(),
           keymap.of(defaultKeymap),
+          intelAsm,
           ayuLight,
           marksField,
           markDecos,
@@ -286,7 +288,7 @@ export class BlockRuntime {
       ? ` · ${result.exit}` : '';
     const verb = mode === 'step' ? 'stepped'
       : result.finished ? 'finished' : 'halted';
-    this.status(`${verb}${exit} · ${result.steps} steps`);
+    this.status(`${verb}${exit} · ${result.steps} step${result.steps === 1 ? '' : 's'}`);
   }
 
   private status(text: string): void {
