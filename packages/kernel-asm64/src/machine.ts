@@ -108,6 +108,8 @@ export class Machine {
   rows: DisasmRow[] = [];
   totalInsns = 0;
   outputText = '';
+  /** Source line where the last run stopped at a breakpoint, if any. */
+  pausedAtLine: number | null = null;
 
   private program: AssembledProgram | null = null;
   private uc: UnicornInstance | null = null;
@@ -120,6 +122,8 @@ export class Machine {
   private stepMode = false;
   private stepArmed = false;
   private budgetLeft: number | null = null;
+  private breakLines: ReadonlySet<number> | null = null;
+  private addrLines = new Map<number, number>();
   private trapAddr: number | null = null;
 
   private readonly ucMod: UnicornModule;
@@ -197,7 +201,9 @@ export class Machine {
     this.uc.reg_write_i64(this.reg('rsp'), BigInt(STACK_INIT_RSP));
     this.uc.reg_write_i64(this.reg('rip'), BigInt(program.entry));
     this.uc.context_save(this.initCtx);
-    this.rows = this.buildRows(program);
+    this.addrLines.clear();
+    for (const cl of program.sourceLines) this.addrLines.set(cl.addr, cl.line);
+     this.rows = this.buildRows(program);
     this.resetDynamicState();
     this.phase = 'loaded';
     this.regsBefore = this.readRegs();
@@ -220,6 +226,7 @@ export class Machine {
     this.budgetExceeded = false;
     this.error = null;
     this.totalInsns = 0;
+    this.pausedAtLine = null;
     this.outputText = '';
     this.outputBytes = 0;
     this.decoder = new TextDecoder('utf-8');
@@ -261,8 +268,8 @@ export class Machine {
     this.afterRun(this.finished ? 'finished' : 'paused');
   }
 
-  /** Execute until the program exits or the instruction budget runs out. */
-  run(budget: number): void {
+  /** Execute until exit, budget exhaustion, or a breakpoint source line (stopped before executing it). */
+  run(budget: number, breakpoints?: number[]): void {
     if (!this.uc || !this.program) return;
     if (this.phase === 'error') return;
     if (this.finished) {
@@ -271,8 +278,11 @@ export class Machine {
     }
     this.regsBefore = this.readRegs();
     this.budgetLeft = budget;
+    this.breakLines = breakpoints && breakpoints.length > 0 ? new Set(breakpoints) : null;
+    this.pausedAtLine = null;
     this.invoke(() => this.uc!.emu_start(Number(this.regsBefore.rip), RUN_SENTINEL, 0, 0));
     this.budgetLeft = null;
+    this.breakLines = null;
     if (this.budgetExceeded) {
       this.phase = 'error';
       this.afterRun('error');
@@ -332,10 +342,21 @@ export class Machine {
           return;
         }
         this.stepArmed = true;
-      } else if (this.budgetLeft !== null && --this.budgetLeft < 0) {
-        this.budgetExceeded = true;
-        uc.emu_stop();
-        return;
+      } else {
+        // Run mode: stop BEFORE executing an instruction on a breakpoint line.
+        if (this.breakLines) {
+          const line = this.addrLines.get(at);
+          if (line !== undefined && this.breakLines.has(line)) {
+            this.pausedAtLine = line;
+            uc.emu_stop();
+            return;
+          }
+        }
+        if (this.budgetLeft !== null && --this.budgetLeft < 0) {
+          this.budgetExceeded = true;
+          uc.emu_stop();
+          return;
+        }
       }
       this.totalInsns++;
     } catch {

@@ -4,9 +4,20 @@
   "version": "0.1.0",
   "description": "Client-side literate-programming website prototypes: org-mode lessons with executable, steppable assembly blocks",
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm --dir apps/site build",
+    "dev": "pnpm --dir apps/site dev",
+    "preview": "pnpm --dir apps/site preview",
+    "typecheck": "pnpm --dir apps/site exec tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
     "dev:x64-unicorn": "pnpm --dir apps/x64-unicorn dev",
     "dev:x64-lite": "pnpm --dir apps/x64-lite dev",
     "dev:riscv-lite": "pnpm --dir apps/riscv-lite dev"
+  },
+  "devDependencies": {
+    "eslint": "^10.13.0",
+    "happy-dom": "^21.0.4",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^5.0.5"
   }
 }

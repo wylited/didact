@@ -1,0 +1,165 @@
+// The MIPS32 lesson, as an org-mode source string for the site, plus the
+// three programs it embeds — exported so the headless smoke test runs the
+// exact code a student sees in the editor.
+
+export const helloProgram = `# hello-mips.asm — your first two syscalls
+        .data
+msg:    .asciiz "Hello, MIPS!\\n"      # NUL-terminated string in .data
+        .text
+main:   li      $v0, 4                  # syscall 4: print string at $a0
+        la      $a0, msg                # la = load address (a pseudo-op)
+        syscall
+        li      $v0, 10                 # syscall 10: exit
+        syscall`;
+
+export const sumProgram = `# sum-1-to-10.asm — accumulate 1..10 in $t0, print it
+        .text
+main:   li      $t0, 0                  # sum = 0
+        li      $t1, 1                  # i = 1
+loop:   addu    $t0, $t0, $t1           # sum += i
+        addiu   $t1, $t1, 1             # i++
+        ble     $t1, 10, loop           # while (i <= 10) loop
+        move    $a0, $t0                # print sum (55)
+        li      $v0, 1                  # syscall 1: print int in $a0
+        syscall
+        li      $a0, 10                 # 10 = '\\n'
+        li      $v0, 11                 # syscall 11: print char in $a0
+        syscall
+        li      $v0, 10                 # exit
+        syscall`;
+
+export const factProgram = `# fact-10.asm — factorial(10) = 3628800 via mult / mflo
+        .text
+main:   li      $a0, 10                 # n = 10
+        jal     fact                    # call fact; $ra <- return address
+        move    $a0, $v0                # print the result
+        li      $v0, 1
+        syscall
+        li      $a0, 10                 # '\\n'
+        li      $v0, 11
+        syscall
+        li      $v0, 10
+        syscall
+
+fact:   li      $v0, 1                  # result = 1
+        li      $t0, 2                  # i = 2
+loop:   mult    $v0, $t0                # hi:lo = result * i (a full 64 bits)
+        mflo    $v0                     # result <- low 32 bits
+        addiu   $t0, $t0, 1             # i++
+        ble     $t0, $a0, loop          # while (i <= n)
+        jr      $ra                     # return: pc <- $ra`;
+
+export const PROGRAMS = { hello: helloProgram, sum: sumProgram, factorial: factProgram } as const;
+
+function block(name: string, src: string, result: string): string {
+  return `#+NAME: ${name}\n#+BEGIN_SRC mips\n${src}\n#+END_SRC\n\n#+RESULTS:\n:${result.replace(/\n/g, '\n:')}\n`;
+}
+
+export const mipsLesson = `#+TITLE: MIPS32, Step by Step
+#+SUBTITLE: A real assembler and a fetch–decode–execute interpreter, written in TypeScript — running in your browser
+
+This page teaches MIPS32 the SPIM/MARS way: =add $t0, $t1, $t2=, =lw= with
+=offset($reg)=, =li=/=la=/=move= pseudo-ops, labels, =.data= and =.text=
+sections. Every block below is assembled and executed by a small, honest
+interpreter: it *fetches* the encoded 32-bit word at =pc=, decodes the
+opcode/register/shift/funct fields, and executes — the same words the
+*Program* listing shows in its bytes column. Nothing is pre-recorded.
+
+One simplification up front, the same one SPIM and MARS make in their
+default teaching mode: *there are no branch delay slots*. A taken branch
+moves =pc= to its target immediately, and =jal=/=jalr= link =pc+4= — the
+instruction right after the call. (Bare hardware also executes the word
+/after/ a branch before the jump takes effect; teaching simulators hide
+that, and so does this kernel.)
+
+* Registers, and the hi/lo pair
+
+MIPS32 has 32 general-purpose registers. The hardware doesn't care what
+you call them; the ABI does:
+
+| registers                  | role                                               |
+|----------------------------+----------------------------------------------------|
+| =$zero=                    | hardwired 0 — writes to it are silently discarded  |
+| =$at=                      | the /assembler temporary/, reserved for pseudo-ops |
+| =$v0=, =$v1=               | return values; =$v0= also selects the syscall      |
+| =$a0=–=$a3=                | the first four arguments                           |
+| =$t0=–=$t9=                | caller-saved scratch                               |
+| =$s0=–=$s7=                | callee-saved                                       |
+| =$gp=, =$sp=, =$fp=, =$ra= | global pointer, stack pointer, frame pointer, return address |
+
+Two more registers sit outside the numbered 32: =hi= and =lo=. The
+multiply instructions put a full /64-bit/ product there (=mult= writes
+hi:lo), and =div= puts the quotient in =lo= and the remainder in =hi= —
+no divide writes a general register directly. =mflo= / =mfhi= move the
+results into normal registers; that two-step dance is a MIPS habit you
+can watch in the factorial program below.
+
+MIPS is famous for what it /doesn't/ have: *no condition flags*. There is
+no ZF or CF to inspect after an operation. Comparisons write their answer
+into a register — =slt $t0, $s0, $s1= sets =$t0= to 1 or 0 — and branches
+test registers directly: =beq=/=bne= compare two registers,
+=blez=/=bgtz=/=bltz=/=bgez= test one against zero. The convenience forms
+=blt=, =bgt=, =ble=, =bge= are *pseudo-instructions*: =ble $t1, 10, loop=
+assembles to three machine words — =addiu $at, $zero, 10=,
+=slt $at, $at, $t1= (is 10 < i?), then =beq $at, $zero, loop= (branch
+when it isn't). Step through the loop below and you will see the
+expansion as its own listing rows.
+
+* Syscalls: talking to the world
+
+Like SPIM, the machine talks to you through the =syscall= instruction:
+put a service number in =$v0=, an argument in =$a0=, execute.
+
+| =$v0= | service     | argument in =$a0=                   |
+|-------+-------------+-------------------------------------|
+| 1     | print int   | signed 32-bit value                 |
+| 4     | print string| address of a NUL-terminated string  |
+| 11    | print char  | ASCII code of the character         |
+| 10    | exit        | — (stops the machine)               |
+
+Anything else stops with a line-mapped error. The stack starts at
+=0x7fffeffc= (=$sp= is preloaded), =.text= lives at =0x00400000= and
+=.data= at =0x10010000=, memory is little-endian, and the run budget is
+1,000,000 instructions — an infinite loop earns a clean error, not a
+frozen tab.
+
+* Hello, MIPS
+
+${block('hello', helloProgram, 'Hello, MIPS!')}
+
+Step through it: =la $a0, msg= is /two/ machine instructions (the address
+=0x10010000= doesn't fit in 16 bits, so it is built as =lui $at= + =ori=),
+and both rows point back at the same source line. Hover a listing row to
+see the =# comment= you wrote on that line as its tooltip.
+
+* A loop: sum 1..10
+
+No flags to watch — watch =$t0= and =$t1= change instead. =addu= is the
+no-trap add: the trapping =add= (and =addi=) raises a clean, line-mapped
+error on signed overflow, which is why compilers emit the u-forms.
+
+${block('sum', sumProgram, '55')}
+
+* mult, hi/lo and a real call: factorial(10)
+
+=jal fact= saves the return address in =$ra= — a link register, no stack
+involved until you push one — and =jr $ra= jumps back through it. Each
+=mult= writes the 64-bit product to =hi:lo=; =mflo= keeps the low 32
+bits. For 10! both halves are worth a look: =lo= ends at 3628800 while
+=hi= stays 0. Grow =n= past 12 and =hi= finally has something to say.
+
+${block('factorial', factProgram, '3628800')}
+
+* Syntax cheat sheet
+
+- SPIM/MARS syntax, destination first: =add $t0, $t1, $t2=; comments start with =#=
+- Registers by ABI name (=$t0=) or number (=$8=); =$fp= and =$s8= are the same register
+- Sections: =.data= / =.text=; data directives =.word=, =.half=, =.byte=, =.asciiz=, =.ascii=, =.space=, =.align=
+- Memory operands: =offset($reg)=, =($reg)=, bare =label=, =label+4=, absolute constants
+- Pseudo-ops: =li=, =la=, =move=, =nop=, =not=, =neg=, =mul=, =rem=, 3-operand =div=, =beqz=, =bnez=, =b=, =blt=, =bgt=, =ble=, =bge= — each expands to the real instructions shown in the listing
+- Core ISA: add/addu/sub/subu/addi/addiu, and/or/xor/nor and their i-forms, sll/srl/sra and the v-forms, slt/sltu/slti/sltiu, mult/multu/div/divu, mfhi/mflo/mthi/mtlo, loads/stores lb/lbu/lh/lhu/lw/sb/sh/sw, branches beq/bne/blez/bgtz/bltz/bgez, jumps j/jal/jr/jalr, syscall
+
+Errors are always mapped to the exact source line — a bad register name
+at assembly time; a trapping =add=, a division by zero, an unaligned
+=lw=, or a store into =.text= at run time.
+`;

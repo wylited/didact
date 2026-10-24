@@ -87,8 +87,8 @@ const OPERAND_KEYWORDS = staticTable('ptr byte word dword qword short near far o
 const DATA_OPS: Record<string, DataOp> = { db: 'db', dw: 'dw', dd: 'dd', dq: 'dq' };
 const DATA_SIZES: Record<DataOp, number> = { db: 1, dw: 2, dd: 4, dq: 8 };
 
-/** Cut a `;` comment, ignoring `;` inside string/char literals. */
-function stripComment(raw: string): string {
+/** Index of the first top-level `;`, ignoring `;` inside string/char literals; -1 if none. */
+function commentStart(raw: string): number {
   let quote: string | null = null;
   for (let i = 0; i < raw.length; i++) {
     const c = raw[i];
@@ -98,10 +98,30 @@ function stripComment(raw: string): string {
     } else if (c === '"' || c === "'") {
       quote = c;
     } else if (c === ';') {
-      return raw.slice(0, i);
+      return i;
     }
   }
-  return raw;
+  return -1;
+}
+
+/** Cut a `;` comment, ignoring `;` inside string/char literals. */
+function stripComment(raw: string): string {
+  const at = commentStart(raw);
+  return at < 0 ? raw : raw.slice(0, at);
+}
+
+/** Map each 1-based source line to its trailing `;` comment text (trimmed); lines without one are absent. */
+export function lineComments(source: string): Map<number, string> {
+  const map = new Map<number, string>();
+  const lines = source.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const at = commentStart(lines[i]);
+    if (at >= 0) {
+      const text = lines[i].slice(at + 1).trim();
+      if (text.length > 0) map.set(i + 1, text);
+    }
+  }
+  return map;
 }
 
 /** Decode backslash escapes to byte values; used for db strings and char literals. */

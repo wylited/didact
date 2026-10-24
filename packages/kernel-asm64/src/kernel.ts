@@ -5,5 +5,6 @@ import { Asm64Session } from './session';
 export const asm64Kernel: Kernel = {
   id: 'asm',
   label: 'x86-64 · Unicorn',
+  features: { breakpoints: true },
   createSession: () => new Asm64Session(),
 };

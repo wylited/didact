@@ -8,7 +8,8 @@ An org-babel-like teaching site, 100% client-side. The page is a *literate
 document*: serif prose explaining a concept, then executable code blocks the
 student edits and runs. Languages are provided by **kernels** registered per
 org `#+BEGIN_SRC` language tag. Each kernel contributes an **under-the-hood
-view** (machine panel) with hover tooltips explaining what is going on.
+view** (machine panel); the only tooltips are source-line comments on
+listing rows.
 
 First kernel: x86-64 assembly via Unicorn/Keystone/Capstone WASM (from v0.1
 `apps/x64-unicorn`). The system must make adding kernels (python, typst, …)
@@ -18,27 +19,55 @@ a matter of implementing one package against `docs/architecture.md`.
 
 1. **No global toolbar.** Every executable block owns its controls, inline in
    its header: `▶ Run`, `⤵ Step`, `⟲ Reset`, and a monospace status text.
+   Kernels may opt out of stepping (`features.stepping === false` hides the
+   Step button entirely).
 2. **Run** = assemble + execute to completion (kernel budget bounded). The
    block being executed gets a visible *running* highlight; when finished,
-   status shows `finished · exit summary · N steps`. Load errors: red status
-   + line-mapped message under the block; nothing executes.
-3. **Step** = assemble if needed, then execute exactly ONE unit (instruction).
-   The executed line is highlighted in the block's editor; the corresponding
-   listing row in the under-the-hood view is highlighted and scrolled to.
-4. **Block Reset** restores that block's machine to its just-assembled state
-   and clears its output; code is kept.
-5. **Under-the-hood panel** is a single right-hand pane attached to at most
-   ONE block at a time — the last block that ran/stepped. Its header shows
-   the attached block (`#name` or `Block N`) and kernel label, plus a
-   **detach** button that disconnects the panel from any block (panel goes
-   idle-empty; blocks keep running independently; next run/step re-attaches).
-6. **Output.** Program output renders in the block's results slot (`#+RESULTS:`
-   convention) and in the panel's console when attached.
-7. **Tooltips.** Every meaningful element in the under-the-hood view
-   (registers, flags, panel sections, listing rows) and block status carries
-   a short teaching explanation on hover (`data-tip`). Plain CSS/JS tooltip,
-   no dependency.
-8. Machine state UI renders even before first run (zeroed / idle states).
+   status shows `finished · exit summary · N steps`. On a breakpoint pause,
+   status shows `paused · line N` (mono, normal ink — not error red), the
+   paused line gets the current-line decoration, and the panel shows the
+   paused machine state. Load errors: red status + line-mapped message
+   under the block; nothing executes.
+3. **Step** = assemble if needed, then execute exactly ONE unit
+   (instruction); it continues one instruction from a breakpoint pause.
+   The executed line is highlighted in the block's editor; the
+   corresponding listing row in the under-the-hood view is highlighted
+   and scrolled to.
+4. **Breakpoints.** In blocks whose kernel declares
+   `features.breakpoints`, clicking a line number in the editor gutter
+   toggles a breakpoint on that 1-based line — a filled black square
+   marker in a slim gutter, textbook style. Breakpoints are stored per
+   block and mapped through document edits. Reset clears pause state but
+   keeps breakpoints. Kernels without the feature get no gutter click
+   behavior.
+5. **Block Reset** restores that block's machine to its just-assembled
+   state and clears its output; code and breakpoints are kept.
+6. **Under-the-hood panel** is a single right-hand pane attached to at
+   most ONE block at a time — the last block that ran/stepped. Its header
+   shows the attached block (`#name` or `Block N`) and kernel label, plus
+   a **detach** button. Detaching hides the panel entirely — the panel
+   element leaves the DOM and the layout collapses to a single centered
+   column (~70ch prose measure; code blocks may extend wider). Any later
+   run/step of any block re-attaches the panel and restores the two-pane
+   layout. Switching pages also detaches.
+7. **Output.** Program output renders in the block's results slot
+   (`#+RESULTS:` convention) and in the panel's console when attached.
+   Trusted kernel-generated markup (`html` panels, e.g. rendered SVG)
+   renders in the panel and alongside console output in the results slot.
+8. **Tooltips are comments only.** No hardcoded teaching tooltips:
+   registers, flags, section titles, status, and controls carry none. A
+   listing row shows its source line's trailing `;` comment on hover
+   (kernel-supplied); rows without a comment get no tooltip. Hovering a
+   register/flag row instead highlights it: pure-CSS neutral tint + gray
+   2px left rule — the changed-marking language in neutral gray, so it
+   can't be read as a change.
+9. Machine state UI renders even before first run (zeroed / idle states).
+10. **Pages.** One mount renders several org documents. A slim textbook
+    nav bar sits atop the site (hairline bottom border): site label left
+    (the first page's title), page titles as plain text links right —
+    active page underlined and near-black, others gray. Clicking switches
+    the rendered document: the old page's blocks are disposed and the
+    panel detaches until the next run/step.
 
 ## Visual language — "textbook, light"
 
@@ -56,8 +85,10 @@ a matter of implementing one package against `docs/architecture.md`.
   color-coded text. Status/error states: error text may use dark red
   `#8b1a1a`; success states stay black-on-white (no green).
 - Layout: two panes — lesson left (~55%), under-the-hood panel right (~45%),
-  sticky, internally scrolling; panes stack vertically < 900px. No page-level
-  chrome beyond a plain document title header.
+  sticky, internally scrolling; panes stack vertically < 900px. While the
+  panel is detached the document becomes a single centered column (~70ch
+  prose measure, code blocks may extend wider). Page-level chrome is
+  limited to the slim nav bar and the plain document title header.
 
 ## Org-mode compatibility (binding, unchanged from v0.1)
 
@@ -79,10 +110,12 @@ The org file must remain valid org-babel source in Emacs.
 ## E2E test hooks (binding)
 
 Per block: `block-run`, `block-step`, `block-reset`, `block-status`,
-`editor`, `block` (root), `block-error`, `results`. Panel: `uth` (root),
+`editor`, `block` (root), `block-error`, `results`; gutter line numbers
+`gutter-N`, breakpoint markers `breakpoint-N`. Panel: `uth` (root),
 `uth-title`, `uth-detach`; panel sections `uth-sections`; register cells
-`reg-<name>`; disassembly current row `current-instr`; console `output`.
-Vite `base: './'`.
+`reg-<name>`; disassembly current row `current-instr`; console `output`;
+trusted markup sections `html-panel`. Site: `nav`, `nav-item` (one per
+page link), `page` (rendered document root). Vite `base: './'`.
 
 ## Non-goals
 

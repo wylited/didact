@@ -5,10 +5,9 @@
 // run budget, syscall interception for write/exit, engine recreation after
 // failures, and line-mapped assemble errors.
 
-import { assemble, DATA_BASE } from './asm';
+import { assemble, DATA_BASE, lineComments } from './asm';
 import { Machine, formatHex64, formatDec64, GPR_NAMES, FLAG_DEFS } from './machine';
 import { loadEngines, KeystoneFacade } from './vendor';
-import { REGISTER_TIPS, FLAG_TIPS, SECTION_TIPS, mnemonicTip } from './tips';
 import type { Field, LoadResult, ListingRow, Panel, RunResult, Session } from './types';
 
 const RUN_BUDGET = 1_000_000;
@@ -18,6 +17,8 @@ const HEXDUMP_ROW = 16;
 export class Asm64Session implements Session {
   private machine: Machine | null = null;
   private notes: string[] = [];
+  /** 1-based source line → trailing `;` comment (listing row tips). */
+  private comments = new Map<number, string>();
 
   async load(src: string): Promise<LoadResult> {
     let engines;
@@ -41,14 +42,13 @@ export class Asm64Session implements Session {
       onNote: (text) => this.notes.push(text),
     });
     machine.load(result.program);
-    const old = this.machine;
     this.machine = machine;
-    old?.dispose();
     this.notes = [];
+    this.comments = lineComments(src);
     return { ok: true, summary: `loaded · ${machine.rows.length} instructions` };
   }
 
-  async run(): Promise<RunResult> {
+  async run(breakpoints?: number[]): Promise<RunResult> {
     const m = this.machine;
     if (!m) return { finished: false, steps: 0, error: 'nothing is loaded' };
     if (m.phase === 'error' || m.error) {
@@ -57,7 +57,7 @@ export class Asm64Session implements Session {
     if (m.finished) {
       return { finished: true, steps: m.totalInsns, ...exitOf(m) };
     }
-    m.run(RUN_BUDGET);
+    m.run(RUN_BUDGET, breakpoints);
     return runResult(m);
   }
 
@@ -95,30 +95,30 @@ export class Asm64Session implements Session {
       value: formatHex64(regs.gpr[name]),
       sub: formatDec64(regs.gpr[name]),
       ...(changed.has(name) ? { changed: true } : {}),
-      tip: REGISTER_TIPS[name],
     }));
     fields.push({
       key: 'rip',
       value: formatHex64(regs.rip),
       sub: formatDec64(regs.rip),
       ...(changed.has('rip') ? { changed: true } : {}),
-      tip: REGISTER_TIPS.rip,
     });
 
     const flagFields: Field[] = FLAG_DEFS.map((f) => ({
       key: f.name,
       value: m.isFlagSet(f.bit) ? '1' : '0',
-      tip: FLAG_TIPS[f.name],
     }));
 
-    const rows: ListingRow[] = m.rows.map((r, i) => ({
-      addr: r.addr,
-      bytes: Array.from(r.bytes).map((b) => b.toString(16).padStart(2, '0')).join(' '),
-      text: r.text,
-      ...(r.line !== null ? { line: r.line } : {}),
-      ...(i === currentRow ? { current: true } : {}),
-      tip: mnemonicTip(r.text),
-    }));
+    const rows: ListingRow[] = m.rows.map((r, i) => {
+      const comment = r.line !== null ? this.comments.get(r.line) : undefined;
+      return {
+        addr: r.addr,
+        bytes: Array.from(r.bytes).map((b) => b.toString(16).padStart(2, '0')).join(' '),
+        text: r.text,
+        ...(r.line !== null ? { line: r.line } : {}),
+        ...(i === currentRow ? { current: true } : {}),
+        ...(comment !== undefined ? { tip: comment } : {}),
+      };
+    });
 
     const view = m.dataView();
     const hexdump: { addr: number; bytes: number[]; ascii: string }[] = [];
@@ -135,11 +135,11 @@ export class Asm64Session implements Session {
       m.outputText + (this.notes.length > 0 ? (m.outputText && !m.outputText.endsWith('\n') ? '\n' : '') + this.notes.join('\n') + '\n' : '');
 
     return [
-      { kind: 'fields', id: 'registers', title: 'Registers', tip: SECTION_TIPS.registers, fields },
-      { kind: 'fields', id: 'eflags', title: 'EFLAGS', tip: SECTION_TIPS.flags, fields: flagFields },
-      { kind: 'listing', id: 'disassembly', title: 'Disassembly', tip: SECTION_TIPS.disassembly, rows },
-      { kind: 'hexdump', id: 'memory', title: '.data', tip: SECTION_TIPS.memory, rows: hexdump },
-      { kind: 'console', id: 'output', title: 'Output', tip: SECTION_TIPS.output, text: consoleText },
+      { kind: 'fields', id: 'registers', title: 'Registers', fields },
+      { kind: 'fields', id: 'eflags', title: 'EFLAGS', fields: flagFields },
+      { kind: 'listing', id: 'disassembly', title: 'Disassembly', rows },
+      { kind: 'hexdump', id: 'memory', title: '.data', rows: hexdump },
+      { kind: 'console', id: 'output', title: 'Output', text: consoleText },
     ];
   }
 
@@ -162,5 +162,10 @@ function runResult(m: Machine): RunResult {
       error: `instruction budget of ${RUN_BUDGET.toLocaleString('en-US')} exceeded — is there an infinite loop?`,
     };
   }
-  return { finished: m.finished, steps: m.totalInsns, ...exitOf(m) };
+  return {
+    finished: m.finished,
+    steps: m.totalInsns,
+    ...(m.pausedAtLine !== null ? { pausedAt: m.pausedAtLine } : {}),
+    ...exitOf(m),
+  };
 }

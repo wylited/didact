@@ -1,9 +1,25 @@
 // block.ts — executable block runtime: CM6 editor (Ayu Light), inline
 // controls (Run/Step/Reset + mono status), line-mapped error box, current-
-// line decoration, results-slot output, restore-sample link.
+// line decoration, gutter breakpoints (when the kernel supports them),
+// results-slot output (console + trusted kernel markup), restore-sample
+// link.
 
-import { EditorState, Range, StateEffect, StateField } from '@codemirror/state';
-import { Decoration, EditorView, keymap, lineNumbers } from '@codemirror/view';
+import {
+  EditorState,
+  Range,
+  RangeSet,
+  StateEffect,
+  StateField,
+  type Extension,
+} from '@codemirror/state';
+import {
+  Decoration,
+  EditorView,
+  GutterMarker,
+  gutter,
+  keymap,
+  lineNumbers,
+} from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
 import { ayuLight } from 'thememirror';
 import { intelAsm } from './asm';
@@ -47,6 +63,106 @@ const markDecos = EditorView.decorations.compute([marksField], (state) => {
   add(current, 'lw-current-line');
   add(error, 'lw-error-line');
   return Decoration.set(ranges);
+});
+
+/* ---- breakpoints (kernels with features.breakpoints): clicking a line
+   number toggles a breakpoint on that 1-based line; filled black square
+   markers live in a slim gutter; run() passes the active lines on. */
+
+const toggleBreakpoint = StateEffect.define<number>(); // 1-based line
+
+/** Sorted active breakpoint lines, mapped through doc changes with the
+ * same keep-marks-on-their-text approach as `marksField`. */
+const breakpointsField = StateField.define<number[]>({
+  create: () => [],
+  update(value, tr) {
+    let v = value;
+    for (const e of tr.effects) {
+      if (!e.is(toggleBreakpoint)) continue;
+      v = v.includes(e.value)
+        ? v.filter((l) => l !== e.value)
+        : [...v, e.value].sort((a, b) => a - b);
+    }
+    if (!tr.docChanged) return v;
+    const shift = (line: number): number => {
+      const clamped = Math.min(tr.startState.doc.lines, Math.max(1, line));
+      const from = tr.changes.mapPos(tr.startState.doc.line(clamped).from);
+      return tr.state.doc.lineAt(Math.max(0, from)).number;
+    };
+    const out: number[] = [];
+    for (const line of v) {
+      const shifted = shift(line);
+      if (!out.includes(shifted)) out.push(shifted);
+    }
+    return out.sort((a, b) => a - b);
+  },
+});
+
+class BreakpointMarker extends GutterMarker {
+  constructor(readonly line: number) {
+    super();
+  }
+  override eq(other: BreakpointMarker): boolean {
+    return other.line === this.line;
+  }
+  override toDOM(): Node {
+    const el = document.createElement('div');
+    el.className = 'lw-bp';
+    el.dataset.test = `breakpoint-${this.line}`;
+    return el;
+  }
+}
+
+/** Hidden width template: the marker gutter keeps its width before the
+ * first breakpoint is placed. */
+class BpSpacer extends GutterMarker {
+  override eq(): boolean {
+    return true;
+  }
+  override toDOM(): Node {
+    const el = document.createElement('div');
+    el.className = 'lw-bp';
+    return el;
+  }
+}
+
+const breakpointGutter = gutter({
+  class: 'lw-bp-gutter',
+  markers(view) {
+    const { doc } = view.state;
+    return RangeSet.of(
+      view.state
+        .field(breakpointsField)
+        .filter((line) => line >= 1 && line <= doc.lines)
+.map((line) => ({ from: doc.line(line).from, to: doc.line(line).from, value: new BreakpointMarker(line) })),
+      true,
+    );
+  },
+  lineMarkerChange: (update) =>
+    update.startState.field(breakpointsField, false)
+    !== update.state.field(breakpointsField, false),
+  initialSpacer: () => new BpSpacer(),
+});
+
+/** data-test=gutter-N on every rendered line-number element (the hidden
+ * width spacer and non-numeric elements are skipped). */
+function labelLineNumberEls(view: EditorView): void {
+  for (const el of view.dom.querySelectorAll<HTMLElement>(
+    '.cm-lineNumbers .cm-gutterElement',
+  )) {
+    if (el.style.visibility === 'hidden') continue;
+    const n = Number(el.textContent);
+    if (Number.isInteger(n) && n >= 1) el.dataset.test = `gutter-${n}`;
+  }
+}
+
+const labelGutterNumbers = EditorView.updateListener.of((update) => {
+  if (
+    update.docChanged || update.viewportChanged
+    || update.geometryChanged || update.heightChanged
+  ) {
+    labelLineNumberEls(update.view);
+  }
 });
 
 /** Block lifecycle callbacks, supplied by the host that mounts the block. */
@@ -119,7 +235,8 @@ export class BlockRuntime {
     stepBtn.dataset.test = 'block-step';
     stepBtn.textContent = '⤵ Step';
     stepBtn.addEventListener('click', () => void this.step());
-    head.appendChild(stepBtn);
+    // kernels may opt out of stepping (features.stepping === false)
+    if (kernel.features?.stepping !== false) head.appendChild(stepBtn);
 
     const resetBtn = document.createElement('button');
     resetBtn.type = 'button';
@@ -131,7 +248,6 @@ export class BlockRuntime {
     this.statusEl = document.createElement('span');
     this.statusEl.className = 'lw-status';
     this.statusEl.dataset.test = 'block-status';
-    this.statusEl.dataset.tip = 'Block status: assemble, run and step outcomes for this block.';
     this.statusEl.textContent = 'idle';
     head.appendChild(this.statusEl);
 
@@ -139,29 +255,43 @@ export class BlockRuntime {
 
     const editorHost = document.createElement('div');
     editorHost.dataset.test = 'editor';
+    const canBreak = kernel.features?.breakpoints === true;
+    if (canBreak) editorHost.dataset.bp = 'true';
     this.el.appendChild(editorHost);
+
+    const extensions: Extension[] = [
+      // clicking a line number toggles a breakpoint on that line
+      canBreak
+        ? lineNumbers({
+            domEventHandlers: {
+              mousedown: (view, line): boolean => {
+                const n = view.state.doc.lineAt(line.from).number;
+                view.dispatch({ effects: toggleBreakpoint.of(n) });
+                return true;
+              },
+            },
+          })
+        : lineNumbers(),
+      keymap.of(defaultKeymap),
+      intelAsm,
+      ayuLight,
+      marksField,
+      markDecos,
+      labelGutterNumbers,
+    ];
+    if (canBreak) extensions.push(breakpointsField, breakpointGutter);
 
     this.view = new EditorView({
       parent: editorHost,
-      state: EditorState.create({
-        doc: node.code,
-        extensions: [
-          lineNumbers(),
-          keymap.of(defaultKeymap),
-          intelAsm,
-          ayuLight,
-          marksField,
-          markDecos,
-        ],
-      }),
+      state: EditorState.create({ doc: node.code, extensions }),
     });
+    labelLineNumberEls(this.view);
 
     const restore = document.createElement('a');
     restore.className = 'lw-restore';
     restore.href = '#';
     restore.dataset.test = 'restore-sample';
     restore.textContent = 'restore sample';
-    restore.dataset.tip = 'Put the original lesson code back into this editor.';
     restore.addEventListener('click', (ev) => {
       ev.preventDefault();
       this.restoreSample();
@@ -199,7 +329,7 @@ export class BlockRuntime {
       return;
     }
     this.loadedDoc = this.source;
-    const result = await this.session.run();
+    const result = await this.session.run(this.breakpointLines());
     this.setRunning(false);
     this.reportResult(result, 'finished');
     this.syncAfterExecution();
@@ -230,7 +360,7 @@ export class BlockRuntime {
     } else {
       this.status('halted · nothing left to execute');
     }
-    this.syncAfterExecution();
+    this.syncAfterExecution(result);
     this.busy = false;
     this.events.onActivity(this);
   }
@@ -253,20 +383,42 @@ export class BlockRuntime {
     });
   }
 
-  /** Program output for the results slot: the session's console panel. */
-  private consoleText(): string {
-    const panels = this.session.state();
-    const con = panels.find(
-      (p: Panel): p is Extract<Panel, { kind: 'console' }> => p.kind === 'console');
-    return con?.text ?? '';
+  /** Active breakpoint lines (sorted), or undefined when the kernel has
+   * no breakpoint support. */
+  private breakpointLines(): number[] | undefined {
+    if (this.kernel.features?.breakpoints !== true) return undefined;
+    return this.view.state.field(breakpointsField, false);
   }
 
-  private syncAfterExecution(): void {
-    if (this.resultsEl !== null) this.resultsEl.textContent = this.consoleText();
+  /** Results-slot output: the console text plus any trusted kernel
+   * markup (e.g. rendered SVG), alongside each other. */
+  private renderResults(el: HTMLElement): void {
+    const panels = this.session.state();
+    const nodes: Node[] = [];
+    const con = panels.find(
+      (p: Panel): p is Extract<Panel, { kind: 'console' }> => p.kind === 'console');
+    if (con !== undefined && con.text !== '') {
+      const pre = document.createElement('pre');
+      pre.textContent = con.text;
+      nodes.push(pre);
+    }
+    for (const p of panels) {
+      if (p.kind !== 'html') continue;
+      const box = document.createElement('div');
+      box.className = 'lw-html';
+      box.innerHTML = p.html;
+      nodes.push(box);
+    }
+    el.replaceChildren(...nodes);
+  }
+
+  private syncAfterExecution(result?: RunResult): void {
+    if (this.resultsEl !== null) this.renderResults(this.resultsEl);
     const listing = this.session.state().find(
       (p: Panel): p is Extract<Panel, { kind: 'listing' }> => p.kind === 'listing');
     const row = listing?.rows.find((r) => r.current);
-    this.setMarks({ current: row?.line ?? null });
+    // a breakpoint pause pins the editor decoration to the paused line
+    this.setMarks({ current: result?.pausedAt ?? row?.line ?? null });
   }
 
   /** Shared tail for a failed load: red status, line-mapped error, attach. */
@@ -282,6 +434,10 @@ export class BlockRuntime {
   private reportResult(result: RunResult, mode: 'finished' | 'step'): void {
     if (result.error !== undefined && result.error !== '') {
       this.statusError(`error · ${result.error}`);
+      return;
+    }
+    if (result.pausedAt !== undefined) {
+      this.status(`paused · line ${result.pausedAt}`);
       return;
     }
     const exit = result.exit !== undefined && result.exit !== ''

@@ -1,6 +1,9 @@
 // panel.ts — under-the-hood panel host. Renders Session.state() Panel[]
-// generically; attached to at most one block (the last that ran/stepped);
-// idle-empty when detached. Full re-render on every state() snapshot.
+// generically; attached to at most one block (the last that ran/stepped).
+// Detaching unmounts the panel from the DOM entirely (the host layout
+// drops the right pane); the next attach re-mounts it. Full re-render on
+// every state() snapshot. Tooltips are comment-only: listing rows carry
+// their source-line comment via data-tip; nothing else gets one.
 
 import type { Panel } from './kernel';
 
@@ -15,13 +18,17 @@ export class PanelHost {
   private readonly root: HTMLElement;
   private readonly titleEl: HTMLElement;
   private readonly sectionsEl: HTMLElement;
+  private readonly mount: HTMLElement;
+  private readonly onVisibility: ((visible: boolean) => void) | undefined;
   private block: AttachedBlock | null = null;
 
-  constructor(mount: HTMLElement) {
+  constructor(mount: HTMLElement, onVisibility?: (visible: boolean) => void) {
+    this.mount = mount;
+    this.onVisibility = onVisibility;
+
     this.root = document.createElement('aside');
     this.root.className = 'lw-panel';
     this.root.dataset.test = 'uth';
-    this.root.dataset.tip = 'Under the hood: the live machine state of the attached block.';
 
     const head = document.createElement('div');
     head.className = 'lw-panel-head';
@@ -35,7 +42,6 @@ export class PanelHost {
     detach.type = 'button';
     detach.dataset.test = 'uth-detach';
     detach.textContent = 'detach';
-    detach.dataset.tip = 'Disconnect the panel from its block. Blocks keep running; the next run or step re-attaches.';
     detach.addEventListener('click', () => this.detach());
     head.appendChild(detach);
 
@@ -51,13 +57,17 @@ export class PanelHost {
   }
 
   attach(block: AttachedBlock): void {
+    if (!this.root.isConnected) this.mount.appendChild(this.root);
     this.block = block;
     this.render();
+    this.onVisibility?.(true);
   }
 
+  /** Unmount the panel from the DOM and forget the attached block. */
   detach(): void {
     this.block = null;
-    this.render();
+    this.root.remove();
+    this.onVisibility?.(false);
   }
 
   get attached(): AttachedBlock | null {
@@ -90,7 +100,6 @@ function sectionShell(panel: Panel): HTMLDivElement {
   const label = document.createElement('div');
   label.className = 'lw-sec-label';
   label.textContent = panel.title;
-  if (panel.tip !== undefined) label.dataset.tip = panel.tip;
   sec.appendChild(label);
   return sec;
 }
@@ -105,7 +114,6 @@ function renderSection(panel: Panel): HTMLElement {
         const cell = document.createElement('div');
         cell.className = f.changed === true ? 'lw-field lw-changed' : 'lw-field';
         cell.dataset.test = `reg-${f.key}`;
-        if (f.tip !== undefined) cell.dataset.tip = f.tip;
         const key = document.createElement('span');
         key.className = 'lw-field-key';
         key.textContent = f.key;
@@ -132,7 +140,7 @@ function renderSection(panel: Panel): HTMLElement {
         const tr = document.createElement('tr');
         tr.className = row.current === true ? 'lw-row-current' : 'lw-row';
         if (row.current === true) tr.dataset.test = 'current-instr';
-        if (row.tip !== undefined) tr.dataset.tip = row.tip;
+        if (row.tip !== undefined && row.tip !== '') tr.dataset.tip = row.tip;
         const addr = document.createElement('td');
         addr.className = 'lw-addr';
         addr.textContent = hex(row.addr);
@@ -172,9 +180,18 @@ function renderSection(panel: Panel): HTMLElement {
       const out = document.createElement('pre');
       out.className = 'lw-console';
       out.dataset.test = 'output';
-      out.dataset.tip = 'Program output: everything the attached block printed.';
       out.textContent = panel.text;
       sec.appendChild(out);
+      break;
+    }
+    case 'html': {
+      // Trusted kernel-generated markup (e.g. rendered SVG) — never raw
+      // user input; the kernel contract vouches for it.
+      const box = document.createElement('div');
+      box.className = 'lw-html';
+      box.dataset.test = 'html-panel';
+      box.innerHTML = panel.html;
+      sec.appendChild(box);
       break;
     }
   }

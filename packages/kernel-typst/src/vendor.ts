@@ -1,0 +1,123 @@
+// Loader for the vendored typst-wasm engine shipped in vendor/.
+//
+// Engine choice: `typst-wasm` 1.0.0 (MIT) — JS bindings around the real
+// Typst 0.15.0 compiler compiled to WebAssembly. It compiles a document to
+// SVG page strings in one step (no separate renderer wasm), reports
+// diagnostics with 1-based `line` numbers, and takes its wasm modules as
+// caller-built `WebAssembly.Module`s, so nothing is ever fetched from a CDN.
+//
+// What is loaded lazily on the first `load()` (page load stays fast):
+//  - engine.core{,2,3}.wasm — the compiler (core2/core3 are 159/121-byte
+//    companion modules the engine instantiates alongside core).
+//  - the minimum font set Typst's defaults need (see FONT_FILES; without a
+//    font nothing compiles, and these five cover the default text, bold,
+//    italic, math and raw faces — exact list in THIRD-PARTY.md).
+//
+// Backend: the engine is instantiated in-page through WebAssembly JSPI
+// (`WebAssembly.Suspending`/`promising`), so no Worker, SharedArrayBuffer or
+// COOP/COEP cross-origin isolation is required. JSPI is feature-detected and
+// missing support surfaces as a clear load error. All network fetches the
+// library might perform (typst package imports, URL files) are stubbed out:
+// this kernel is strictly offline.
+
+import { createTypstCompiler } from 'typst-wasm';
+
+/** A typst diagnostic as surfaced by the engine (subset we consume). */
+export interface TypstDiagnostic {
+  message: string;
+  severity: 'error' | 'warning' | string;
+  file?: string;
+  line?: number;
+  column?: number;
+  hints: string[];
+}
+
+export interface TypstSvgPage {
+  page: number;
+  output: string;
+}
+
+/** The narrow engine surface the session uses (fakeable in tests). */
+export interface TypstEngine {
+  addSource(path: string, text: string): Promise<void>;
+  compile(opts: {
+    main: string;
+    format: 'svg';
+  }): Promise<{ pages: TypstSvgPage[]; diagnostics: TypstDiagnostic[] }>;
+}
+
+/** Vendored engine wasm modules (names are fixed by typst-wasm). */
+const ENGINE_FILES = [
+  'engine.core.wasm',
+  'engine.core2.wasm',
+  'engine.core3.wasm',
+] as const;
+
+/** Minimum font set for Typst's default families, in load order. */
+export const FONT_FILES = [
+  'LibertinusSerif-Regular.otf', // default text face ('Libertinus Serif')
+  'LibertinusSerif-Bold.otf',    // headings / *strong*
+  'LibertinusSerif-Italic.otf',  // /emphasis/
+  'NewCMMath-Regular.otf',       // default math face ($...$)
+  'DejaVuSansMono.ttf',          // default raw/code face
+] as const;
+
+function defaultBase(): string {
+  // Browser: assets live at <page-base>/vendor-typst/ (the app copies this
+  // package's vendor/ into its public root). Headless (bun/vitest): resolve
+  // against this module so the package's own vendor/ is used.
+  if (typeof document !== 'undefined') {
+    return new URL('vendor-typst/', document.baseURI).href;
+  }
+  return new URL('../vendor/', import.meta.url).href;
+}
+
+let vendorDir = defaultBase();
+
+/** Point the loader at a different same-origin directory for the assets. */
+export function setVendorBase(url: string): void {
+  vendorDir = url.endsWith('/') ? url : url + '/';
+}
+
+async function readBytes(name: string): Promise<Uint8Array<ArrayBuffer>> {
+  const res = await fetch(vendorDir + name);
+  if (!res.ok) {
+    throw new Error(`cannot load ${name} from ${vendorDir}: HTTP ${res.status}`);
+  }
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+let enginePromise: Promise<TypstEngine> | null = null;
+
+/** Load (once) the vendored typst compiler engine and its fonts. */
+export function loadEngine(): Promise<TypstEngine> {
+  enginePromise ??= (async () => {
+    // JSPI is standardized but not yet in the TS DOM lib.
+    const wa = WebAssembly as typeof WebAssembly & {
+      Suspending?: unknown;
+      promising?: unknown;
+    };
+    if (typeof wa.Suspending !== 'function' || typeof wa.promising !== 'function') {
+      throw new Error(
+        'this browser has no WebAssembly JSPI (WebAssembly.promising); ' +
+          'the Typst engine needs Chrome/Edge 137+, Firefox 153+ or Safari 27+',
+      );
+    }
+    const coreModules = {} as Record<(typeof ENGINE_FILES)[number], WebAssembly.Module>;
+    for (const name of ENGINE_FILES) {
+      coreModules[name] = new WebAssembly.Module(await readBytes(name));
+    }
+    const compiler = await createTypstCompiler({
+      coreModules,
+      backend: 'jspi',
+      packageCache: false,
+      // Strictly offline: any typst package/URL import fails as a fetch
+      // error instead of reaching the network.
+      fetch: () => Promise.reject(new Error('offline kernel: no network fetches')),
+    });
+    const fonts = await Promise.all(FONT_FILES.map(readBytes));
+    await compiler.addFonts(...fonts);
+    return compiler;
+  })();
+  return enginePromise;
+}

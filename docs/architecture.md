@@ -28,7 +28,11 @@ export type Panel =
   | { kind: 'hexdump'; id: string; title: string; tip?: string;
       rows: { addr: number; bytes: number[]; ascii: string }[] }
   | { kind: 'console'; id: string; title: string; tip?: string;
-      text: string };
+      text: string }
+  /** Trusted kernel-generated markup (e.g. rendered SVG), never raw user
+   *  input; rendered inline in the panel and the block's results slot. */
+  | { kind: 'html'; id: string; title: string; tip?: string;
+      html: string };
 
 export interface Field {
   key: string;          // 'rax' | 'ZF' | …
@@ -56,11 +60,18 @@ export interface RunResult {
   steps: number;
   exit?: string;      // 'exit(0)'
   error?: string;     // budget exceeded, runtime fault, …
+  /** 1-based source line where execution paused at a breakpoint. */
+  pausedAt?: number;
 }
 
 export interface Session {
   load(src: string): Promise<LoadResult>;
-  run(): Promise<RunResult>;
+  /**
+   * Run to completion, or stop immediately *before* executing any
+   * instruction whose 1-based source line is in `breakpoints`. Kernels
+   * that cannot honor breakpoints ignore the argument.
+   */
+  run(breakpoints?: number[]): Promise<RunResult>;
   step(): Promise<{ ran: boolean; result?: RunResult }>;
   reset(): void;                      // back to just-assembled state
   state(): Panel[];                   // full under-the-hood snapshot
@@ -70,6 +81,8 @@ export interface Session {
 export interface Kernel {
   readonly id: string;                // org lang tag, e.g. 'asm'
   readonly label: string;             // 'x86-64 · Unicorn'
+  /** UI capabilities; a missing/false flag hides the affordance. */
+  readonly features?: { breakpoints?: boolean; stepping?: boolean };
   createSession(): Session;
 }
 ```
@@ -80,17 +93,23 @@ today so pyodide-style kernels need no contract change later.
 
 ## Core responsibilities (`@literate/core`)
 
+
 - `parseOrg(src): OrgDoc` — grammar per `docs/design.md`.
-- `mountSite({ root, orgSource, kernels, fonts? })` → renders document,
-  block runtimes, panel host. Returns handle with `dispose()`.
+- `mountSite({ root, fonts?, kernels, pages })` → renders the nav bar +
+  active page document, block runtimes, panel host. Handle exposes
+  `blocks`, `panel`, `activeIndex`, `show(index)`, `dispose()`.
 - Block runtime: CodeMirror 6 editor (Ayu Light), per-block controls +
   status + error box + results slot; running/attached highlights; current
-  line decoration on step; `data-test` hooks.
+  line decoration on step and breakpoint pause; gutter breakpoints when
+  `features.breakpoints` (Step button hidden when `features.stepping ===
+  false`); `data-test` hooks.
 - Panel host: renders `Session.state()` panels (generic renderers for the
-  four Panel kinds), attach/detach logic, global tooltip engine for
-  `[data-tip]`.
+  five Panel kinds, `html` via trusted `innerHTML`), attach/detach
+  (detach unmounts the panel and collapses the layout), global tooltip
+  engine for `[data-tip]` — comment-only tooltips on listing rows.
 - Styles: the textbook-light theme (CSS custom properties, no radius,
-  Atkinson Hyperlegible via @fontsource import, mono stack for code/panel).
+  Atkinson Hyperlegible via @fontsource import, mono stack for code/panel,
+  nav bar + detached single-column state).
 
 ## kernel-asm64 responsibilities
 
@@ -101,16 +120,16 @@ today so pyodide-style kernels need no contract change later.
 - Port v0.1 `apps/x64-unicorn/src/{asm,machine}.ts` logic: two-pass keystone
   label resolution, syscall interception, budget, stepping (HOOK_CODE),
   context restore — reshaped to `Kernel`/`Session`.
-- Panel data: registers fields (+tips per register: role, Linux calling
-  convention), EFLAGS fields (+per-flag tips), disassembly listing
-  (+per-mnemonic tips for the common set; generic fallback tip), .data
-  hexdump, console.
+- Panel data: registers fields, EFLAGS fields, disassembly listing
+  (row `tip` = the source line's trailing `;` comment), .data hexdump,
+  console.
 - Exports `asm64Kernel: Kernel` (id `'asm'`).
 
 ## apps/site responsibilities
 
-- Thin composition: import lesson.org raw, register `[asm64Kernel]`, mount.
+- Thin composition: import the lesson org sources raw, register
+  `[asm64Kernel]`, mount with `pages`.
 - `src/lesson.org`: port the v0.1 x86-unicorn lesson, updated workflow copy
-  (per-block controls, panel attach/detach, tooltips). Two executable blocks
-  (hello; sum loop printing 55).
+  (per-block controls, breakpoints, panel attach/detach, pages). Two
+  executable blocks (hello; sum loop printing 55).
 - index.html (noscript in body), favicon optional, title plain text.

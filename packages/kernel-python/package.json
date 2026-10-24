@@ -1,0 +1,10 @@
+{
+  "name": "@literate/kernel-python",
+  "version": "0.3.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "pyodide": "^314.0.7"
+  }
+}

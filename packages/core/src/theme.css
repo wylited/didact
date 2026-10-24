@@ -7,7 +7,8 @@
   --lw-paper: #ffffff;
   --lw-hairline: #d0d0d0;
   --lw-tint: #f4f1e8;        /* changed-marking tint */
-  --lw-error: #8b1a1a;
+  --lw-gray: #8c8c8c;        /* inactive ink: nav links, hover rules */
+  --lw-hover: #f4f4f4;       /* register/flag hover tint (neutral) */
   --lw-mono: ui-monospace, "SF Mono", Menlo, monospace;
   --lw-serif: "Atkinson Hyperlegible", Georgia, "Times New Roman", serif;
 }
@@ -50,6 +51,37 @@
     padding-top: 1.5rem;
   }
 }
+
+/* ---- nav: slim textbook page bar, aligned with the layout grid */
+
+.lw-nav {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  max-width: 82rem;
+  margin: 0 auto;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--lw-hairline);
+  font-family: var(--lw-serif);
+}
+
+.lw-nav-label { font-weight: 700; }
+
+.lw-nav-pages { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+
+.lw-nav-link { color: var(--lw-gray); text-decoration: none; }
+.lw-nav-link:hover { color: var(--lw-ink); }
+.lw-nav-link.lw-nav-active { color: var(--lw-ink); text-decoration: underline; }
+
+/* ---- detached panel: no right pane, single column, ~70ch prose measure
+   (code blocks may extend wider) */
+
+.lw-site.lw-detached .lw-layout { grid-template-columns: minmax(0, 1fr); }
+.lw-site.lw-detached .lw-panel-pane { display: none; }
+.lw-site.lw-detached .lw-para { max-width: 70ch; }
+.lw-site.lw-detached .lw-list { max-width: 70ch; }
 
 /* ---- document */
 
@@ -175,6 +207,18 @@ code.lw-inline {
 .lw-current-line { background: var(--lw-tint); }
 .lw-error-line { background: #f6dede; }
 
+/* Breakpoints (kernels with features.breakpoints): clickable line
+   numbers, filled black square markers, textbook debugger style. */
+
+[data-test="editor"][data-bp] .cm-lineNumbers .cm-gutterElement { cursor: pointer; }
+
+.lw-bp {
+  width: 0.5rem;
+  height: 0.5rem;
+  margin: 0.18rem 0.15rem 0.1rem;
+  background: var(--lw-ink);
+}
+
 .lw-restore {
   display: inline-block;
   font-family: var(--lw-mono);
@@ -276,6 +320,14 @@ code.lw-inline {
 .lw-field-val { margin-left: auto; }
 .lw-field-sub { width: 100%; opacity: 0.65; font-size: 0.72rem; }
 
+/* Hovering a register/flag row highlights it: neutral tint + left rule
+   (changed-marking language, grayed so it can't read as a change). */
+
+.lw-field:hover {
+  background: var(--lw-hover);
+  box-shadow: inset 2px 0 0 var(--lw-gray);
+}
+
 .lw-listing { border-collapse: collapse; width: 100%; }
 .lw-listing td {
   padding: 0.1rem 0.4rem;
@@ -300,6 +352,12 @@ code.lw-inline {
   overflow-x: auto;
   line-height: 1.45;
 }
+
+/* Trusted kernel markup (SVG etc.): panel sections and results slots. */
+
+.lw-html { margin: 0; }
+.lw-html svg { max-width: 100%; height: auto; }
+.lw-results > * + * { margin-top: 0.4rem; }
 
 /* ---- tooltip */
 

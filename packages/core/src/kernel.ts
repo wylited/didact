@@ -10,7 +10,11 @@ export type Panel =
   | { kind: 'hexdump'; id: string; title: string; tip?: string;
       rows: { addr: number; bytes: number[]; ascii: string }[] }
   | { kind: 'console'; id: string; title: string; tip?: string;
-      text: string };
+      text: string }
+  /** Trusted kernel-generated markup (e.g. rendered SVG), never raw user
+   *  input; rendered inline in the panel and the block's results slot. */
+  | { kind: 'html'; id: string; title: string; tip?: string;
+      html: string };
 
 export interface Field {
   key: string;          // 'rax' | 'ZF' | …
@@ -38,11 +42,18 @@ export interface RunResult {
   steps: number;
   exit?: string;      // 'exit(0)'
   error?: string;     // budget exceeded, runtime fault, …
+  /** 1-based source line where execution paused at a breakpoint. */
+  pausedAt?: number;
 }
 
 export interface Session {
   load(src: string): Promise<LoadResult>;
-  run(): Promise<RunResult>;
+  /**
+   * Run to completion, or stop immediately *before* executing any
+   * instruction whose 1-based source line is in `breakpoints`. Kernels
+   * that cannot honor breakpoints ignore the argument.
+   */
+  run(breakpoints?: number[]): Promise<RunResult>;
   step(): Promise<{ ran: boolean; result?: RunResult }>;
   reset(): void;                      // back to just-assembled state
   state(): Panel[];                   // full under-the-hood snapshot
@@ -52,5 +63,8 @@ export interface Session {
 export interface Kernel {
   readonly id: string;                // org lang tag, e.g. 'asm'
   readonly label: string;             // 'x86-64 · Unicorn'
+  /** UI capabilities; a missing/false flag hides the affordance. */
+  readonly features?: { breakpoints?: boolean; stepping?: boolean };
   createSession(): Session;
 }
+

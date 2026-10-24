@@ -17,4 +17,4 @@ export type { AttachedBlock } from './panel';
 export { installTooltips } from './tooltip';
 export type { Disposer } from './tooltip';
 export { mountSite } from './site';
-export type { MountOptions, SiteHandle } from './site';
+export type { MountOptions, SiteHandle, PageSpec } from './site';
