@@ -1,0 +1,433 @@
+#+TITLE: ELEC2350 · 8 · The Control Unit
+#+SUBTITLE: Opcode in, nine signals out — the two-level steering logic of the single-cycle processor, and the don't-cares that keep it small
+
+So far: The Single-Cycle Datapath walked =add=, =lw=, =sw= and =beq=
+through the same rooms — register file, ALU, data memory — and every room
+needed a decision: which register number to write, which value feeds the
+ALU's second input, whether memory reads or writes this cycle. This page
+is about where those decisions come from. The control unit is a small
+block of logic that reads the instruction every cycle and sets every
+switch in the datapath. Nine signals — two of them the ALUOp bits — and a
+table you can derive instead of memorize.
+
+* Control is a function of the opcode
+
+Mental model first. The datapath is fixed wiring: muxes, an ALU, two
+memories, a register file. None of it knows what an =add= is. The control
+unit is the only part of the machine that reads the instruction /as an
+instruction/: six opcode bits in, a fixed set of switch settings out.
+Same opcode, same settings, every cycle. It is combinational logic — a
+function, not a program.
+
+Lecture 6 (p.52) lists what control signals do:
+
+- select ALU operations
+- read or write memory and the register file
+- select inputs for muxes
+
+And where they come from: the opcode field =instr[31:26]= and, for
+R-type, the function field =instr[5:0]= (=funct=). The three formats
+place those fields like this:
+
+| format | fields, left to right from bit 31 |
+|--------+-----------------------------------|
+| R-type | op / rs / rt / rd / shamt / funct |
+| I-type | op / rs / rt / 16-bit immediate |
+| J-type | op / 26-bit target |
+
+The control unit reads =op= from every format. It reads =funct= only when
+=op= is =000000=, because only R-type instructions carry an operation
+there — in an I-type word those six bits are the bottom of the immediate,
+in a J-type word the bottom of the target.
+
+One control input is not generated from the opcode at all. L6 p.52
+again: =beq= "also uses the ALU result as control signal" — the ALU's
+/Zero/ flag. Control commands the datapath, and the datapath reports one
+bit back. Hold that thought; it is how branches pick the next PC.
+
+* Two levels: Control, then ALU control
+
+Here is the observation that shapes the whole design (L6 p.53): the six
+=funct= bits are used for exactly one thing in the entire machine —
+selecting the ALU operation. Nothing else looks at them. So instead of
+one wide control unit that eats =op= and =funct= together, the design
+splits the job in two:
+
+| level | reads | emits |
+|-------+-------+-------|
+| Control (first level) | op (6 bits) | nine signals: RegDst, ALUSrc, MemtoReg, RegWrite, MemRead, MemWrite, Branch, ALUOp1, ALUOp0 — everything except the ALU operation |
+| ALU control (second level) | ALUOp (2 bits) plus funct (6 bits) | the 4-bit ALU operation |
+
+Why split? L6 p.53 gives the reason in one line: two levels "reduce the
+size and complexity of each control unit[s] allowing faster operation" —
+quoted verbatim, so the grammar slip stays. A
+single unit fed by all twelve relevant bits would be wide, slow logic.
+Two narrow units — six inputs here, eight there — are smaller and faster,
+and =funct= never even reaches the main control. It is the same instinct
+as the two-level PC mux from The Single-Cycle Datapath: keep each block
+small and give it only the inputs it needs.
+
+L6 p.53 adds one more fact worth memorizing: =beq= uses the =Branch=
+signal /and/ the ALU's Zero to control the next value of PC. The online
+version of Lab 2 exists to let you flip these signals one by one.
+
+* Nine signals, one job each
+
+Each signal answers exactly one question the datapath cannot answer for
+itself. Learn the question, and the truth table writes itself.
+
+| signal | its one job |
+|--------+-------------|
+| RegDst | picks the register-file write number: rd (bits 15:11) when 1, rt (bits 20:16) when 0 |
+| ALUSrc | picks the ALU's second input: read data 2 (a register) when 0, the sign-extended immediate when 1 |
+| MemtoReg | picks the write-back value: the ALU result when 0, the data-memory read data when 1 |
+| RegWrite | enables the register file's write port; 1 means the selected register is written at the next clock edge |
+| MemRead | enables a data-memory read at the ALU-computed address |
+| MemWrite | enables a data-memory write of read data 2 at the ALU-computed address |
+| Branch | 1 means the ALU's Zero flag is allowed to choose the branch target as the next PC |
+| ALUOp1, ALUOp0 | the two-bit hint handed to ALU control: what kind of ALU work this instruction needs |
+
+The first three steer the three muxes the shared datapath had to add (The
+Single-Cycle Datapath pointed them out): =RegDst= at the write port,
+=ALUSrc= at the ALU's second input, =MemtoReg= at write-back. The next
+three are enables — the register file's write port and data memory act only
+when told (the register file's read ports are combinational and always
+live), and data memory has one shared read/write port, so it never reads
+and writes in the same cycle. =Branch= works with Zero, never alone.
+
+DrMIPS — the Lab 2 datapath — uses these exact names: =MuxDst= is steered
+by RegDst, =MuxReg= by ALUSrc, =MuxMem= by MemToReg, and the =AndBranch=
+gate combines Branch and Zero before the jump mux picks the final next
+PC.
+
+* The full truth table
+
+A truth table is a function written down. Six input bits and nine output
+bits suggest 64 rows; the course subset has only four opcode classes, so
+the whole control unit fits in one table. This is L6 p.62, every cell as
+printed:
+
+| Input or output | Signal name | R-format | lw | sw | beq |
+|-----------------+--------+----------+----+----+-----|
+| Inputs | Op5 | 0 | 1 | 1 | 0 |
+|         | Op4 | 0 | 0 | 0 | 0 |
+|         | Op3 | 0 | 0 | 1 | 0 |
+|         | Op2 | 0 | 0 | 0 | 1 |
+|         | Op1 | 0 | 1 | 1 | 0 |
+|         | Op0 | 0 | 1 | 1 | 0 |
+| Outputs | RegDst | 1 | 0 | X | X |
+|         | ALUSrc | 0 | 1 | 1 | 0 |
+|         | MemtoReg | 0 | 1 | X | X |
+|         | RegWrite | 1 | 1 | 0 | 0 |
+|         | MemRead | 0 | 1 | 0 | 0 |
+|         | MemWrite | 0 | 0 | 1 | 0 |
+|         | Branch | 0 | 0 | 0 | 1 |
+|         | ALUOp1 | 1 | 0 | 0 | 0 |
+|         | ALUOp0 | 0 | 0 | 0 | 1 |
+
+The input columns are the opcodes in binary (L6 p.61): R-format = 0 =
+=000000=, =lw= = 35 = =100011=, =sw= = 43 = =101011=, =beq= = 4 =
+=000100=. Check them against real words — the four demo blocks below
+print these exact rows in the =Program= panel, whose bytes column shows
+each word's four bytes, most significant first:
+
+- =add $t0, $s1, $s2= assembles to =0x02324020=, bytes =02 32 40 20=; the first byte's top six bits are =000000=. This is the word L6 p.44 encodes by hand.
+- =lw $t0, 4($s1)= assembles to =0x8E280004=, bytes =8e 28 00 04=; top six bits =100011=.
+- =sw $t0, 0($s1)= assembles to =0xAE280000=, bytes =ae 28 00 00=; top six bits =101011=.
+- =beq $t0, $t1, took= assembles to =0x11090001=, bytes =11 09 00 01=; top six bits =000100=.
+
+Cross-check the output columns against DrMIPS, because Lab 2 runs DrMIPS.
+Its =default.set= stores opcode 0 as RegDst 1, RegWrite 1, ALUOp 2,
+ALUSrc 0, MemToReg 0; opcode 35 as the =lw= row; opcode 43 as the =sw=
+row; opcode 4 as Branch 1, ALUSrc 0, ALUOp 1. Every cell where L6 prints
+a definite value agrees.
+
+One deliberate gap: L6's table has no row for =j=, even though =j= is in
+the lecture subset (its datapath is L6 pp.50–51). DrMIPS fills it:
+opcode 2 (=000010=) gets =Jump= 1 and nothing else — a tenth signal
+steering one more PC mux. The =j print= inside the =beq= demo below
+encodes to =0x08100006=, first byte =08=, top six bits =000010=. If an
+exam question asks for =j='s control settings, that is the row to give.
+
+Do not memorize this table. Derive it: for each instruction ask which
+field names the destination register, whether the ALU's second input is
+an immediate, whether memory is read, written, or untouched, whether a
+register is written, whether the PC can be redirected. The opcodes are on
+the reference card; the logic is the course.
+
+* Don't-cares are a design tool
+
+An =X= in a truth table does not mean "unknown". It means /free/: the
+designer may pick either value, and picks whichever makes the logic
+smallest. The control table has four X cells, and L6 p.61 gives the
+reason in one breath:
+
+"sw & beq will not modify any register, it is ensured by making RegWrite
+to 0. So, we don't care what write register & write data are."
+
+Walk the logic. =RegWrite= 0 closes the register file's write port. The
+=RegDst= mux still outputs some register number every cycle; the
+=MemtoReg= mux still outputs some value every cycle; neither lands
+anywhere. So for =sw= and =beq=, =RegDst= and =MemtoReg= cost nothing to
+leave unspecified — and an unspecified output means fewer terms in the
+control logic, the same small-and-fast story as the two-level split.
+DrMIPS wires both X cells to 0, which is one legal choice out of two.
+
+Exam angle: "why is it safe that RegDst is a don't-care for =sw=?" —
+because =RegWrite= 0 means the write port never opens, so the destination
+number is irrelevant. The converse is the trap: =lw= and R-format have
+=RegWrite= 1, so their =RegDst= must be exact. No X where a write
+actually happens.
+
+* ALUOp: a two-bit hint, then funct
+
+The main control never tells the ALU "add". It says what the addition is
+for. Three cases cover the whole subset, plus one unused encoding:
+
+- ALUOp =00=: add, unconditionally. Address math: =lw= and =sw= compute base + sign-extended offset. DrMIPS uses the same row for =addi=.
+- ALUOp =01=: sub, unconditionally. The =beq= comparison: subtract two registers and watch Zero.
+- ALUOp =10=: consult =funct=. R-type: the six funct bits pick the operation.
+- ALUOp =11=: not used in this subset.
+
+Notice why the =01= shortcut must exist: =beq= has no =funct= field. Its
+low six bits are offset bits, so ALU control has nothing to read — the
+main control has to say "subtract" itself.
+
+The second-level table, funct values and the 4-bit operation codes the
+ALU takes (L6 p.60 prints it as a figure, but that printed P&H table has
+no =nor= row; the =nor= row here — funct 100111 → code 1100 — comes from
+DrMIPS =default.set=, the instruction/control definition file, as do the
+4-bit codes; the datapath Lab 2 runs is =unicycle.cpu=, built from those
+definitions):
+
+| ALUOp | funct | ALU operation | 4-bit code |
+|-------+-------+---------------+------------|
+| 00 | — | add | 0010 (2) |
+| 01 | — | sub | 0110 (6) |
+| 10 | 100000 (32) | add | 0010 (2) |
+| 10 | 100010 (34) | sub | 0110 (6) |
+| 10 | 100100 (36) | and | 0000 (0) |
+| 10 | 100101 (37) | or | 0001 (1) |
+| 10 | 100111 (39) | nor | 1100 (12) |
+| 10 | 101010 (42) | slt | 0111 (7) |
+
+The first two rows ignore funct entirely — when ALUOp is =00= or =01= the
+answer is already decided. The six funct values are exactly the course
+ALU's repertoire (L6 p.25): =add=, =sub=, =and=, =or=, =nor=, =slt=. The
+funct numbers are on the reference card; the three ALUOp meanings are
+not. Memorize the meanings, look up the numbers.
+
+Exam angle: ALUOp =10= with funct 42 means =slt=, operation code =0111=.
+ALUOp =00= means add no matter what the funct bits happen to say — a
+favorite distractor.
+
+* Predict, then run: four instructions, four rows
+
+The method, once, then four times. These are the lecture's own four
+walkthroughs (L6 pp.47, 56–58), now with the signal table beside them.
+For each block:
+
+- Read the focus instruction — the line whose comment says /focus/.
+- Predict all nine signals before you scroll past the block. Write them down.
+- Run the block and check the panel evidence the prose names.
+- Compare your nine values with the row under the block.
+
+The setup and exit lines (=li=, =la=, =move=, =syscall=) are outside the
+lecture's hardware subset: L6 p.13 builds a processor for =add=, =sub=,
+=and=, =or=, =slt=, =lw=, =sw=, =beq= and =j= only. Read them as
+"registers preloaded" plus "a printing service". Each =li= here is one
+=addiu= word — opcode =001001= in the listing — and =la= is the usual
+=lui= + =ori= pair from Machine Code: R, I, J.
+
+** R-format: =add $t0, $s1, $s2=
+
+Cover the table below the block. The instruction reads two registers and
+writes a third. Predict: which field names the destination register? Is
+the ALU's second input a register or an immediate? Where does write-back
+data come from? Which units are enabled at all?
+
+#+NAME: rtype-row
+#+BEGIN_SRC mips
+# rtype-row.asm — one R-type instruction, one control row
+        .text
+main:   li      $s1, 200                 # rs: first source operand
+        li      $s2, 50                  # rt: second source operand
+        add     $t0, $s1, $s2            # focus: op=000000, funct=100000
+        move    $a0, $t0                 # print 250 so the run is meaningful
+        li      $v0, 1                   # syscall 1: print int in $a0
+        syscall
+        li      $v0, 10                  # syscall 10: exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:250
+
+Run it with a stop: set a breakpoint on line 5 (click the line number),
+Run — the machine pauses before the =add= with =pc= at =0x00400008= —
+then Step once. The =Registers= panel flags =$t0= as changed:
+=0x000000fa=, which is 250. The =Program= row for =add= shows bytes
+=02 32 40 20=: six leading zero bits of opcode, =funct= =20= in the last
+byte. Nothing touched data memory — no =lw=, no =sw=, zero accesses, the
+same counting Loads, Stores, and the Byte-Addressed World drilled.
+
+| instruction | RegDst | ALUSrc | MemtoReg | RegWrite | MemRead | MemWrite | Branch | ALUOp1 | ALUOp0 |
+|-------------+--------+--------+----------+----------+---------+----------+--------+--------+--------|
+| add $t0, $s1, $s2 | 1 | 0 | 0 | 1 | 0 | 0 | 0 | 1 | 0 |
+
+Read the row against the encoding. =RegDst= 1: the write number is the
+=rd= field, bits 15:11 of =0x02324020=, which is =01000= — $t0. =ALUSrc=
+0: the ALU adds two register values. =RegWrite= 1: $t0 is written at the
+clock edge. Both memory enables and =Branch= are 0. =ALUOp= =10=, so ALU
+control consults =funct= =100000= (32) and emits operation =0010= — add.
+
+** =lw=: the ALU becomes an address calculator
+
+Predict first. The destination register now sits in a different field of
+the instruction — which one, and what does that force =RegDst= to? The
+ALU's second input is the constant 4 — register or immediate? What is
+the ALU's result used for, and which value actually gets written back?
+
+#+NAME: lw-row
+#+BEGIN_SRC mips
+# lw-row.asm — one load, one control row
+        .data
+arr:    .word   11, 77                   # arr[0]=11 at +0, arr[1]=77 at +4
+        .text
+main:   la      $s1, arr                 # base register (setup, not in subset)
+        lw      $t0, 4($s1)              # focus: op=100011, $t0 <- mem[$s1+4]
+        move    $a0, $t0                 # print 77, the word the load fetched
+        li      $v0, 1                   # syscall 1: print int in $a0
+        syscall
+        li      $v0, 10                  # syscall 10: exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:77
+
+Breakpoint on line 6, Run, Step: =$t0= changes to =0x0000004d= (77). Now
+look at the =.data= panel: the row at =0x10010000= reads =0b 00 00 00 4d
+00 00 00= — the two =.word=s, 11 then 77, little-endian. The load fetched
+the second one, from address =0x10010004=. The =lw= row's bytes are =8e
+28 00 04= — opcode =100011= in the first byte's top six bits.
+
+| instruction | RegDst | ALUSrc | MemtoReg | RegWrite | MemRead | MemWrite | Branch | ALUOp1 | ALUOp0 |
+|-------------+--------+--------+----------+----------+---------+----------+--------+--------+--------|
+| lw $t0, 4($s1) | 0 | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 0 |
+
+=RegDst= 0: the destination is the =rt= field, bits 20:16 — =01000=,
+$t0. For the same instruction bits, this is the exact opposite choice
+from R-format. =ALUSrc= 1: the sign-extended 4 feeds the ALU. =ALUOp=
+=00=: add — the ALU computes =0x10010000 + 4=, an address, not an
+arithmetic result anyone keeps. =MemRead= 1 and =MemtoReg= 1: the memory
+word, not the ALU result, is what gets written back. =RegWrite= 1.
+Compare with the =add= row: three mux settings flipped (=RegDst=,
+=ALUSrc=, =MemtoReg=) plus =MemRead= and =ALUOp= (10 → 00) — five of the
+nine cells differ — the rest of the datapath is reuse.
+
+** =sw=: same address math, memory in the other direction
+
+Predict. Does =sw= write a register? If not, what does that force
+=RegWrite= to, and what does that set free? Where does the stored data
+come from — which read port? And what does the ALU spend the cycle
+doing?
+
+#+NAME: sw-row
+#+BEGIN_SRC mips
+# sw-row.asm — one store, one control row
+        .data
+slot:   .word   0                        # the word sw will overwrite
+        .text
+main:   li      $t0, 200                 # rt: the data to store
+        la      $s1, slot                # base register (setup, not in subset)
+        sw      $t0, 0($s1)              # focus: op=101011, mem[$s1+0] <- $t0
+        lw      $a0, 0($s1)              # read it back so the run shows 200
+        li      $v0, 1                   # syscall 1: print int in $a0
+        syscall
+        li      $v0, 10                  # syscall 10: exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:200
+
+Breakpoint on line 7 — the =sw= line — Run, Step: the =Registers= panel
+flags nothing. No register was written. The evidence is in the =.data=
+panel instead: the first four bytes at =0x10010000= are now =c8 00 00
+00= — 200, little-endian — where =00 00 00 00= stood before the step.
+The =lw= on the next line exists to read those bytes back so the
+=Output= panel proves the store: 200.
+
+| instruction | RegDst | ALUSrc | MemtoReg | RegWrite | MemRead | MemWrite | Branch | ALUOp1 | ALUOp0 |
+|-------------+--------+--------+----------+----------+---------+----------+--------+--------+--------|
+| sw $t0, 0($s1) | X | 1 | X | 0 | 0 | 1 | 0 | 0 | 0 |
+
+=RegWrite= 0: the write port never opens, so =RegDst= and =MemtoReg= are
+the don't-cares from earlier (DrMIPS wires both to 0). =ALUSrc= 1 and
+=ALUOp= =00=: the same address addition as =lw=, here =0x10010000 + 0=.
+=MemWrite= 1, =MemRead= 0: one shared memory port means a store cycle
+never also reads. Note where the data comes from: the =rt= field of
+=0xAE280000= — =01000=, $t0 — names a register on read port 2, whose
+value rides the write-data path into memory. For =sw=, =rt= is a source,
+not a destination.
+
+** =beq=: the ALU becomes a comparator
+
+Last prediction set. Register write? ALU inputs — two registers, or a
+register and an immediate? Which ALU operation, given that =beq= has no
+=funct= field to consult? And which two signals together decide the next
+PC?
+
+#+NAME: beq-row
+#+BEGIN_SRC mips
+# beq-row.asm — one branch, one control row
+        .text
+main:   li      $t0, 200                 # L6's example values
+        li      $t1, 200                 # equal, so sub gives Zero=1
+        li      $a0, 0                   # answer 0 = branch not taken
+        beq     $t0, $t1, took           # focus: op=000100, Branch AND Zero
+        j       print                    # the not-taken path (skipped here)
+took:   li      $a0, 1                   # answer 1 = the branch was taken
+print:  li      $v0, 1                   # syscall 1: print int in $a0
+        syscall
+        li      $v0, 10                  # syscall 10: exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:1
+
+Breakpoint on line 6, Run: =pc= sits at =0x0040000c=, before the =beq=.
+Step once and watch the =hi · lo · pc= panel: =pc= moves to =0x00400014=
+— the =took= label — skipping =0x00400010=, the =j=. Subtracting $t0 and
+$t1 gave 0, so Zero = 1, and Branch AND Zero steered the PC. The
+=Registers= panel flags nothing: =beq= writes no register. The =beq=
+row's bytes are =11 09 00 01= — opcode =000100= on top, immediate =0001=
+at the end: one word past PC+4, exactly where =took= sits. That offset
+arithmetic is the one from Machine Code: R, I, J.
+
+Now break the prediction: change =li $t1, 200= to =li $t1, 250= and Run
+again. The subtraction gives −50, Zero = 0, Branch AND Zero = 0, and the
+fall-through =j print= runs instead. The =Output= panel prints =0=.
+
+| instruction | RegDst | ALUSrc | MemtoReg | RegWrite | MemRead | MemWrite | Branch | ALUOp1 | ALUOp0 |
+|-------------+--------+--------+----------+----------+---------+----------+--------+--------+--------|
+| beq $t0, $t1, took | X | 0 | X | 0 | 0 | 0 | 1 | 0 | 1 |
+
+=ALUSrc= 0: both ALU inputs are registers. =ALUOp= =01=: ALU control
+emits =0110= (sub) without looking at funct — there is no funct to look
+at. =Branch= 1: Zero is allowed to redirect the PC, to =PC+4 + (immediate
+<< 2)= when Zero = 1, to =PC+4= otherwise. =RegWrite= 0 and the usual
+two don't-cares. Memory is completely idle: a branch touches no data
+memory at all.
+
+* Exam drills this page prepares you for
+
+- A8 (ISA and format-theory MCQs): which fields control reads, why two levels, what each of the nine signals does, why an =X= is safe — the control-unit short-answer and MCQ shapes of the final's single-cycle ILO.
+- A2 and A3 (encode and decode): recognizing =000000=, =100011=, =101011=, =000100=, =000010= in the top six bits of a word, and funct disambiguation when the opcode is zero.
+- The signal-row drill itself: given any instruction in the subset, produce the nine values from first principles — exactly what the Lab 2 and Lab 3 DrMIPS control experiments ask you to flip through.
+
+Next: Multi-Cycle and the Pipeline — why giving every instruction the
+whole machine for a full clock cycle is the single-cycle design's fatal
+flaw, and what overlaps instead.

@@ -1,0 +1,316 @@
+#+TITLE: ELEC2350 · 11 · The Memory Hierarchy
+#+SUBTITLE: Why lw and sw stay fast anyway: locality, the tag/index/offset split, and AMAT (ILO7, P&H 5.1–5.3)
+
+So far: Multi-Cycle and the Pipeline overlapped the five stages, and Hazards,
+Forwarding, Stalls kept the pipe full — but a load that must walk out to memory
+stalls everything behind it. This page: why that walk is usually cheap, and why
+the order of your array loop decides when it is not. Everything here is
+[P&H 5.1–5.3; F26 slides post Nov 20 not yet posted] — textbook-grounded; the
+L8 deck lands Nov 20–27.
+
+* The speed gap
+
+Fast memory is small and expensive. Big memory is slow and cheap. The industry
+never resolved that contradiction — it hid it. The memory hierarchy stacks
+levels, each holding a copy of a slice of the level below: registers hold the
+few values your code names, caches hold what your code just touched, DRAM holds
+the whole program, disk holds everything else. A load climbs the ladder until
+some level answers.
+
+Two numbers set the size of the problem: a register read costs about one cycle,
+and a DRAM access costs hundreds. The levels in between are engineering.
+Figures vary by chip and year; the ratios are the point.
+
+| Level       | Built from               | Typical size      | Typical access cost |
+|-------------+--------------------------+-------------------+---------------------|
+| Registers   | flip-flops in the CPU    | 32 words (128 B) | 1 cycle            |
+| L1 cache    | SRAM next to the CPU     | 32–64 KiB         | 1–4 cycles          |
+| L2 cache    | SRAM on the same package | 256 KiB–1 MiB     | ~10–20 cycles       |
+| Main memory | DRAM                     | 4–64 GiB          | ~100–200 cycles     |
+| Disk        | magnetic or flash        | terabytes         | millions of cycles  |
+
+Rounded, engineering-typical figures — the kind of numbers P&H 5.1 motivates the
+hierarchy with, not a table copied from it. The trade the hierarchy makes: keep
+smallest, hottest copy nearest the CPU. What makes a copy hot is the subject of
+the next section.
+
+* Locality: why the gap doesn't kill you
+
+The hierarchy only works because programs are repetitive. Two regularities show
+up in every loop you have written since Branches, Loops, and C Translation.
+
+Temporal locality: what you just used, you will use again soon. The loop counter
+in =$t0= is read and bumped on every iteration; it lives in a register, so the
+reuse is served by level zero, the fastest one. When a value cannot live in the
+32 registers — an array, or a spilled temporary from Procedures and the Stack —
+the cache catches the reuse instead. Instructions reuse too: the loop body in
+=sum-inorder= below is six words of =.text=, re-fetched on all sixteen
+iterations. After the first pass, every one of those fetches is an
+instruction-cache hit.
+
+Spatial locality: what you just used, its neighbors are next. =walk[0]= and
+=walk[1]= sit 4 bytes apart, and a 16-byte block holds =walk[0]= through
+=walk[3]= together. Run =sum-inorder= below, then look at the =.data= panel:
+each hexdump row is 16 bytes — exactly the block size this page uses throughout.
+The values 10, 20, 30, 40 lead rows zero to three; rows four to fifteen are all
+zeros. One miss at =walk[0]= drags the entire first row in, and the next three
+loads hit without asking DRAM.
+
+That is the whole bet. Caches are small, but programs keep touching the same
+lines, and the neighbors of those lines.
+
+* Direct-mapped caches: the address split
+
+A direct-mapped cache is a wall of numbered drawers. The index picks the
+drawer. The tag says what is inside it. The offset picks the word within.
+Exactly one drawer per index: no search, no choice — that is why lookup is
+fast.
+
+Fix a concrete cache: 1 KiB total, 16-byte blocks, direct-mapped. The address
+split follows by arithmetic:
+
+- Block size 16 = 2^4, so the low 4 bits, [3:0], are the block offset.
+- 1 KiB / 16 B = 64 blocks = 2^6, so the next 6 bits, [9:4], are the index.
+- Whatever remains, the top 22 bits [31:10], is the tag.
+
+The cache never sees your instruction. It sees the 32-bit address your =lw=
+computed, cut into three fields by wires. Cut a real address — =walk[4]= from
+the blocks below, the first word of block 1:
+
+#+BEGIN_SRC text
+&walk[4]      = 0x10010010
+binary        = 0001 0000 0000 0001 0000 0000 0001 0000
+tag  [31:10]  = 0001 0000 0000 0001 0000 00      = 0x40040
+index  [9:4]  = 00 0001                          = 0x1
+offset [3:0]  = 0000                             = 0x0
+#+END_SRC
+
+Sanity check by division instead of bits: divide the address by the block size.
+0x10010010 / 16 = 0x1001001 = 16781313, the memory block number. The index is
+that number mod 64 = 1; the tag is that number div 64 = 262208 = =0x40040=.
+Same answer both ways; under exam pressure, use whichever is faster by hand.
+
+The hit rule, formally: an access — load or store, data or instruction —
+*hits* when the drawer at index has its valid bit set and its stored tag
+equals the address tag. The word at offset inside the drawer is then the
+answer, at hit time. On a *miss*, the drawer's old block is discarded — the
+simple story, which the write-policy section below sharpens — the 16 bytes
+starting at the block base — the address with its low four bits zeroed — are
+fetched from the next level, the tag is recorded, and valid is set.
+
+The first block of =sum-inorder= in slow motion:
+
+| load      | address      | index | outcome                        |
+|-----------+--------------+-------+--------------------------------|
+| walk[0] | 0x10010000 | 0     | miss (compulsory: first touch) |
+| walk[1] | 0x10010004 | 0     | hit                            |
+| walk[2] | 0x10010008 | 0     | hit                            |
+| walk[3] | 0x1001000C | 0     | hit                            |
+| walk[4] | 0x10010010 | 1     | miss (compulsory: new block)   |
+
+Twelve of the sixteen loads hit. The four misses are compulsory — the first
+touch of a block the cache has never seen. Nothing is wrong with the cache; the
+data had never been fetched before.
+
+* Block size: one miss feeds the neighbors
+
+Block size is the spatial-locality dial. Bigger blocks mean one miss pre-loads
+more neighbors, so a sequential walk amortizes each miss over more hits. Too
+big, and the extra bytes are dead weight: fetched, never read, and evicting
+data that was about to be used. =sum-inorder= loves 16-byte blocks — every
+fetched byte gets read. =sum-strided= below hates them: it reads one word out
+of every block it touches, so three quarters of each fetch is wasted. The exam
+formulation: bigger blocks help when the stride between accesses is small
+compared to the block; they only inflate the miss penalty when it is not.
+
+* Conflict misses and associativity
+
+Direct-mapped means exactly one drawer per index, so two hot blocks that share
+an index evict each other forever. Take =0x10010010= (index 1, tag =0x40040=)
+and =0x10010410= (index 1, tag =0x40041=): the addresses differ by =0x400= =
+1024 bytes — exactly the cache size, which is precisely the stride that lands
+in the same drawer. A loop touching both alternately misses on every access
+while the other 63 drawers sit idle. That is a conflict miss, and no amount of
+locality saves you from it. Together with the compulsory misses above and
+capacity misses — evictions that happen only because the cache is too small to
+hold the working set, even with perfect placement — these are P&H's three Cs
+of the miss taxonomy: compulsory, capacity, conflict. The fix is to relax the mapping: a 2-way
+set-associative cache gives each index two slots and checks both tags in
+parallel; 4-way and 8-way generalize; at the limit, a fully associative cache
+has one set and any block can live anywhere. Associativity trades hit time
+(more tags to compare) against conflict misses (more slots per index).
+
+* Writes: the policies a store must choose
+
+Everything above watched =lw=. A store misses too, and then the cache must
+pick a policy on two axes. /When/ does the write reach the next level:
+/write-through/ pushes every store down immediately, so the cache holds only
+clean copies; /write-back/ defers, marking the drawer /dirty/ and flushing the
+block only when it is evicted — cheaper per store, costlier to manage. /Where/
+does the store land on a miss: /write-allocate/ fetches the block and writes
+into it (spatial locality says you will touch the neighbors); /no-allocate/
+writes around the cache straight to the next level. The four combinations are
+all real designs, and GAPLIST F8 counts them as exam-computable. This page's
+programs are =lw=-only, so they never exercise any of it — and the discarding
+sentence earlier ("the drawer's old block is discarded") is the whole truth
+only for a clean block: with write-back, a dirty victim must be written back
+to the next level before the new block takes its drawer.
+
+* AMAT: the one formula to memorize
+
+You cannot write "the cache is fast" for marks. You can write a number.
+Average memory access time folds hit and miss into one figure:
+
+AMAT = hit time + miss rate × miss penalty
+
+Worked, A15 style — formula, substitution, units. A cache hits in 1 cycle,
+misses 4% of the time, and a miss costs 100 cycles: AMAT = 1 + 0.04 × 100 = 5
+cycles per access. Halve the miss rate to 2%: AMAT = 1 + 0.02 × 100 = 3 cycles
+— same hit time, same penalty, memory looks 5/3 = 1.67 times faster. The miss
+rate is the only factor software controls, which is why loop order matters.
+
+Apply the formula to the two walks below. Walk A, =sum-inorder=: 16 loads,
+4 compulsory misses, miss rate 4/16 = 25%; AMAT = 1 + 0.25 × 100 = 26 cycles;
+data time 16 × 26 = 416 cycles, of which 400 are misses. Walk B, =sum-strided=:
+16 loads, 16 misses, miss rate 100%; AMAT = 1 + 1.00 × 100 = 101 cycles; data
+time 16 × 101 = 1616 cycles, of which 1600 are misses. Same sum, same
+instruction count, exactly 4 times the miss cost.
+
+* What this means for MIPS code
+
+Loop order is a memory-system decision, and C makes it before any MIPS exists.
+C stores a 2-D array row-major: =a[i][j]= with =j= varying fastest, so
+consecutive =j= are consecutive addresses. Walk a row with =j= inner and your
+=lw= strides by 4 bytes, block after block, every word used. Walk a column
+with =i= inner and it strides by a whole row. The cache never sees your
+source; it only sees the addresses.
+
+** Walk A: every word, in order
+
+#+NAME: sum-inorder
+#+BEGIN_SRC mips
+# sum-inorder.asm — read every word of walk[], in address order
+        .data
+walk:   .word   10, 0, 0, 0, 20, 0, 0, 0     # walk[0..7]
+        .word   30, 0, 0, 0, 40, 0, 0, 0     # walk[8..15]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[16..23]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[24..31]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[32..39]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[40..47]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[48..55]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[56..63]
+        .text
+main:   la      $s0, walk                    # $s0 = &walk[0] = 0x10010000
+        li      $t0, 0                       # i = 0
+        li      $t1, 16                      # stop when i = 16: elements 0..15
+        li      $t2, 0                       # sum = 0
+loop:   sll     $t3, $t0, 2                  # $t3 = i * 4, the byte offset
+        addu    $t4, $s0, $t3                # $t4 = &walk[i]
+        lw      $t5, 0($t4)                  # the only data-memory access
+        addu    $t2, $t2, $t5                # sum += walk[i]
+        addiu   $t0, $t0, 1                  # i++ — one element = 4 bytes
+        bne     $t0, $t1, loop               # next element while i != 16
+        move    $a0, $t2                     # print the sum
+        li      $v0, 1                       # syscall 1: print int
+        syscall
+        li      $v0, 10                      # syscall 10: exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:100
+
+Run it, then look at three places. The Output panel prints 100, the sum of the
+four nonzero words. The =.data= panel shows all 256 bytes of =walk=: sixteen
+rows, one block per row, with 10, 20, 30, 40 leading rows 0–3 and zeros
+elsewhere. The status line under the editor reports 106 steps — note the
+number, because the next block reports the same one.
+
+Then set a breakpoint on line 18, the =lw=, and Run: the machine pauses before
+the first load with =$t4= holding =0x10010000=. Run again to continue to the
+next breakpoint hit: =$t4= takes =0x10010004=, then =0x10010008=,
+=0x1001000C= — and then =0x10010010=, the first address of a new row. On
+hardware, that jump across a 16-byte boundary is the compulsory miss; here it
+is the next value in =$t4=.
+
+** Walk B: one word per block
+
+#+NAME: sum-strided
+#+BEGIN_SRC mips
+# sum-strided.asm — same array, same sum, one word per 16-byte block
+        .data
+walk:   .word   10, 0, 0, 0, 20, 0, 0, 0     # walk[0..7]
+        .word   30, 0, 0, 0, 40, 0, 0, 0     # walk[8..15]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[16..23]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[24..31]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[32..39]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[40..47]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[48..55]
+        .word   0, 0, 0, 0, 0, 0, 0, 0       # walk[56..63]
+        .text
+main:   la      $s0, walk                    # $s0 = &walk[0] = 0x10010000
+        li      $t0, 0                       # i = 0
+        li      $t1, 64                      # stop when i = 64: end of array
+        li      $t2, 0                       # sum = 0
+loop:   sll     $t3, $t0, 2                  # $t3 = i * 4, the byte offset
+        addu    $t4, $s0, $t3                # $t4 = &walk[i]
+        lw      $t5, 0($t4)                  # reads 1 word, drags in 16 bytes
+        addu    $t2, $t2, $t5                # sum += walk[i]
+        addiu   $t0, $t0, 4                  # i += 4 elements = 16 bytes = 1 block
+        bne     $t0, $t1, loop               # one load per block while i != 64
+        move    $a0, $t2                     # print the sum
+        li      $v0, 1                       # syscall 1: print int
+        syscall
+        li      $v0, 10                      # syscall 10: exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:100
+
+Two immediate values differ from =sum-inorder=: the bound 16 became 64, and the
+bump =addiu $t0, $t0, 1= became =addiu $t0, $t0, 4=. The program structure —
+same array, same sixteen iterations, same six-word loop body — is otherwise
+identical, and the Output panel prints the same 100. =sum-strided= is a column
+walk of a 4-column row-major array: =a[0][0]=, =a[1][0]=, =a[2][0]= sit 16
+bytes apart, one block apart.
+
+Set the breakpoint on line 18 again and Run-continue: =$t4= takes
+=0x10010000=, =0x10010010=, =0x10010020=, and so on to =0x100100F0= — the
+first word of each of the sixteen rows. Sixteen distinct blocks, sixteen
+misses, zero hits. The loop touches each cache line exactly once and reads a
+quarter of what each miss fetches: 256 bytes dragged in, 192 of them never
+touched by any =lw=. For the same sum, =sum-inorder= fetched 64 bytes and read
+all of them.
+
+Honest note: this kernel has no cache — =.data= is a flat, instant array — and
+neither does DrMIPS, the lab simulator. The two blocks demonstrate the access
+patterns; the miss counts are the arithmetic this page taught you to do. Run
+both and compare the status lines: identical, 106 steps each. The step counter
+cannot tell the two walks apart. A DRAM chip would feel the difference.
+
+Close the loop with Loads, Stores, and the Byte Addressed World: nothing you
+learned there changes. The address is still base + sign-extended offset, byte
+addressing still scales an index by 4, and a misaligned =lw= still faults. The
+hierarchy sits behind that address — registers answer if they can, then L1,
+then L2, then DRAM — and the stride of your loop decides how many levels each
+load actually pays.
+
+* Exam drills this page prepares you for
+
+- A15-style arithmetic, the closest midterm archetype: AMAT = hit time + miss
+  rate × miss penalty, worked with formula, substitution, and units in cycles
+  per access; miss-rate halving comparisons; total stall cycles for a load
+  sequence. The unit-slip distractors that fill A15 MCQs live here too.
+- Final-exam ILO7 drills this page grounds — GAPLIST marks cache arithmetic as
+  the most exam-computable part of P&H 5.1–5.3: classify temporal vs spatial
+  locality in a loop; derive tag/index/offset widths from cache size and block
+  size; split a specific 32-bit address; count compulsory, capacity, and
+  conflict misses for a short access sequence; compute AMAT for two loop
+  orders and compare.
+- The memorize/lookup split from QUESTION_STYLE §3: memorize the AMAT formula
+  and the two width rules — offset bits = log2 of block size, index bits =
+  log2 of the number of /sets/, the block count divided by the associativity
+  (direct-mapped is the 1-way case where sets equal blocks). A 1 KiB cache
+  with 16 B blocks and 2 ways has 64 blocks / 2 = 32 sets, so 5 index bits,
+  not 6. The hierarchy table figures are rounded textbook

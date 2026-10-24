@@ -55,6 +55,24 @@ start:  add     $t0, $t1, $t2
   });
 });
 
+describe('immediate ranges: sign-extended vs zero-extended', () => {
+  it('rejects the 32768..65535 band for addi/addiu/slti/sltiu (the andi/ori world)', () => {
+    for (const mnem of ['addi', 'addiu', 'slti', 'sltiu']) {
+      const r = assemble(`.text\nmain: ${mnem} $t0, $t1, 40000`);
+      expect(r.ok, mnem).toBe(false);
+      if (!r.ok) expect(r.errors[0]?.message).toContain('signed 16-bit field');
+    }
+  });
+
+  it('accepts the two spellings of 16-bit negatives and the zero-extended band', () => {
+    expect(assemble('.text\nmain: addi $t0, $t1, -32768').ok).toBe(true);
+    expect(assemble('.text\nmain: addi $t0, $t1, 0xffff8000').ok).toBe(true);
+    expect(assemble('.text\nmain: addi $t0, $t1, 32767').ok).toBe(true);
+    expect(assemble('.text\nmain: ori $t0, $t1, 65535').ok).toBe(true);
+    expect(assemble('.text\nmain: li $t0, 40000').ok).toBe(true); // li routes via ori
+  });
+});
+
 describe('lesson programs, headless', () => {
   it('hello prints the string and exits 0', () => {
     const m = run(PROGRAMS.hello);

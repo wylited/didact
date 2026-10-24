@@ -1,0 +1,600 @@
+#+TITLE: ELEC2350 · 4 · Branches, Loops, and C Translation
+#+SUBTITLE: Every C if, while, and for compiles to the same three things: a label, a compare, and a branch
+
+So far this series has been straight-line code. The Machine Model page built
+the fetch-decode-execute loop, Arithmetic and Logic filled the register file,
+and Loads, Stores, and the Byte Addressed World reached memory — but every
+program still ran top to bottom. Real programs choose, repeat, and skip. This
+page adds the last ingredient: instructions that move the program counter on
+purpose.
+
+The toolkit is four instructions. Two conditional branches, =beq= and =bne=;
+one comparison, =slt=; one unconditional jump, =j=. Every C construct you are
+examined on — =if=, =if/else=, =while=, =for= — compiles into those four plus
+labels. Translating C under dictated registers is the heaviest graded skill of
+the midterm, and this page is that skill, end to end.
+
+* The default is fall-through
+
+Mental model first: MIPS has no condition flags. There is no zero flag or
+carry bit left behind by an =add= for a later instruction to inspect. A branch
+looks at two registers, right now, and makes exactly one decision: execute the
+next instruction (fall through), or fetch the next instruction from a label.
+Nothing is remembered. Everything else on this page is bookkeeping around that
+one decision.
+
+The two branches:
+
+- =beq $s1, $s2, L= — branch to =L= if the two registers hold equal values
+- =bne $s1, $s2, L= — branch to =L= if they hold different values
+
+Both compare two registers — never an immediate. =beq $t0, 5, L= is not an
+instruction in the course subset; the 5 must be loaded into a register first.
+(This kernel accepts it as a convenience pseudo-op that clobbers =$at= — handy
+for experiments, banned on exams.)
+
+A label names an address. =loop:= binds the name =loop= to the address of the
+next instruction laid down in =.text=. Labels are never executed; they are
+constants the assembler solves so you do not write =0x0040000C= by hand.
+
+#+NAME: fall-through
+#+BEGIN_SRC mips
+# beq-bne.asm — the only two conditional branches in the course subset
+main:   li      $t0, 5                  # $t0 = 5
+        li      $t1, 5                  # $t1 = 5, equal to $t0
+        bne     $t0, $t1, skip          # 5 != 5 is false: NOT taken, fall through
+        addi    $t0, $t0, 10            # so this runs: $t0 = 15
+skip:   beq     $t0, $t0, done          # a register equals itself: taken
+        addi    $t0, $t0, 100           # jumped over: never executes
+done:   add     $a0, $t0, $zero         # $a0 = $t0 (move, class spelling)
+        li      $v0, 1                  # syscall 1: print int in $a0
+        syscall
+        li      $v0, 10                 # syscall 10: exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:15
+
+Run it and read the Output panel: =15=. Then follow the =current= marker through
+the Program panel: the =bne= compared 5 with 5, found them equal, and fell
+through, so the =addi= ran and =$t0= became 15. Next, =beq $t0, $t0, done=
+compares a register with itself — always true — so the jump fired and
+=addi $t0, $t0, 100= never executed at all. A skipped instruction does not
+run; that is the entire point of a branch.
+
+Now read the bytes column. The =bne= row is =0x15090001=: the top six bits,
+=000101=, are the =bne= opcode; the next ten bits name =$t0= (8) and =$t1=
+(9); and the last sixteen bits are =0x0001= — not an address. Branches are
+I-type, and their immediate is a word offset counted from =PC+4= — the
+address of the =addi=, one instruction past the =bne=. The offset 1
+therefore lands one word further on, two instructions past the =bne=
+itself, which is exactly where =skip= sits. The =beq= row
+further down, =0x11080001=, works the same way. This page only needs the
+idea; the full arithmetic — sign-extension, the multiply-by-four, negative
+backward offsets — is the Machine Code: R, I, J page, where it is drilled as
+the number-one source of encoding errors.
+
+Two listing habits to pick up now. First, =li= is a pseudo-instruction: the
+=li $t0, 5= row carries the bytes =0x24080005= — a single =addiu=-shaped word
+with 5 in the immediate field, one row, no =$at=, because 5 fits in 16 bits.
+Second, =add $a0, $t0, $zero= is the class spelling of a register-to-register
+copy: the reference card lists =move= as a pseudo-instruction, so exams want
+the =add= form.
+
+One theory question lives here too (A8 territory): a classic distractor claims
+the programmer can update the PC with =addi=. False. The PC is
+hardware-managed; branches and jumps are the only instructions that move it,
+and everything else just falls through.
+
+* if, two ways
+
+Mental model: C says, if the condition holds, run this extra statement.
+Assembly cannot say if — it can only branch. So the C condition gets turned
+inside out: the branch asks when *not* to run the body, and jumps away. Even
+that can be arranged two ways, and T3 p.19 prints both and asks which is
+better. The program below holds both translations of ~if (i == j) f = g + h;~
+on the same inputs. Form 1 branches *into* the body and jumps over it; form 2
+branches *away* and lets the body fall through.
+
+#+NAME: if-two-forms
+#+BEGIN_SRC mips
+# if-two-forms.asm — if (i == j) f = g + h;  — both T3 p.19 forms, one program
+        .data
+fa:     .asciiz "beq+j: f="            # form 1 prints its f here
+fb:     .asciiz "\nbne:   f="          # form 2 prints its f here
+        .text
+main:   li      $s0, 4                  # i
+        li      $s1, 7                  # j  (i != j: the body must be skipped)
+        li      $s2, 9                  # g
+        li      $s3, 4                  # h
+        li      $s4, 0                  # f = 0  (0 will mean the body was skipped)
+        # form 1: branch INTO the body, then jump over it
+        beq     $s0, $s1, then1         # i == j? go run the body
+        j       exit1                   # no: jump over the body
+then1:  add     $s4, $s2, $s3           # f = g + h
+exit1:  add     $t0, $s4, $zero         # stash form 1's f
+        # form 2: branch AWAY from the body, which falls through
+        li      $s4, 0                  # f = 0 again
+        bne     $s0, $s1, exit2         # i != j? skip the body
+        add     $s4, $s2, $s3           # f = g + h
+exit2:  li      $v0, 4                  # print "beq+j: f="
+        la      $a0, fa
+        syscall
+        add     $a0, $t0, $zero         # form 1's f
+        li      $v0, 1
+        syscall
+        li      $v0, 4                  # print "\nbne:   f="
+        la      $a0, fb
+        syscall
+        add     $a0, $s4, $zero         # form 2's f
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:beq+j: f=0
+:bne:   f=0
+
+Run it. Both forms skip the body — =i= is 4, =j= is 7 — so both lines print
+~f=0~ and the body never touched =f=. Now edit =li $s1, 7= into =li $s1, 4=
+and Run again: both print ~f=13~. Two different shapes, identical behavior.
+
+So which form wins? Set a breakpoint on the =beq= line (click its line
+number), Run, then Step repeatedly and watch the =current= marker walk the
+listing. On the skip path form 1 executes =beq= (not taken) and then the =j=;
+form 2 executes only its =bne= and is done. Count it out:
+
+| form               | in the listing      | executed when i == j | executed when i != j |
+|--------------------+---------------------+----------------------+----------------------|
+| branch-then-jump   | 3 words: beq, j, add | 2                    | 2                    |
+| branch-away        | 2 words: bne, add   | 2                    | 1                    |
+
+The branch-away form is never longer, is one instruction shorter on the skip
+path, and is one word smaller in the code. That is T3's answer: the =bne=
+version needs no extra =j=. It also reads better — the fall-through is the
+body, the branch guards the exit — and exams expect the branch-away habit.
+
+** if/else and the mandatory second jump
+
+A plain =if= has one arm, so falling off the end is harmless. =if/else= has
+two arms and only one may run, so a second jump appears: the =j Exit= that
+leaps over the else-part. The C: ~if (i == j) f = g + h; else f = g - h;~
+
+#+NAME: if-else
+#+BEGIN_SRC mips
+# if-else.asm — if (i == j) f = g + h; else f = g - h;
+main:   li      $s0, 4                  # i
+        li      $s1, 4                  # j  (i == j: the then-part runs)
+        li      $s2, 9                  # g
+        li      $s3, 4                  # h
+        bne     $s0, $s1, else          # i != j? go to the else-part
+        add     $s4, $s2, $s3           # then: f = g + h
+        j       exit                    # skip the else-part
+else:   sub     $s4, $s2, $s3           # else: f = g - h
+exit:   add     $a0, $s4, $zero         # print f
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:13
+
+Run: =i= equals =j=, the =bne= is not taken, the then-part computes
+~9 + 4 = 13~, and the =j= skips the else-part. Flip =li $s1, 4= to 7: now the
+=bne= fires, the else-part computes ~9 - 4 = 5~, and the =j= is the skipped
+instruction. Exactly one arm runs every time, and the =j= is what keeps it to
+one.
+
+The mirror also works: branch on the true condition into the then-part —
+laid out *below* the else-part — and let the else-part fall through. The
+listing stays four words either way, but the executed counts are per-path:
+the arm that falls through costs 2 instructions and the arm that jumps
+costs 3. In the listing above the then-path runs =bne= (not taken), =add=,
+=j= — 3 — while the else-path runs =bne= (taken), =sub= — 2; the mirror
+swaps which arm pays for the =j=. Compilers choose the direction that
+gives the likelier arm the fall-through; on paper either earns full marks.
+
+** The statement after the if
+
+The classic A1 trap, straight from HW1 Q1(a): a statement written after the
+=if= is not part of the =if=. The C: ~if (i == j) f = g + h; f = f - i;~
+
+The question dictates the registers — =i= in =$t0=, =j= in =$t1=, =f= in
+=$s1=, =g= in =$s2=, =h= in =$s3= — and allows only =bne=:
+
+#+NAME: hw1-q1a
+#+BEGIN_SRC mips
+# hw1-q1a.asm — if (i == j) f = g + h;  f = f - i;   (HW1 Q1a)
+main:   li      $t0, 2                  # i   (HW1 dictates: i=$t0, j=$t1)
+        li      $t1, 2                  # j
+        li      $s1, 0                  # f   (f=$s1, g=$s2, h=$s3)
+        li      $s2, 9                  # g
+        li      $s3, 4                  # h
+        bne     $t0, $t1, skip          # i != j: skip the if-body (only bne allowed)
+        add     $s1, $s2, $s3           # f = g + h      (inside the if)
+skip:   sub     $s1, $s1, $t0           # f = f - i      (OUTSIDE: always runs)
+        add     $a0, $s1, $zero         # print f
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:11
+
+Run: =i= is 2 and =j= is 2, so the body sets ~f = 9 + 4 = 13~, and then the
+unconditional =sub= runs anyway: ~f = 13 - 2 = 11~. The =sub= sits outside the
+=if=, after the label, and executes on both paths. Change the first line to
+=li $t0, 5=: the body is skipped and the output is =-5=, which is =0 - 5=.
+One =bne=, two fates — the trailing statement is the part graders watch.
+
+* Less-than without blt
+
+Mental model: the course subset has no =blt=. The reference card lists it on
+its back page as a pseudo-instruction, and the HW1 cover note says to use only
+the instructions learnt in class. A real less-than is a two-instruction idiom:
+=slt= turns the comparison into a 0-or-1 value in a register, and an ordinary
+branch reads that value like any other register.
+
+Formally: =slt $t0, $s0, $s1= stores 1 in =$t0= if =$s0 < $s1= (signed
+compare), else 0. It compares; it does not branch. Then
+=beq $t0, $zero, L= says: the comparison was false, go to =L=. For a constant
+bound there is =slti $t0, $s1, 10= — same question with the 10 embedded,
+still followed by a branch.
+
+(This kernel happily assembles =blt= — the listing shows it expand to =slt=
+plus a branch, clobbering =$at= on the way. Fine for checking answers; write
+the two-instruction form yourself on paper.)
+
+Adapted from T3 p.21, which works ~if (a < b) f = a + b; else f = a - b;~
+(this page swaps in its own register assignment):
+
+#+NAME: slt-if
+#+BEGIN_SRC mips
+# slt-if.asm — if (a < b) f = a + b; else f = a - b;   (adapted from T3 p.21)
+main:   li      $s0, 3                  # a
+        li      $s1, 7                  # b
+        slt     $t0, $s0, $s1           # $t0 = (a < b) ? 1 : 0   — the comparison
+        beq     $t0, $zero, else        # 0 means not-less: else-part
+        add     $s2, $s0, $s1           # then: f = a + b
+        j       exit
+else:   sub     $s2, $s0, $s1           # else: f = a - b
+exit:   add     $a0, $s2, $zero         # print f
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:10
+
+Run, then look at the Registers panel: =$t0= holds 1 — the comparison result
+is still sitting there after the branch consumed it, because =slt= answers
+into a register and nothing has overwritten it. The =slt= row in the Program
+panel is =0x0211402A=, opcode 0 with =funct= 0x2A — a fact the
+Machine Code: R, I, J page will ask you to produce from scratch. The output
+is =10=, since =3 < 7= picked =3 + 7=. Flip =li $s1, 7= to 2: =3 < 2= fails,
+the =beq= fires, and the output is =1=, which is =3 - 2=.
+
+Two ways to flip a test, both on T3's list: swap the =slt= operands —
+=slt $t0, $s1, $s0= asks =a > b= — or branch on the opposite value —
+=bne $t0, $zero, Then= runs the body when the comparison is true. Pick
+whichever makes the fall-through the arm you expect to run.
+
+* j and the shape of every loop
+
+Mental model: =beq= and =bne= choose between two futures; =j= has no opinion.
+=j loop= sets the program counter to =loop=, unconditionally, every time it
+executes. Loops are built from that certainty: the body ends by jumping back
+to the test — the back-edge — and the test is the one door out.
+
+=j= is J-type: a six-bit opcode and a 26-bit field, no registers. The field
+holds the target address shifted right by two, and the top four bits of the
+final address are copied from =PC+4= — pseudodirect addressing, the formula
+on the reference card. You can see one concretely in the while loop below:
+=j loop= assembles to =0x08100003=, whose field =0x100003= is
+=0x0040000C >> 2= — the address of =loop=. The Machine Code: R, I, J page
+turns that into drills.
+
+Every loop you will translate — while, for, an array walk — has the same
+five-line skeleton:
+
+#+BEGIN_SRC text
+loop:   <exit test>       # branch to done when the C condition is FALSE
+        <body>            # the statements inside { ... }
+        <bump>            # i = i + 1  (or i = i - 1, or p = p + 4)
+        j     loop        # the back-edge: unconditional
+done:
+#+END_SRC
+
+Break one part and you feel it immediately. Drop the =j= and the body runs
+once, then falls into =done=. Drop the =bump= and the test keeps asking the
+same question. Drop the test and there is no door at all:
+
+#+BEGIN_SRC text
+spin:   j     spin        # no test, no bump: the PC chases its tail forever
+#+END_SRC
+
+The kernel gives that program a clean, named death: after 1,000,000
+instructions it stops with the error =instruction budget of 1,000,000 steps
+exceeded — this looks like an infinite loop=. A missing bump in a real loop
+produces exactly this error.
+
+* while: test at the top
+
+Mental model: a while loop asks before it acts. The test sits above the body,
+so a condition that is already false on entry means zero iterations — the
+body never runs at all. Translating it means writing the test as a branch
+*away*: C says keep going while ~i <= 10~, but the branch can only ask the
+exit question — is it already too late? — and jump to =done= when the answer
+is yes.
+
+The inversion is one line of algebra: ~i <= 10~ fails exactly when =10 < i=.
+So the test is an =slt= with the bound first, and a =bne= that leaves when
+the answer is 1. The C:
+~sum = 0; i = 1; while (i <= 10) { sum = sum + i; i = i + 1; }~
+
+#+NAME: while-sum
+#+BEGIN_SRC mips
+# while-sum.asm — sum = 1 + 2 + ... + 10 = 55
+main:   li      $s0, 0                  # sum = 0                    (init)
+        li      $s1, 1                  # i = 1                      (init)
+        li      $s2, 10                 # the bound 10 needs a register
+loop:   slt     $t0, $s2, $s1           # $t0 = (10 < i)?  the inverted test
+        bne     $t0, $zero, done        # yes: while (i <= 10) is over
+        add     $s0, $s0, $s1           # sum = sum + i              (body)
+        addi    $s1, $s1, 1             # i = i + 1                  (bump)
+        j       loop                    # back to the test       (back-edge)
+done:   add     $a0, $s0, $zero         # print sum
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:55
+
+The four moving parts are labeled in the comments — init, test, body, bump —
+plus the back-edge =j=. Note the bound: 10 lives in =$s2= because branches
+compare registers; the constant would be invisible to =bne= otherwise.
+
+Run, then make the loop visible. Set a breakpoint on the body line
+=add $s0, $s0, $s1= and Run: the machine pauses before the body on every
+pass. Each pause shows the state before the add: =$s1= at 1, 2, 3, … 10 and
+=$s0= at 0, 1, 3, 6, … 45. Continue with Run (Run resumes from a pause) and
+watch the =changed= flag mark the register the last instruction wrote. After
+the tenth body pass the test sees =$s1= at 11, so =10 < 11= is true, the =bne=
+leaves, and the breakpoint never fires again. The final =sum= prints as =55=.
+
+* for is while with the paperwork up front
+
+Mental model: a for loop is a while loop with the init pulled into the header
+and the bump nailed to the bottom of the body.
+~for (i = 10; i > 0; i = i - 1) sum = sum + i;~ executes exactly the
+instructions of its while twin, in the same order. Nothing new to learn —
+only where the paperwork sits.
+
+#+NAME: for-countdown
+#+BEGIN_SRC mips
+# for-countdown.asm — for (i = 10; i > 0; i = i - 1) sum = sum + i;
+main:   li      $s0, 0                  # sum = 0
+        li      $s1, 10                 # i = 10                 (for-init)
+loop:   slt     $t0, $zero, $s1         # $t0 = (0 < i)?         (for-test)
+        beq     $t0, $zero, done        # i <= 0: leave the loop
+        add     $s0, $s0, $s1           # sum = sum + i          (for-body)
+        addi    $s1, $s1, -1            # i = i - 1              (for-bump)
+        j       loop                    # back-edge
+done:   add     $a0, $s0, $zero         # print sum
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:55
+
+Same =55= as the while version — opposite direction, same ten terms. The test
+=i > 0= becomes =0 < i=: =slt $t0, $zero, $s1= with =$zero= written first.
+The operand order of =slt= encodes the direction of the comparison; that
+order is the only difference between an =i > 0= test and an =i < 0= test.
+
+** The beq-only counting loop
+
+When a counter steps through every value by one, equality can replace
+less-than entirely. ~i <= 12~ fails first at ~i == 13~, so test for 13 with
+=beq= and no =slt= is needed. That is HW1 Q1(c):
+~sum = 0; for (i = 0; i <= 12; i++) sum = sum + 3;~
+
+Count before you code: =i= runs 0 through 12 — 13 iterations, not 12 — so
+the answer is 13 × 3 = 39. The question dictates =sum= in =$s3= and =i= in
+=$t4=; the bound gets its own register because =beq= sees registers only:
+
+#+NAME: hw1-q1c
+#+BEGIN_SRC mips
+# hw1-q1c.asm — sum = 0; for (i = 0; i <= 12; i++) sum = sum + 3;
+main:   li      $s3, 0                  # sum = 0   (HW1 dictates: sum=$s3, i=$t4)
+        li      $t4, 0                  # i = 0
+        li      $t5, 13                 # i <= 12  is tested as  i != 13
+loop:   beq     $t4, $t5, done          # i == 13: 13 iterations are done
+        addi    $s3, $s3, 3             # sum = sum + 3
+        addi    $t4, $t4, 1             # i = i + 1
+        j       loop
+done:   add     $a0, $s3, $zero         # print sum
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:39
+
+* Two worked translations
+
+From here to the exam, translations follow HW1 Q1's register discipline,
+stated as house rules:
+
+- C variables live in =$s= registers; the question dictates which ones.
+- Scratch — comparison results, computed addresses — lives in =$t= registers.
+- Every loop bound gets its own register; branches see registers only.
+- =$at=, =$k0= and =$k1= are off-limits; the assembler and the OS own them.
+- Registers are untyped — an address and an integer look identical, and the
+  instruction decides which is which (the Loads, Stores, and the Byte
+  Addressed World page made this point with =lw=).
+
+** Array maximum
+
+The biggest translation so far, and the shape of most exam loops: a for over
+an array with an if inside. The C:
+
+#+BEGIN_SRC text
+max = A[0];
+for (i = 1; i < n; i = i + 1)
+    if (A[i] > max)
+        max = A[i];
+#+END_SRC
+
+Mental model: a champion and a stream of challengers. =max= holds the best
+value seen so far, each =A[i]= challenges it, and the =if= decides whether
+the title changes. The loop reuses the skeleton, the =if= reuses branch-away,
+and the array access reuses base + 4i addressing from the Loads, Stores, and
+the Byte Addressed World page.
+
+#+NAME: array-max
+#+BEGIN_SRC mips
+# array-max.asm — max = A[0]; for (i = 1; i < n; i++) if (A[i] > max) max = A[i];
+        .data
+arr:    .word 5, 3, 12, -2, 7           # A[0..4]; n = 5
+        .text
+main:   la      $s0, arr                # $s0 = base address of A
+        li      $s1, 1                  # i = 1
+        li      $s3, 5                  # n = 5
+        lw      $s2, 0($s0)             # max = A[0]  (the first champion)
+loop:   slt     $t0, $s1, $s3           # $t0 = (i < n)?
+        beq     $t0, $zero, done        # i >= n: leave the loop
+        sll     $t0, $s1, 2             # byte offset = 4 * i
+        add     $t0, $s0, $t0           # $t0 = &A[i]
+        lw      $t1, 0($t0)             # $t1 = A[i]  (the challenger)
+        slt     $t2, $s2, $t1           # $t2 = (max < A[i])  — A[i] > max
+        beq     $t2, $zero, next        # challenge failed: keep the old max
+        add     $s2, $t1, $zero         # max = A[i]
+next:   addi    $s1, $s1, 1             # i = i + 1
+        j       loop
+done:   add     $a0, $s2, $zero         # print max
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:12
+
+Run it. Output: =12=. Then read two panels. The .data panel shows the five
+words exactly as the loop reads them: =05 00 00 00=, =03 00 00 00=,
+=0c 00 00 00= — that one is 12 — then =fe ff ff ff=, which is -2 in two's
+complement, then =07 00 00 00=. The Registers panel ends with =$s0= holding
+=0x10010000= (the base address), =$s1= at 5, =$s2= at 12, =$s3= at 5: =i=
+stopped exactly at =n=.
+
+Two translation decisions worth stealing. First, =A[i] > max= has no
+greater-than instruction: =slt $t2, $s2, $t1= asks the equivalent
+=max < A[i]= — swap the operands to flip the comparison. Second, the body's
+=if= is the plain-if form again: branch away when the challenge fails, fall
+through into the title change.
+
+Set a breakpoint on the =slt $t2, $s2, $t1= line and Run: four pauses, one
+per challenger, and the champion changes exactly once — when 12 arrives from
+=A[2]= and dethrones 5.
+
+** The else-if chain
+
+Mental model: an else-if chain is not special syntax. It is an =if= nested
+inside the else arm of the =if= above it: each level asks one question, a
+wrong answer falls through to the next question, and the final else is what
+remains when every question has failed. The C:
+
+#+BEGIN_SRC text
+if (i == j)      f = g + h;    /* equal     */
+else if (i < j)  f = g - h;    /* i smaller */
+else             f = g;        /* i larger  */
+#+END_SRC
+
+#+NAME: nested-if
+#+BEGIN_SRC mips
+# nested-if.asm — an else-if chain is an if nested inside the else
+main:   li      $s0, 7                  # i
+        li      $s1, 3                  # j
+        li      $s2, 9                  # g
+        li      $s3, 4                  # h
+        bne     $s0, $s1, elseif        # i != j: try the next question
+        add     $s4, $s2, $s3           # i == j:  f = g + h
+        j       exit
+elseif: slt     $t0, $s0, $s1           # $t0 = (i < j)?
+        beq     $t0, $zero, greater     # not less: last question
+        sub     $s4, $s2, $s3           # i < j:   f = g - h
+        j       exit
+greater: add    $s4, $s2, $zero         # i > j:   f = g
+exit:   add     $a0, $s4, $zero         # print f
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:9
+
+Three questions, three outcomes: equal gives ~9 + 4 = 13~, =i < j= gives
+~9 - 4 = 5~, and =i > j= gives =9=. The run starts with =i= 7 and =j= 3, so
+the first two questions fail and the last else wins: output =9=. Flip
+=li $s1, 3= to 7 and the first test succeeds: output =13=. Flip it to 9 and
+the nested test succeeds: output =5=. Each arm ends in =j exit=, so control
+leaves the chain exactly once, and each new question costs one label.
+
+* Predict, then run
+
+Trace questions (A6) hand you a finished program and ask for final values and
+execution counts, with the process shown. The kernel makes checking free; the
+marks come from predicting first. Take the array-max block and change its
+data line to =.word 7, 20, 3, -2, 12=. Before running anything, write down
+three answers:
+
+- the printed maximum
+- the final =$s1= and =$s2=
+- how many times the =lw $t1, 0($t0)= line executes
+
+Then Run. The Output panel reads =20=. The Registers panel shows =$s1= at 5
+and =$s2= at 20. For the count, set a breakpoint on the =lw= line and count
+the pauses: four — one per challenger, =i= from 1 through 4, while =A[0]= was
+loaded before the loop ever spun. Whatever disagreed with your prediction is
+your study list. The Exam Gym page scales this into drills for every
+archetype.
+
+* Exam drills this page prepares you for
+
+- A1 — C to MIPS translation under constraints, the heaviest graded skill
+  (19 of 100 HW1 points): if and if/else in both forms, the statement after
+  the if, while and for with the bound in a register, ~i <= n~ rewritten as
+  ~i != n+1~, less-than via =slt=, array access by base + 4i, and the =$s=
+  variables / =$t= temporaries discipline.
+- A6 — full program trace: final register and array values plus execution
+  counts, with the process shown; the predict-then-run drill above is the
+  method.
+- A8 — ISA and format theory: branches are I-type and PC-relative, =j= is
+  J-type and pseudodirect, =beq= and =bne= compare two registers only, and the PC
+  is hardware-managed.
+
+The encodings quoted along the way — =0x15090001=, =0x11080001=,
+=0x24080005=, =0x0211402A=, =0x08100003= — become hand computations on the
+Machine Code: R, I, J page, where branch offsets and jump fields are drilled
+against the listing.

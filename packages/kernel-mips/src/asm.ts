@@ -416,8 +416,14 @@ function encode(real: Real, addr: number, resolve: (name: string) => number): nu
         throw new AsmFailure(line, `${mnem} immediate ${v} must be 0..65535 (it is zero-extended, not sign-extended — use li for big values)`);
       return iType(OPCODES[mnem]!, rs, rt, v);
     }
-    if (v > UINT16_MAX && v < 0xffff_8000)
-      throw new AsmFailure(line, `${mnem} immediate ${v} does not fit in 16 bits (use li to load big values)`);
+    // Sign-extended immediates: the course rule is the 16-bit two's-
+    // complement range −32768..32767. The 0xffff8000..0xffffffff
+    // spellings are accepted as alternate writings of negatives; the
+    // 32768..65535 band is rejected (it is the zero-extended world of
+    // andi/ori, and silently sign-extending it would teach the wrong
+    // rule).
+    if (v > INT16_MAX && v < 0xffff_8000)
+      throw new AsmFailure(line, `${mnem} immediate ${v} does not fit in a signed 16-bit field (−32768..32767; the 0..65535 band belongs to andi/ori — use li for big values)`);
     return iType(OPCODES[mnem]!, rs, rt, v);
   }
 

@@ -1,0 +1,348 @@
+#+TITLE: ELEC2350 · 1 · The Machine Model
+#+SUBTITLE: Words in memory, thirty-two registers, and the loop that ties them together
+
+This page opens the series /MIPS from the Ground Up/. If you have already run
+the site's *MIPS32, Step by Step* lesson, you have watched a program print a
+line and exit; here we slow the machine down until every part of that is
+visible. The promise: a CPU is not magic. It is a loop that fetches a word
+from memory, decodes it, executes it, and starts over. Four ideas carry the
+whole series — the instruction as a 32-bit word, the register file, memory as
+one byte array, and that loop. The next page, /Arithmetic and Logic/, builds
+directly on all four.
+
+* An instruction is a word, and the editor is memory
+
+Mental model first. Everything the processor ever does is triggered by a
+32-bit word. Assembly language is a human spelling of that word, and
+assembling is the act of writing those words into memory. When you press Run
+on a block below, the editor text is translated into machine words, the words
+are written into memory starting at =0x00400000=, and the machine then reads
+those same words back, one at a time, and obeys them. The editor is not a
+file being interpreted line by line. It is a view of memory.
+
+#+NAME: first-words
+#+BEGIN_SRC mips
+# first-words.asm — assemble me into memory, then run me
+        .data
+msg:    .asciiz "a machine, from words"    # these bytes land at 0x10010000
+        .text
+main:   la      $a0, msg                # $a0 = address of msg (expands to 2 words)
+        li      $v0, 4                  # syscall 4: print the string at $a0
+        syscall                         # the only door to your screen
+        li      $v0, 10                 # syscall 10: exit, the only way out
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:a machine, from words
+
+Run it, then look at the *Program* panel under the block. Each row is one
+machine word: the address it lives at, the eight hex digits of the encoded
+word, and the source line it came from. The first row sits at =0x00400000=.
+Notice that one source line, =la $a0, msg=, occupies two rows,
+=0x00400000= and =0x00400004= — =la= is a pseudo-instruction, a convenience
+the assembler expands into two real words, both mapped back to the same
+source line. The full expansion story belongs to the /Machine Code: R, I, J/
+page.
+
+Now look at the *.data* panel. The string's bytes sit at =0x10010000=: the
+first row's ASCII column spells =a machine, from= plus a space, and the
+second row holds =words= and the NUL that terminates the string. Your
+program has two halves living in memory at two different addresses, and
+assembling wrote both.
+
+The formal rule: one instruction is one machine word, and one word is 4 bytes
+= 32 bits. The assembler maps each assembly instruction to one word
+(pseudo-instructions may expand to several), and instructions and data are
+both stored in memory as words — the stored-program concept. There is no
+16-bit MIPS32 instruction and no 64-bit one.
+
+The exam angle: A8 format questions lean on exactly these standing facts.
+All instructions are 32 bits. Instructions and data are both words in memory.
+The machine cannot tell a code word from a data word except by which address
+it is fetched from.
+
+* Thirty-two registers
+
+Registers are the machine's workbench: thirty-two slots, each holding exactly
+one 32-bit word. MIPS is a load-store machine: arithmetic only ever reads and
+writes registers. A value in memory must be loaded into a register before any
+instruction can touch it, and stored back afterwards — that bridge is the job
+of =lw= and =sw=, treated fully on the /Loads, Stores, and the Byte Addressed
+World/ page.
+
+#+NAME: register-dance
+#+BEGIN_SRC mips
+# register-dance.asm — values move between registers, sources keep theirs
+        .text
+main:   li      $t0, 21                 # $t0 = 21 (one word: addiu $t0, $zero, 21)
+        li      $t1, 21                 # $t1 = 21
+        addu    $t2, $t0, $t1           # $t2 = 42, and $t0, $t1 are unchanged
+        move    $s0, $t2                # $s0 = 42 (move is addu $s0, $zero, $t2)
+        move    $a0, $t0                # print $t0
+        li      $v0, 1                  # syscall 1: print int in $a0
+        syscall
+        li      $a0, 32                 # 32 = ' '
+        li      $v0, 11                 # syscall 11: print char in $a0
+        syscall
+        move    $a0, $t1                # print $t1
+        li      $v0, 1
+        syscall
+        li      $a0, 32
+        li      $v0, 11
+        syscall
+        move    $a0, $t2                # print $t2
+        li      $v0, 1
+        syscall
+        li      $a0, 32
+        li      $v0, 11
+        syscall
+        move    $a0, $s0                # print $s0
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:21 21 42 42
+
+Run it, then read the *Registers* panel. =$t0= and =$t1= still hold 21
+(=0x00000015=): =addu= read them as sources and left them alone. =$t2= holds
+=0x0000002a=, and =$s0= holds the same 42 — =move= copies without consuming.
+Each printed number traveled through =$a0= on its way to the screen.
+
+The names are convention, not hardware. The machine knows registers by
+number, 0 to 31; the letters are an agreement about who uses them for what:
+
+| register | number | role |
+|---+---+---|
+| $zero | 0 | welded to 0: reads as 0, writes are discarded |
+| $at | 1 | assembler temporary, reserved for pseudo-op expansions |
+| $v0, $v1 | 2, 3 | procedure return values; $v0 also picks the syscall service |
+| $a0–$a3 | 4–7 | the first four procedure arguments |
+| $t0–$t7 | 8–15 | temporaries: scratch for the current computation |
+| $s0–$s7 | 16–23 | saved registers: variables a procedure must preserve |
+| $t8, $t9 | 24, 25 | more temporaries |
+| $k0, $k1 | 26, 27 | reserved for the operating system |
+| $gp | 28 | global pointer, anchored near the data segment |
+| $sp | 29 | stack pointer, starts at 0x7fffeffc |
+| $fp/$s8 | 30 | frame pointer ($s8 is the alias) |
+| $ra | 31 | return address for procedure calls |
+
+Two groups matter already. =$v0= and =$a0= are how you talk to =syscall=
+(below), and the =$t= versus =$s= split — scratch freely versus preserve
+across calls — becomes the saving discipline of the /Procedures and the
+Stack/ page. Treat the table as a map, not a law: only =$zero='s behavior is
+enforced by hardware.
+
+Numbers worth memorizing, because encoding questions use them bare:
+=$t0=–=$t7= are 8–15, =$s0=–=$s7= are 16–23, =$a0= is 4, =$v0= is 2, =$ra=
+is 31. A register number fits in five bits — thirty-two values — which is
+why the register fields inside an instruction word are five bits wide.
+
+One register is missing from the table on purpose: the program counter, =pc=.
+It is not one of the thirty-two. It is a separate 32-bit register holding the
+address of the next word to fetch, and you never compute with it — no =addi=
+ever updates =pc=. Only the control-flow instructions (=beq=, =bne=, =j=,
+=jal=, =jr=) move it. That exact distinction is a standing A8 trap: "the
+programmer does not update the PC with =addi=".
+
+** The one register that refuses to change
+
+=$zero= is welded shut. Reading it always yields 0, and every write to it is
+silently discarded — no error, no warning, nothing changes:
+
+#+NAME: zero-refuses
+#+BEGIN_SRC mips
+# zero-refuses.asm — $zero reads 0 forever, every write is discarded
+        .text
+main:   addi    $zero, $zero, 5         # try to put 5 into $zero
+        move    $a0, $zero              # read $zero back
+        li      $v0, 1                  # syscall 1: print int in $a0
+        syscall
+        li      $v0, 10                 # syscall 10: exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:0
+
+Run it. The Output panel prints =0= — the =addi= executed, the machine did
+not complain, and the write went nowhere. The *Registers* panel confirms
+=$zero= is still =0x00000000=. Then look at the =addi= row in the *Program*
+panel: its encoded word is =0x20000005=, and its destination field really
+does name register 0. The hardware received the write and dropped it.
+
+This is useful, not broken. =$zero= is the standard source of the constant
+0: =move $a0, $zero= copies a zero with no =li= needed, and the one-word
+expansion of =li $t0, 21= is really =addiu $t0, $zero, 21= — run the
+register dance and read the bytes =24 08 00 15= on its first listing row. A
+free constant source is a RISC habit you will see everywhere.
+
+* Memory: one long byte array
+
+Memory is one array of bytes with an address on every cell, from =0x00000000=
+to =0xFFFFFFFF=. A word is four consecutive bytes, and a word's address is
+always a multiple of 4. The hardware labels none of these bytes as code or
+data; the layout below is a convention about which addresses get used for
+what. These are the addresses this machine actually uses:
+
+| address | what the convention puts there |
+|---+---|
+| 0x00400000 | .text — your assembled words, one per instruction; pc starts at the first word |
+| 0x00400004 and up | the rest of .text, growing upward |
+| 0x10008000 | the $gp anchor, parked below the data segment (this kernel's .data starts at 0x10010000, above it) |
+| 0x10010000 | .data — .word, .asciiz and friends start here |
+| above .data | the heap, growing up toward the stack (this kernel never allocates one) |
+| 0x7fffeffc | $sp, the stack pointer's start; the stack grows down, toward the data |
+
+Check every row against panels you have already run. In =first-words=, the
+*Program* panel's first row is =0x00400000= and the *.data* panel's first row
+is =0x10010000=. Run any block on this page and find =$sp= in the *Registers*
+panel: =0x7fffeffc=, untouched, because nothing here pushed anything onto a
+stack. =$gp= sits at =0x10008000= for the same reason — it is an anchor, and
+anchors hold still. Code and data share one memory; the only protection is
+directional convention, and this kernel does enforce one edge of it: a store
+into =.text= is refused outright, with an error naming the line.
+
+Two course facts complete the picture. First, the heap and the stack grow
+toward each other — heap up, stack down — which is why a runaway recursion
+eventually meets a runaway allocation; the /Procedures and the Stack/ page
+watches =$sp= shrink for real. Second, within one word the byte order
+matters: this machine is little-endian, least significant byte first. You
+cannot see that until you look at single bytes — the .data panel shows them,
+a program proves them — which is exactly where the /Loads, Stores, and the
+Byte Addressed World/ page picks up.
+
+The exam angle: A7's hint — "What is stored in memory? Memory and registers
+are not the same" — is a memory-model question before it is a counting
+question. Memory holds the words of your program and the bytes of your data;
+registers hold thirty-two words of working state; neither can do the other's
+job.
+
+* The loop: fetch, decode, execute
+
+Strip a processor to its core and one loop remains:
+
+- fetch: read the 32-bit word at the address in =pc=
+- decode: split the word into fields — the top six bits, the opcode, say what kind of word this is
+- execute: do the one thing the word says — add two registers, print a string, jump
+- advance: =pc = pc + 4=, unless the word just executed was a branch or jump that set =pc= itself
+
+That loop is the whole secret. Watch it run one word at a time:
+
+#+NAME: four-steps
+#+BEGIN_SRC mips
+# four-steps.asm — four instructions, watched one word at a time
+        .text
+main:   addiu   $t0, $zero, 3           # word 1: $t0 = 3
+        addiu   $t1, $zero, 4           # word 2: $t1 = 4
+        addu    $t2, $t0, $t1           # word 3: $t2 = 3 + 4 = 7
+        move    $a0, $t2                # word 4: $a0 = 7, ready to print
+        li      $v0, 1                  # syscall 1: print the 7
+        syscall
+        li      $v0, 10                 # syscall 10: exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:7
+
+Four instructions, then the exit. Do this exactly:
+
+- Click the line number in the editor gutter on the =addu= line — line 5, =addu $t2, $t0, $t1= — so it gains a stop mark. That sets a breakpoint on that source line.
+- Press Run. The machine assembles, executes the first two words, and stops /before/ line 5 — a breakpoint stops before an instruction, never after it. The status line reads =paused · line 5=.
+- Read the state. In the *hi · lo · pc* panel, =pc= is =0x00400008= — exactly the address the *Program* panel shows for the =addu= row, which now carries the current marker. In *Registers*, =$t0= is =0x00000003= and =$t1= is =0x00000004= from the two loop rounds already done, while =$t2= is still =0x00000000=.
+- Press Step. One full fetch–decode–execute round runs on the word =0x01095021=: decoded as addu with destination 10 and sources 8 and 9, executed so =$t2= becomes =0x00000007=, advanced so =pc= moves to =0x0040000c=. The *Registers* panel flags =$t2= as changed.
+- Press Step again. The =move= runs, =$a0= becomes =0x00000007=, and =pc= moves to =0x00400010=.
+- Press Run. The machine continues from the pause, runs the print and the exit, and the Output panel shows =7= with status =finished · exit(0) · 8 steps=.
+
+The formal rule: one Step is one machine word, one full round of the loop.
+=pc= advances by 4 because words are 4 bytes and memory is byte-addressed;
+branch and jump words are the only ones that move =pc= any other way. Run the
+block again with no breakpoint and count: eight rows in the *Program* panel,
+eight steps in the status line, eight rounds of the loop.
+
+The exam angle: A8 asks PC questions — it advances by 4, it is not writable
+with arithmetic — and stored-program questions: the processor fetches
+instructions from memory in sequence and the PC tracks the current one. You
+have now executed that definition by hand.
+
+* Syscalls: the only door in and out
+
+The core loop has no screen and no keyboard attached. When a program wants to
+be seen, it executes =syscall= — itself a real instruction, encoded
+=0x0000000c=, every field zero except funct 12. The service number in =$v0=
+names the service; =$a0= carries the argument:
+
+| $v0 | service | argument in $a0 |
+|---+---+---|
+| 1 | print int | a signed 32-bit value, printed in decimal |
+| 4 | print string | address of a NUL-terminated string |
+| 10 | exit | none — stops the machine |
+| 11 | print char | an ASCII code; the low 8 bits print |
+
+You have already used all four. =first-words= printed its string with service
+4 and left with 10. The register dance printed each number with service 1 and
+separated them with service 11: every gap between two numbers was
+=li $a0, 32= (ASCII space) plus =syscall=. A newline prints the same way,
+=li $a0, 10= with service 11. That
+is the entire I/O vocabulary of this kernel. No read syscall exists, so every
+program on these pages carries its own data in its =.data= section.
+
+Two habits to build now. Set =$v0= immediately before the =syscall= —
+anything that clobbers =$v0= in between silently changes which service runs.
+And end every program with =li $v0, 10= / =syscall=; the next section says
+why that is not a suggestion.
+
+The exam angle: trace questions hand you SPIM-style programs that print with
+these same services, and the exit pair is assumed knowledge. Knowing there is
+no input is why every exam program is self-contained.
+
+* A tour of the five panels
+
+Every block on this site carries the same five panels. They are the machine
+opened up, and later pages assume you can find them blind:
+
+- *Registers* — all 32 registers in ABI order, hex with signed decimal beneath; the register or registers written by the last executed instruction are flagged changed
+- *hi · lo · pc* — the multiply and divide result pair (empty until /Arithmetic and Logic/ needs it) and =pc=, the address of the next word to fetch
+- *Program* — one row per machine word: address, encoded bytes, source text; the row at =pc= is marked current; hover any row to see its =# comment= as a tooltip
+- *.data* — the live first 256 bytes of the data segment, 16 per row, with an ASCII column
+- *Output* — everything the syscalls have printed so far
+
+Rerun =four-steps= with the line-5 breakpoint and read the panels in order at
+the pause. *Registers*: the changed flag sits on =$t1=, the last word to
+execute, while =$t0= still shows its 3 from the round before. *hi · lo · pc*:
+=0x00400008=. *Program*: the current row is the =addu= word about to execute,
+=01 09 50 21= in its bytes column. *.data*: empty, because this program
+declares no data. *Output*: empty, because the print =syscall= is still three
+words ahead. Five panels, one frozen moment, and the machine's whole mind is
+readable.
+
+* Two traps to know before you continue
+
+Both traps are about the machine's edges, not its core: what Run really does
+when you press it, and how a program is allowed to end.
+
+Trap one: Run restarts. Pressing Run always re-assembles the current editor
+text and starts from scratch whenever the machine is idle — finished,
+errored, never started, or paused with the text edited since the last run.
+Mid-flight is the exception: paused at a breakpoint or mid-stepping with
+continues from where the machine stands. That is how =four-steps= finished
+above, and it is why editing a block while it is paused makes the next Run
+restart — the words in memory no longer match the editor. The ⟲ Reset button
+rebuilds the machine from the last assembled program and clears the results
+slot.
+
+Trap two: programs must exit through =syscall 10=. Running past the last word
+is an error, not a silent stop — the kernel names the line and tells you the
+fix. The mirror trap is the program that never reaches its exit: an infinite
+loop burns the run budget of 1,000,000 instructions and stops with a clean
+error instead of a frozen page. Every block on these pages ends with the same
+two lines for exactly this reason.
+
+* Exam drills this page prepares you for
+
+- A8, ISA and format theory MCQs — the standing facts this page makes concrete: every instruction is one 32-bit word; instructions and data are both words in memory, the stored-program concept; =pc= is not one of the 32 general registers, advances by 4, and no =addi= updates it; the text, data, and stack layout and which way each region grows; register numbers =$t0=–=$t7= = 8–15 and =$s0=–=$s7= = 16–23. The field-level encode and decode drills arrive on the /Machine Code: R, I, J/ page.
+- A7, memory-access counting, the memory-model half — what is stored in memory (your program's words at =0x00400000=, your data at =0x10010000=, the stack at the top) versus what lives in registers (thirty-two words of fast working state). The counting half — only =lw= and =sw= touch data memory — is completed by the /Loads, Stores, and the Byte Addressed World/ page.

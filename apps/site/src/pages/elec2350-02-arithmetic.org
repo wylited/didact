@@ -1,0 +1,618 @@
+#+TITLE: ELEC2350 · 2 · Arithmetic and Logic
+#+SUBTITLE: The compute instructions, and the two extension rules that decide every trap question
+
+So far, The Machine Model showed the machine as a loop — fetch a word,
+decode it, execute it — running over 32 registers and a byte-addressed
+memory. This page fills in the execute step: the arithmetic and logic
+instructions that do the actual computing.
+
+Two rules run through all of it, and both are exam material. First,
+immediates are 16-bit fields: =addi= sign-extends its field, while =andi=
+and =ori= zero-extend theirs. Second, the signed forms =add=, =addi=, =sub=
+trap on overflow, while the u-forms =addu=, =addiu=, =subu= wrap. This
+kernel enforces both rules for real, so every claim below is one Run
+away.
+
+Run every block, then read the panels. =Registers= shows each value in
+hex and signed decimal side by side, and flags the register an
+instruction just wrote. =Program= shows the encoded 32-bit word beside
+every instruction — the raw material of Machine Code: R, I, J, three
+pages ahead. =Output= collects everything the syscalls print.
+
+* Add and subtract: registers only
+
+Mental model: the ALU is a pocket calculator wired to 32 scratchpads,
+and it only computes with numbers already sitting in a scratchpad. MIPS
+is a load-store ISA. No arithmetic instruction has a memory operand,
+and none takes two constants. A number in memory must be loaded into a
+register first — that is the whole subject of Loads, Stores, and the
+Byte Addressed World, the next page in the series.
+
+Operand order is destination first, in every instruction: =add $t2, $t0, $t1=
+puts =$t0= + =$t1= into =$t2=. The first register is where the answer lands.
+
+One instruction takes a constant instead of a second register: =addi=.
+And there is no =subi=. Not because subtracting a constant is useless —
+because immediates are signed, so =addi= with a negative constant already
+subtracts. A separate mnemonic would be redundant, and MIPS drops
+redundancy. That is a classic viva question; the answer is the negative
+immediate.
+
+#+NAME: add-sub-addi
+#+BEGIN_SRC mips
+# arith-basics.asm — add, sub, and addi standing in for subi
+        .text
+main:   li      $t0, 7                  # a = 7
+        li      $t1, 5                  # b = 5
+        add     $t2, $t0, $t1           # $t2 = 7 + 5 = 12
+        move    $a0, $t2                # print $t2 (syscall 1)
+        li      $v0, 1
+        syscall
+        li      $a0, 10                 # '\n' (syscall 11)
+        li      $v0, 11
+        syscall
+        sub     $t3, $t0, $t1           # $t3 = 7 - 5 = 2
+        move    $a0, $t3                # print $t3
+        li      $v0, 1
+        syscall
+        li      $a0, 10
+        li      $v0, 11
+        syscall
+        addi    $t4, $t0, -5            # 7 + (-5) = 2 — subi, without subi
+        move    $a0, $t4                # print $t4
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:12
+:2
+:2
+
+Lines two and three of the output are the same number. =sub $t3, $t0, $t1=
+and =addi $t4, $t0, -5= computed the identical result — the entire
+argument for why =subi= does not exist. Step through the block and watch
+the =Registers= panel: the register each instruction writes is flagged
+=changed=, one at a time.
+
+* Immediates: sixteen bits, signed
+
+Mental model: an instruction word is 32 bits wide and must also carry
+the opcode and the register numbers, so the constant gets the leftover
+field: 16 bits. Read as a two's-complement number, 16 bits span −32768
+to 32767. The asymmetry is structural: the 65536 patterns split evenly
+between negatives and non-negatives, and zero occupies one of the
+non-negative slots, so the positive side stops one short.
+
+#+NAME: imm-range
+#+BEGIN_SRC mips
+# imm-range.asm — both extremes of the 16-bit signed immediate, added
+        .text
+main:   addi    $t0, $zero, 32767       # largest immediate: field 0x7FFF
+        addi    $t1, $zero, -32768      # smallest: field 0x8000
+        add     $t2, $t0, $t1           # 32767 + (-32768) = -1
+        move    $a0, $t2                # print the sum
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:-1
+
+Run, then look at the =Registers= panel: =$t0= = 0x00007FFF with the
+signed decimal 32767 beside it, and =$t1= = 0xFFFF8000 with −32768. Both
+extremes assembled and loaded. The console shows only their sum, −1.
+
+The formal rule: the hardware sign-extends the 16-bit field to 32 bits
+before computing — field 0x8000 becomes 0xFFFF8000, which is why −32768
+works. A constant outside the range is refused at assembly time — and
+so is the band 32768..65535, with a message that hands that band to
+=andi=/=ori=. HW1 Q4(a) is exactly this error: =addi $t1, $t2, 65536=
+fails, and the fix is to build 65536 in a register with =lui= and
+=add= — how, two sections down. This assembler also accepts the
+two's-complement spelling, so 0xFFFF8000 may be written where −32768
+is meant.
+
+Exam angle: T2 Q1 asks the range as an MCQ, and the popular distractor
+is the printed option "0 to 2^16" — the unsigned reading of the field,
+off by one at the top. The unsigned range 0..65535 belongs to =andi=
+and =ori=, below.
+
+The same signed field serves =slti=: =slti $t2, $t1, imm= puts 1 in
+=$t2= when =$t1= is less than the sign-extended immediate, 0 otherwise
+— set-on-less-than against a constant.
+
+#+NAME: slti-block
+#+BEGIN_SRC mips
+# slti-block.asm — set on less-than, against an immediate
+        .text
+main:   li      $t1, 5
+        slti    $t2, $t1, 10            # 5 < 10: $t2 = 1
+        slti    $t3, $t1, 3             # 5 < 3:  $t3 = 0
+        move    $a0, $t2                # print both flags
+        li      $v0, 1
+        syscall
+        li      $a0, 32                 # ' '
+        li      $v0, 11
+        syscall
+        move    $a0, $t3
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:1 0
+
+Output =1 0=: 5 is less than 10 but not less than 3. The register form
+=slt= and the unsigned pair =sltu=/=sltiu= get their full treatment in
+Branches, Loops, and C Translation.
+
+* Overflow: add traps, addu wraps
+
+Mental model: a register is 32 bits with no type attached. Signed
+arithmetic reads those bits as a two's-complement number, and that
+reading has a ceiling: =0x7FFFFFFF= = 2147483647 is the largest signed
+32-bit value, and one more wraps to =0x80000000=, the most negative
+value, −2147483648. When the true result leaves the signed range, the
+mnemonic chooses what happens: =add=, =addi= and =sub= raise an overflow
+exception; =addu=, =addiu= and =subu= keep the low 32 bits and say nothing.
+
+#+NAME: overflow-trap
+#+BEGIN_SRC mips
+# fault-demo (overflow-trap.asm): the add traps on signed overflow, on purpose
+        .text
+main:   lui     $t1, 0x7FFF             # $t1 = 0x7FFF0000
+        ori     $t1, $t1, 0xFFFF        # $t1 = 0x7FFFFFFF = 2147483647
+        move    $a0, $t1                # print the operand first
+        li      $v0, 1
+        syscall
+        li      $t2, 1                  # the fateful +1
+        add     $t3, $t1, $t2           # 2147483647 + 1 — overflow, trap
+        move    $a0, $t3                # never reached
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit — never reached either
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:2147483647
+
+Run it. The console keeps the 2147483647 printed before the failure,
+and nothing after. The status line under the block turns into the
+kernel's verdict: =line 9: add $t3, $t1, $t2: add overflowed —
+2147483647 + 1 does not fit in a signed 32-bit register (use the
+u-form to wrap)=. In the =Program= panel the current-row pointer is
+still sitting on the =add= — the machine died right there, and the exit
+instructions never ran. Note what the kernel hands you: the source
+line, the instruction, both operands, and the fix.
+
+Predicting overflow without running anything — the rule:
+
+| operation   | operands             | overflow when the result claims |
+|-------------+----------------------+---------------------------------|
+| addition    | positive + positive  | a negative                      |
+| addition    | negative + negative  | a positive                      |
+| subtraction | positive − negative  | a negative                      |
+| subtraction | negative − positive  | a positive                      |
+
+A positive and a negative can always be added safely — that is why the
+extremes block above ran clean. T4 recaps this as a number-systems
+topic; the MIPS-relevant half is knowing which mnemonics trap.
+
+The same arithmetic in the u-form:
+
+#+NAME: addu-wraps
+#+BEGIN_SRC mips
+# addu-wraps.asm — the u-form wraps instead of trapping
+        .text
+main:   lui     $t1, 0x7FFF             # $t1 = 0x7FFFFFFF
+        ori     $t1, $t1, 0xFFFF
+        li      $t2, 1
+        addu    $t3, $t1, $t2           # wraps: $t3 = 0x80000000
+        move    $a0, $t3                # print it — as a signed int
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:-2147483648
+
+The console shows −2147483648. Now look at the =Registers= panel: =$t3= =
+=0x80000000=. The same 32 bits, two readings — a register holds a bit
+pattern, and the instruction decides how to read it. Tutorial 3 puts it
+in a boxed note: registers do not have types.
+
+This rule is lectured, not incidental: L4 Arithmetic II p.7 states it
+outright — =add=, =addi=, and =sub= will cause exceptions on overflow,
+while =addu=, =addiu=, and =subu= will not — and it is midterm-half
+material. Nor are the u-forms back-page exotica: =addu=, =addiu=,
+=subu=, =sltu= and =sltiu= are all core rows of the reference card's
+front-page instruction table; it is =sra=, =mult=, =div=, =mfhi= and
+=mflo= that live on the back. In any real simulator — MARS, SPIM, this
+kernel — the distinction is live, and compilers emit the u-forms almost
+exclusively: wrapping is the useful default, and the trap is for
+finding bugs.
+
+* Shifts: sll multiplies, srl and sra halve
+
+Mental model: a shifter is wiring, not a loop. All 32 bits slide k
+places in one step, and the only design question is what fills the k
+vacated positions. =sll= shifts left, zeros enter from the right, and
+each position doubles the value. =srl= and =sra= shift right and differ
+only in what enters from the left: =srl= pushes zeros, =sra= pushes
+copies of the sign bit.
+
+** sll is multiply by a power of two
+
+T2 Q4's own numbers, made executable:
+
+#+NAME: shift-basics
+#+BEGIN_SRC mips
+# shift-basics.asm — T2 Q4: 16 shifted left 2, then right 3
+        .text
+main:   li      $t0, 16                 # 16 = ...0001 0000
+        sll     $t1, $t0, 2             # 16 << 2 = 64 — multiply by 4
+        srl     $t2, $t1, 3             # 64 >> 3 = 8 — divide by 8
+        sra     $t3, $t1, 3             # also 8 — positive, sign bit 0
+        move    $a0, $t1                # print $t1
+        li      $v0, 1
+        syscall
+        li      $a0, 10                 # '\n'
+        li      $v0, 11
+        syscall
+        move    $a0, $t2                # print $t2
+        li      $v0, 1
+        syscall
+        li      $a0, 10
+        li      $v0, 11
+        syscall
+        move    $a0, $t3                # print $t3
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:64
+:8
+:8
+
+Output lines two and three are equal: on a positive value the sign bit
+is 0, so =sra= pushes zeros in exactly like =srl=, and the two
+instructions agree. The disagreement needs a negative operand — next
+block.
+
+Multiplication by a constant is shift-and-add — T2 lists =mul= but never
+exercises it, and the taught method for b = a*5 is =sll $s3, $s0, 2=
+(now 4a) followed by =add $s3, $s3, $s0= (4a + a = 5a).
+
+The formal shape: =sll $t1, $t0, 2= is destination, source, count. The
+count lives in a 5-bit field (shamt) and must be 0..31 — =sll $s5, $s2,
+0x26= is HW1 Q4(d)'s invalid instruction, because 38 does not fit in 5
+bits. In the encoding the source register sits in the rt field, not rs
+— a decode trap detailed on Machine Code: R, I, J.
+
+** srl versus sra on a negative value
+
+T2 draws this as an 8-bit picture:
+
+#+BEGIN_SRC text
+value      1111 1100     -4 in 8 bits
+srl 2  ->  0011 1111     63 — zeros pushed in at the top: sign destroyed
+sra 2  ->  1111 1111     -1 — copies of the sign bit: still negative
+#+END_SRC
+
+The same experiment at full width, on =0xFFFFFF00=:
+
+#+NAME: srl-vs-sra
+#+BEGIN_SRC mips
+# srl-vs-sra.asm — one negative value, shifted right both ways
+        .text
+main:   lui     $t0, 0xFFFF             # $t0 = 0xFFFF0000
+        ori     $t0, $t0, 0xFF00        # $t0 = 0xFFFFFF00 = -256
+        sra     $t1, $t0, 4             # 0xFFFFFFF0 = -16 — sign kept
+        srl     $t2, $t0, 4             # 0x0FFFFFF0 = 268435440 — zeros
+        move    $a0, $t0                # print the value: -256
+        li      $v0, 1
+        syscall
+        li      $a0, 10                 # '\n'
+        li      $v0, 11
+        syscall
+        move    $a0, $t1                # print sra result: -16
+        li      $v0, 1
+        syscall
+        li      $a0, 10
+        li      $v0, 11
+        syscall
+        move    $a0, $t2                # print srl result: 268435440
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:-256
+:-16
+:268435440
+
+Three numbers: −256 goes in, −16 and 268435440 come out. The =sra= line
+stayed negative — four copies of the sign bit were pushed in, giving
+=0xFFFFFFF0= = −16. The =srl= line filled the top with zeros:
+=0x0FFFFFF0= = 268435440, a huge positive number. Sign preserved versus
+sign destroyed, in one output panel.
+
+To watch it happen: click the line number of the =sra= instruction in
+the editor gutter to set a breakpoint, Run, then Step once. The
+=Registers= panel flags =$t1= as =changed= and shows =0xFFFFFFF0= with the
+signed reading −16. Step again and =$t2= takes =0x0FFFFFF0=.
+
+The rule: a signed value shifted right takes =sra=; an unsigned value
+takes =srl=. HW1 Q3(c) shifts =0xBBBBBBBB= right by 3 with
+=srl= — the zeros entering the top are part of the answer.
+
+* Bitwise: and, or, nor
+
+Mental model: bitwise instructions are 32 one-bit computations running
+side by side, one per column. =and= keeps a bit where both operands have
+a 1; =or= where either has a 1; =nor= where neither has a 1. Their everyday
+job is masking — AND selects the bits to keep, OR sets bits, and
+together they splice fields into one word.
+
+The lecture's worked example, with =$t1= = =0x00003C00= and =$t2= =
+=0x00000D00=:
+
+#+BEGIN_SRC text
+$t1   0x00003C00   0000 0000 0000 0000 0011 1100 0000 0000
+$t2   0x00000D00   0000 0000 0000 0000 0000 1101 0000 0000
+and   0x00000C00   a 1 only where both operands have a 1
+or    0x00003D00   a 1 wherever either operand has a 1
+nor $t1, $zero      0xFFFFC3FF   NOT $t1 — NOR against constant zero
+#+END_SRC
+
+#+NAME: and-or-nor
+#+BEGIN_SRC mips
+# and-or-nor.asm — the lecture's numbers, all three gates
+        .text
+main:   li      $t1, 0x3C00             # 0011 1100 0000 0000
+        li      $t2, 0x0D00             # 0000 1101 0000 0000
+        and     $t3, $t1, $t2           # 0x00000C00
+        or      $t4, $t1, $t2           # 0x00003D00
+        nor     $t5, $t1, $zero         # NOT $t1 = 0xFFFFC3FF
+        move    $a0, $t3                # print and: 3072
+        li      $v0, 1
+        syscall
+        li      $a0, 10                 # '\n'
+        li      $v0, 11
+        syscall
+        move    $a0, $t4                # print or: 15616
+        li      $v0, 1
+        syscall
+        li      $a0, 10
+        li      $v0, 11
+        syscall
+        move    $a0, $t5                # print nor: -15361
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:3072
+:15616
+:-15361
+
+The third print is negative: =0xFFFFC3FF= read as a signed 32-bit number
+is −15361. The =Registers= panel shows both readings side by side. NOR
+against =$zero= is the course's free NOT — there is no =not= instruction
+in the taught set — and =nor $t0, $zero, $zero= builds all ones,
+=0xFFFFFFFF=, a PostLab1 idiom. One more thing to see in the =Program=
+panel: =li $t1, 0x3C00= assembled to a single =addiu= row, because 15360
+fits the signed 16-bit immediate.
+
+The fourth gate, =xor=, is in the course subset too (HW1 Q1's allowed
+list) and outputs a 1 exactly where the operands disagree — the
+bit-pattern differ detector:
+
+#+NAME: xor-bits
+#+BEGIN_SRC mips
+# xor-bits.asm — xor: a 1 exactly where the operands disagree
+        .text
+main:   li      $t1, 0x3C00             # 0011 1100 0000 0000
+        li      $t2, 0x0F00             # 0000 1111 0000 0000
+        xor     $t3, $t1, $t2           # 0011 0011 0000 0000 = 0x3300
+        move    $a0, $t3                # print: 13056
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:13056
+
+=0x3300= = 13056: the middle bits both operands set (=0x0C00=)
+cancelled, and everything only one of them set survived. Its immediate
+form =xori= zero-extends just like =andi= and =ori=, below.
+
+Exam angle: HW1 Q3(a) shifts a value left by 4 and then =or= in a second
+register, splicing two fields into one — =or= keeps every bit either
+operand contributes.
+
+** The immediate forms zero-extend
+
+Mental model: =andi=, =ori= and =xori= carry the same 16-bit immediate
+field as =addi=, but a mask does not want sign extension. The hardware
+reads the field as an unsigned pattern and puts zeros on top: the mask
+=0xFFFF= is =0x0000FFFF=, sixteen ones — never all ones.
+
+#+NAME: andi-zero-extend
+#+BEGIN_SRC mips
+# andi-zero-extend.asm — andi's mask is 16 bits wide, zeros on top
+        .text
+main:   lui     $t1, 0xABCE             # $t1 = 0xABCE0000
+        ori     $t1, $t1, 0xF001        # $t1 = 0xABCEF001
+        andi    $t2, $t1, 0xFFFF        # mask 0x0000FFFF: top half dies
+        nor     $t3, $zero, $zero       # $t3 = 0xFFFFFFFF, all ones
+        and     $t4, $t1, $t3           # AND all ones: nothing changes
+        move    $a0, $t2                # print the andi result
+        li      $v0, 1
+        syscall
+        li      $a0, 10                 # '\n'
+        li      $v0, 11
+        syscall
+        move    $a0, $t4                # print the all-ones contrast
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:61441
+:-1412501503
+
+First number: 61441, which is =0x0000F001=. The top half of =0xABCEF001=
+is gone — the mask was only 16 bits wide. Second number: −1412501503,
+the full =0xABCEF001= unchanged, because AND with all ones touches
+nothing. If =andi= sign-extended its immediate, the mask would be all
+ones and the two numbers would match. They do not.
+
+That is the entire trap of HW1 Q3(b), which writes =andi $t2, $t2, -1=.
+SPIM accepts the −1 spelling and encodes the field as =0xFFFF= — which
+zero-extends to the 16-bit mask =0x0000FFFF=, cutting the shifted value
+down to its low half. It is not an all-ones mask, and the top 16 bits
+do not survive. This assembler is stricter and rejects the −1 spelling
+outright — =andi immediate 4294967295 must be 0..65535 (it is
+zero-extended, not sign-extended — use li for big values)= — so write
+the =0xFFFF= spelling; the lesson is identical.
+
+=ori= zero-extends the same way, which is exactly why it is safe as
+=lui='s partner — the section after next.
+
+* Multiply and divide: hi and lo
+
+Mental model: multiply can outgrow 32 bits and divide leaves a
+remainder, so the ALU keeps two extra result registers, =hi= and =lo=,
+that no ordinary instruction names. =mult rs, rt= writes the full
+64-bit product across the pair — =hi= holds the upper half, =lo= the
+lower; =div rs, rt= writes the quotient to =lo= and the remainder to
+=hi= (L4 Arithmetic II, pp.18–22). =mfhi= and =mflo= are the read-back:
+each copies its half into a general register. On the reference card
+=mult=, =div=, =mfhi= and =mflo= live on the back page — lectured, but
+off the front table.
+
+#+NAME: mult-div
+#+BEGIN_SRC mips
+# mult-div.asm — hi and lo: where 64-bit results land
+        .text
+main:   li      $t1, 100000
+        mult    $t1, $t1                # 100000 × 100000 = 0x2_540BE400
+        mfhi    $a0                     # hi = 2: the product outgrew 32 bits
+        li      $v0, 1
+        syscall
+        li      $a0, 32                 # ' '
+        li      $v0, 11
+        syscall
+        mflo    $a0                     # lo = 1410065408: the low 32 bits
+        li      $v0, 1
+        syscall
+        li      $a0, 10                 # '\n'
+        li      $v0, 11
+        syscall
+        li      $t2, 7
+        li      $t3, 2
+        div     $t2, $t3                # 7 ÷ 2: quotient to lo, remainder to hi
+        mflo    $a0                     # 3 — the quotient
+        li      $v0, 1
+        syscall
+        li      $a0, 32
+        li      $v0, 11
+        syscall
+        mfhi    $a0                     # 1 — the remainder
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:2 1410065408
+:3 1
+
+Two output lines. The first: 100000 × 100000 is =10^10= =
+=0x2540BE400=, five bytes wide, so =hi= = 2 and =lo= = 1410065408
+(=0x540BE400=) — the product split across the pair. The second: 7 ÷ 2
+gives quotient 3 out of =mflo= and remainder 1 out of =mfhi=. Both
+operands of =mult= and =div= are registers; neither takes an immediate.
+
+* Building 32-bit constants: lui plus ori
+
+Mental model: no instruction can carry a 32-bit constant; the immediate
+field is 16 bits. A full-width constant is built inside the register,
+in halves: =lui $t1, 0x1234= (load upper immediate) writes =0x1234= into
+the top 16 bits and zeros the bottom half, giving =0x12340000=; then
+=ori $t1, $t1, 0x5678= fills the bottom. Two instructions — and for a
+constant this wide, two is the minimum, which is exactly what T2 Q8
+asks for.
+
+#+NAME: lui-ori
+#+BEGIN_SRC mips
+# lui-ori.asm — 0x12345678 into $t1, the two-instruction minimum
+        .text
+main:   lui     $t1, 0x1234             # $t1 = 0x12340000, low half zero
+        ori     $t1, $t1, 0x5678        # $t1 = 0x12345678
+        move    $a0, $t1                # print it: 305419896
+        li      $v0, 1
+        syscall
+        li      $v0, 10                 # exit
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:305419896
+
+The console prints 305419896; the =Registers= panel shows =$t1= =
+=0x12345678=, the goal. Now replace the two instructions with
+=li $t1, 0x12345678= and Run again: the =Program= panel lists two rows
+for that one source line — the assembler expanded the pseudo-op into
+the same =lui= + =ori= pair. Pseudo-op expansion gets its full treatment
+on Machine Code: R, I, J.
+
+Why =ori= is the partner, and not =addi=: =ori= zero-extends, so it can
+only set bits in the bottom half. =addi= sign-extends — with a low half
+like =0xF001= it would add =0xFFFFF001= and turn =0xABCE0000= into
+=0xABCDF001=, the top half quietly wrong. For =0x12345678= the low half
+=0x5678= has its top bit clear, so an =addi= would happen to work; =ori=
+is the form that is always safe.
+
+The minimum-instruction trap: "minimum number of instructions" is not
+always two. A constant in −32768..32767 fits a single =addi=; a constant
+in 0..65535 fits a single =ori=; only wider constants need =lui= + =ori=.
+Read the constant before counting instructions.
+
+* Exam drills this page prepares you for
+
+- A4, register trace: per-instruction values through arithmetic, shift
+  and logic snippets. T2 Q3 (add then sub, answer 5), T2 Q4 (the 16 to
+  64 to 8 shift trace — this page's block), and HW1 Q3's shift-and-mask
+  traces, answered in 8 hex digits.
+- A5, validity critique: the canonical four of HW1 Q4 — =addi= with a
+  65536 immediate, =subi= (does not exist), =ori= with a 32-bit immediate,
+  =sll= with shamt 38 — plus T2 Q1's immediate-range MCQ.
+- A11, build a 32-bit constant: =lui= + =ori= in two instructions, and
+  the minimum-may-be-one trap (T2 Q8).
+
+The Exam Gym turns each of these into a self-checking drill; the
+listing's encoded-bytes column is your answer key.

@@ -1,0 +1,322 @@
+#+TITLE: ELEC2350 · 5 · Machine Code: R, I, J
+#+SUBTITLE: Every instruction is one 32-bit word in one of three shapes — and the Program panel's bytes column prints the true encoding of anything you type
+
+So far you wrote assembly and trusted the assembler: The Machine Model showed the machine fetching 32-bit words from memory, and Branches, Loops, and C Translation built control flow out of labels. This page opens the box: how one assembly line becomes exactly one 32-bit word, the three field layouts it can take, and how to convert by hand in both directions. This is the encode/decode skill that carries the heaviest point weights on the exam.
+
+* Three formats, thirty-two bits
+
+An instruction is not text. It is one 32-bit word — eight hex digits — that the machine fetches, slices into fixed fields, and executes. The format is the name of the slicing: R when all operands are registers, I when a 16-bit constant rides along, J for the two far jumps. Every field has a fixed width at a fixed position, so hardware can slice blindly; bit 31 is always the top of the opcode.
+
+Thirty-two bits is four bytes is eight hex digits, and each hex digit is four bits. That correspondence is why the exam demands hex answers: one instruction, eight digits, no ambiguity.
+
+** The R format
+
+R-type instructions work entirely on registers: =add=, =sub=, =and=, =or=, =nor=, =slt=, the shifts =sll=/=srl=/=sra=, =jr=, and =syscall=. Their opcode is always =000000=; what tells them apart is the funct field at the bottom — a second six-bit opcode. The decoder's rule: top six bits zero → R-type → funct decides which instruction.
+
+| field | bits  | width | what it holds                                     |
+|-------+-------+-------+---------------------------------------------------|
+| op    | 31–26 | 6     | 000000 for every R-type                         |
+| rs    | 25–21 | 5     | first source register                             |
+| rt    | 20–16 | 5     | second source register                            |
+| rd    | 15–11 | 5     | destination register                              |
+| shamt | 10–6  | 5     | shift amount, 0–31                                |
+| funct | 5–0   | 6     | which operation — the R-type's real opcode        |
+
+Three register fields at five bits each: five bits address exactly 32 registers. The shifts bend the pattern — =sll $t0, $t1, 2= has no second register, so =rs= stays 0, the source sits in =rt=, and the constant lives in =shamt=. A shift amount is five bits, 0 to 31; that is why =sll $s5, $s2, 38= is invalid no matter how it is spelled.
+
+** The I format
+
+When an instruction needs a small constant — =addi='s operand, =lw=/=sw='s offset, =beq='s branch distance — the constant is baked into the instruction itself. The three low R fields (=rd=, =shamt=, =funct=, eleven bits together) are replaced by one 16-bit immediate field:
+
+| field     | bits  | width | what it holds                                |
+|-----------+-------+-------+----------------------------------------------|
+| op        | 31–26 | 6     | the opcode                                   |
+| rs        | 25–21 | 5     | source register, or the base of a load/store |
+| rt        | 20–16 | 5     | destination, store source, or second compare |
+| immediate | 15–0  | 16    | constant or offset                           |
+
+=rt= wears three hats: destination for arithmetic and loads, source for =sw=, second comparand for =beq=/=bne=. The 16-bit field is a signed two's-complement number for =addi=, =slti=, memory offsets and branch distances — the range −32768 to 32767 — while =andi=/=ori= read it as a zero-extended bit pattern (Arithmetic and Logic covers that split). Sixteen signed bits is a recurring MCQ answer; count it as −2^15 to 2^15−1.
+
+** The J format
+
+=j= and =jal= must name a target address, and 26 bits is all the room left after the opcode. The trick that makes it enough: targets are word-aligned, so the low two bits of any target are always =00= and are dropped. The field stores the target as a word address, and hardware puts the two zeros back at execution.
+
+| field  | bits  | width | what it holds                        |
+|--------+-------+-------+--------------------------------------|
+| op     | 31–26 | 6     | 2 for j, 3 for jal           |
+| target | 25–0  | 26    | the target's word address (>> 2)     |
+
+* Register numbers: two families to memorize
+
+Encoding needs numbers, not names — the fields hold five-bit register numbers. Memorize two anchors and the rest can be looked up: =$t0=–=$t7= are 8–15 and =$s0=–=$s7= are 16–23. Count up inside a family from its anchor: =$t3= is 11, =$s4= is 20.
+
+| name          | number | role                            |
+|---------------+--------+---------------------------------|
+| $zero       | 0      | hardwired 0, writes discarded   |
+| $at         | 1      | assembler temporary, reserved   |
+| $v0–$v1   | 2–3    | procedure return values         |
+| $a0–$a3   | 4–7    | procedure arguments             |
+| $t0–$t7   | 8–15   | temporaries                     |
+| $s0–$s7   | 16–23  | saved variables                 |
+| $t8–$t9   | 24–25  | more temporaries                |
+| $k0–$k1   | 26–27  | reserved for the OS             |
+| $gp         | 28     | global pointer                  |
+| $sp         | 29     | stack pointer                   |
+| $fp         | 30     | frame pointer                   |
+| $ra         | 31     | return address                  |
+
+One number worth fixing in memory is =$ra= = 31, because =jr $ra= is the standard return: =op= 0, =rs= 31 (=11111=), everything else 0, =funct= 0x08, giving =0x03E00008=. A tutorial slide prints =0x03E00010= — read the low six bits of that word yourself: =010000= is funct 0x10, not =jr='s =001000=. The slide has a typo; the reference card and this kernel both say =0x03E00008=. Type =jr $ra= into any editor on this page, Run, and the Program panel confirms: bytes =03 e0 00 08=.
+
+* Encoding by hand, then checking with the kernel
+
+Encoding is recipe work: pick the format, replace names with numbers, write each field in binary, concatenate left to right, regroup into nibbles from the right, read off eight hex digits. Exams grade the field table as partial credit — always show it.
+
+You never have to trust your arithmetic, either. Type any instruction in the editor, Run, and read the Program panel's bytes column — the kernel is your answer key. It prints four hex pairs, most significant byte first: =add $s0, $s1, $s2= shows as =02 32 80 20=.
+
+Worked example one, =add $s0, $s1, $s2=. Destination first in assembly, but the table is what the machine sees:
+
+| field  | bits  | content              | binary              |
+|--------+-------+----------------------+---------------------|
+| op     | 31–26 | add → 0            | 000000            |
+| rs     | 25–21 | $s1 → 17           | 10001             |
+| rt     | 20–16 | $s2 → 18           | 10010             |
+| rd     | 15–11 | $s0 → 16           | 10000             |
+| shamt  | 10–6  | 0                    | 00000             |
+| funct  | 5–0   | add → 0x20         | 100000            |
+
+Concatenated: =000000 10001 10010 10000 00000 100000=, regrouped into nibbles as =0000 0010 0011 0010 1000 0000 0010 0000= — the digits read 0, 2, 3, 2, 8, 0, 2, 0, so the word is =0x02328020=.
+
+Worked example two, =addi $t1, $t2, -32=. The immediate is negative, so it goes in as 16-bit two's complement: |−32| is =0000 0000 0010 0000=, invert to =1111 1111 1101 1111=, add one → =1111 1111 1110 0000= = 0xFFE0.
+
+| field     | bits  | content              | binary                   |
+|-----------+-------+----------------------+--------------------------|
+| op        | 31–26 | addi → 8           | 001000                 |
+| rs        | 25–21 | $t2 → 10           | 01010                  |
+| rt        | 20–16 | $t1 → 9            | 01001                  |
+| immediate | 15–0  | −32 → 0xFFE0         | 1111 1111 1110 0000    |
+
+The word is =0010 0001 0100 1001 1111 1111 1110 0000= = =0x2149FFE0=. Note the field order: =rs= is the source =$t2=, =rt= is the destination =$t1= — the I-type has no =rd=, and the destination's field position moves. That swap is a standard lost-credit trap.
+
+Worked example three, a branch. In the block below, =beq $s0, $s0, print= sits at word 5 and =print= at word 8; the branch counts from PC+4, which is word 6, so the offset is (8 − 6) = 2 words.
+
+| field     | bits  | content              | binary                   |
+|-----------+-------+----------------------+--------------------------|
+| op        | 31–26 | beq → 4            | 000100                 |
+| rs        | 25–21 | $s0 → 16           | 10000                  |
+| rt        | 20–16 | $s0 → 16           | 10000                  |
+| immediate | 15–0  | offset 2             | 0000000000000010       |
+
+The word is =0x12100002= — always taken, because a register equals itself. The =b label= pseudo uses the same trick with a register that is always zero: it expands to =beq $zero, $zero, label= (though =b= itself is not on the reference card's pseudo list — it is a course-slide extra this kernel accepts).
+
+#+NAME: encode-verify
+#+BEGIN_SRC mips
+# encode-verify.asm — three hand encodings, executed for real
+        .text
+main:   addi    $s1, $zero, 20         # word 0: $s1 = 20
+        addi    $s2, $zero, 22         # word 1: $s2 = 22
+        add     $s0, $s1, $s2          # word 2: 0x02328020 -> $s0 = 42
+        addi    $t2, $zero, 40         # word 3: $t2 = 40
+        addi    $t1, $t2, -32          # word 4: 0x2149FFE0 -> $t1 = 8
+        beq     $s0, $s0, print        # word 5: 0x12100002 -> taken, skips 2 words
+        addi    $s0, $zero, 999        # word 6: skipped
+        addi    $t1, $zero, 999        # word 7: skipped
+print:  move    $a0, $s0               # word 8: print 42
+        li      $v0, 1
+        syscall
+        li      $a0, 10                # '\n'
+        li      $v0, 11
+        syscall
+        move    $a0, $t1               # print 8
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:42
+:8
+
+Run it, then look at the Program panel. The =add= row (word 2) shows =02 32 80 20=, the =addi= row (word 4) shows =21 49 ff e0=, and the =beq= row (word 5) shows =12 10 00 02= — all three match the field tables above, digits for digits. The branch was taken, so words 6 and 7 never ran; the Output panel prints 42 then 8, and the Registers panel ends with =$s0= at =0x0000002a= and =$t1= at =0x00000008=. The words you verified by hand also compute.
+
+* Decoding: hex back to assembly
+
+Decoding runs the recipe backwards, and the first cut is always the top six bits — the opcode. All zeros means R-type: read the funct field, the last six bits. Any other opcode names the instruction by itself, and the format follows. You need the reference card as the lookup table; this is the course-subset slice, every row verified against this kernel's assembler:
+
+| mnemonic   | format | op    | funct   |
+|------------+--------+-------+---------|
+| sll      | R      | 0x00  | 0x00    |
+| srl      | R      | 0x00  | 0x02    |
+| sra      | R      | 0x00  | 0x03    |
+| jr       | R      | 0x00  | 0x08    |
+| syscall  | R      | 0x00  | 0x0C    |
+| add      | R      | 0x00  | 0x20    |
+| sub      | R      | 0x00  | 0x22    |
+| and      | R      | 0x00  | 0x24    |
+| or       | R      | 0x00  | 0x25    |
+| nor      | R      | 0x00  | 0x27    |
+| slt      | R      | 0x00  | 0x2A    |
+| beq      | I      | 0x04  | —       |
+| bne      | I      | 0x05  | —       |
+| addi     | I      | 0x08  | —       |
+| slti     | I      | 0x0A  | —       |
+| andi     | I      | 0x0C  | —       |
+| ori      | I      | 0x0D  | —       |
+| lui      | I      | 0x0F  | —       |
+| lw       | I      | 0x23  | —       |
+| sw       | I      | 0x2B  | —       |
+| j        | J      | 0x02  | —       |
+| jal      | J      | 0x03  | —       |
+
+One row is this kernel's, not the card's: =syscall= (0x00/0x0C) does not
+appear on the F26 reference card, even though the kernel assembles it.
+
+Worked decode one, =0x8D8BFF1C=. Write the nibbles in binary — =1000 1101 1000 1011 1111 1111 0001 1100= — then slice on the format boundaries:
+
+| field     | bits  | binary                   | meaning                          |
+|-----------+-------+--------------------------+----------------------------------|
+| op        | 31–26 | 100011                 | 0x23 → lw, an I-type           |
+| rs        | 25–21 | 01100                  | 12 → $t4, the base             |
+| rt        | 20–16 | 01011                  | 11 → $t3, the destination      |
+| immediate | 15–0  | 1111 1111 0001 1100    | 0xFF1C → −228                    |
+
+Two traps live in that one word. First, =rt= is the destination of a load, not a source — =lw= writes =$t3=. Second, the immediate is negative whenever bit 15 is set: 0xFF1C − 0x10000 = −228. The instruction is =lw $t3, -228($t4)=.
+
+Worked decode two, =0x00128902= → =0000 0000 0001 0010 1000 1001 0000 0010=. The top six bits are zero, so it is R-type and funct decides:
+
+| field  | bits  | binary                | meaning                        |
+|--------+-------+-----------------------+--------------------------------|
+| op     | 31–26 | 000000              | R-type — read funct            |
+| rs     | 25–21 | 00000               | 0, unused                      |
+| rt     | 20–16 | 10010               | 18 → $s2, the source         |
+| rd     | 15–11 | 10001               | 17 → $s1, the destination    |
+| shamt  | 10–6  | 00100               | 4                              |
+| funct  | 5–0   | 000010              | 0x02 → srl                   |
+
+So: =srl $s1, $s2, 4=. The shift trap again — the source rides in =rt= and =rs= is 0; misreading =rs= as the source yields a plausible-looking wrong answer.
+
+The check that catches every slip is the round trip: type your decoded assembly back and read the bytes column. If the listing reproduces the original word, the decode was right. The block below runs both decodes for real. It even picks =$t4= so that =-228($t4)= lands on a word in =.data= — =val= sits at 0x10010000, =$t4= is loaded with 0x100100E4, and 0x100100E4 − 228 = 0x10010000.
+
+#+NAME: decode-roundtrip
+#+BEGIN_SRC mips
+# decode-roundtrip.asm — 0x8D8BFF1C and 0x00128902, re-typed and run
+        .data
+val:    .word   1729                   # the word the decoded lw fetches
+        .text
+main:   la      $t4, val+228           # $t4 = 0x100100E4 — two listing rows
+        lw      $t3, -228($t4)         # 0x8D8BFF1C -> $t3 = 1729
+        addi    $s2, $zero, 160        # $s2 = 160 = 0xA0
+        srl     $s1, $s2, 4            # 0x00128902 -> $s1 = 10
+        move    $a0, $t3               # print 1729
+        li      $v0, 1
+        syscall
+        li      $a0, 10                # '\n'
+        li      $v0, 11
+        syscall
+        move    $a0, $s1               # print 10
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:1729
+:10
+
+Run it, then look at the Program panel: the =lw= row shows =8d 8b ff 1c= and the =srl= row shows =00 12 89 02= — both round trips closed. The Registers panel shows =$t3= = =0x000006c1= (1729, loaded from =val=) and =$s1= = =0x0000000a= (160 shifted right four). The .data panel's first four bytes are =c1 06 00 00= — that is 1729 stored little-endian, the byte order Loads, Stores, and the Byte Addressed World dissects.
+
+* Branch encoding: word offsets from PC+4
+
+A branch cannot carry a 32-bit target address in a 16-bit field, so it does not try. It stores a position relative to itself: the number of instructions between PC+4 and the target. The formula, worth memorizing cold:
+
+offset = (target − (PC+4)) / 4, counted in words from PC+4.
+
+At execution the hardware rebuilds the address: pc = (PC+4) + (signext(imm) << 2). Sign-extend first, then shift left by two — exactly once. The 16-bit signed field counts −32768 to 32767 words from PC+4, roughly ±128 KiB of reach; that is the whole branch range.
+
+Backward branches are the exam's favourite, because two traps bite at once: the offset is negative, and the base is PC+4, not the branch's own address. Compute this one by hand before running the block. Number the words from 0 — the listing's address column does it for you, since word n sits at 0x00400000 + 4n. The =beq= is word 6 at 0x00400018, so PC+4 is word 7 at 0x0040001C; =loop= is word 3 at 0x0040000C. Offset = (0x0040000C − 0x0040001C) / 4 = −16 / 4 = −4, which is 0xFFFC in 16 bits.
+
+#+NAME: backward-beq
+#+BEGIN_SRC mips
+# backward-beq.asm — a bottom-tested loop; the beq points backwards
+        .text
+main:   addi    $t0, $zero, 5          # word 0: n = 5
+        addi    $t2, $zero, 1          # word 1: one = 1
+        addi    $s0, $zero, 0          # word 2: sum = 0
+loop:   add     $s0, $s0, $t0          # word 3: sum += n
+        addi    $t0, $t0, -1           # word 4: n--
+        slt     $t1, $zero, $t0        # word 5: more = (0 < n)
+        beq     $t1, $t2, loop         # word 6: offset -4 (0xFFFC)
+        move    $a0, $s0               # print sum = 15
+        li      $v0, 1
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+RESULTS:
+:15
+
+Now check yourself. Run, then find the =beq= row in the Program panel: bytes =11 2a ff fc=. The fields read op 4, =rs= =$t1= = 9, =rt= =$t2= = 10, immediate 0xFFFC = −4 — the offset you computed. For the execution side, click the =beq='s line number to set a breakpoint, Run, and Step once: the run pauses before the branch with =pc= = =0x00400018=, and one step moves =pc= back to =0x0040000c= — the =loop= label, four words behind PC+4. Step around a full iteration and watch =$t1= hold 1 while the loop repeats, then drop to 0 when =$t0= reaches 0 and the branch stops being taken; the Output panel ends with 15, the sum 5 + 4 + 3 + 2 + 1.
+
+The trap in numbers: measuring this branch from the branch itself gives 3 − 6 = −3; measuring from PC+4 gives 3 − 7 = −4. The tutorial MCQ versions of this question list both (−5 and −6 there) and the wrong one is the tempting one. Off-by-one on the PC+4 base is the single most common encoding error in the course; the ×4 (or <<2) is the second.
+
+* Jump encoding: the 26-bit word address
+
+=j= stores a word address: field = target >> 2. At execution the hardware shifts the field back left by two and glues on the top four bits of PC+4: pc = (PC+4)[31:28] followed by (field << 2). The field supplies 26 bits and the appended zeros two more, so a jump can reach any word-aligned address in the same 2^28-byte — 256 MiB — region as the jump itself. Our text lives at 0x00400000, so (PC+4)[31:28] is 0 and the target is field << 2.
+
+Here is the classic worked example, verified against this kernel. The =j= sits at 0x0040000C and the label at 0x00400018:
+
+#+NAME: jump-example
+#+BEGIN_SRC text
+main:   addi    $t0, $zero, 1          # word 0 @ 0x00400000
+        addi    $t0, $zero, 2          # word 1 @ 0x00400004
+        addi    $t0, $zero, 3          # word 2 @ 0x00400008
+        j       target                 # word 3 @ 0x0040000C
+        addi    $t0, $zero, 4          # word 4 @ 0x00400010 (skipped)
+        addi    $t0, $zero, 5          # word 5 @ 0x00400014 (skipped)
+target: addi    $t0, $zero, 6          # word 6 @ 0x00400018
+#+END_SRC
+
+Field = 0x00400018 >> 2 = 0x0100006. Word = (2 << 26) | 0x0100006 = =0x08100006=. Type the listing into any editor on this page, Run, and the =j= row reads =08 10 00 06=; words 4 and 5 never execute. Decoding runs it backwards: field 0x0100006, shifted left two → 0x00400018; the upper four bits of PC+4 (=0x00400010=) are 0, so the target is 0x00400018.
+
+Two exam regulars. The field stores the word address, not the byte address: =j LOOP= with LOOP at 0x00001000 encodes field 0x00000400, because the >> 2 is not optional. And =jal= uses the identical encoding with op 3, but also writes PC+4 into =$ra= — the return link that Procedures and the Stack builds on.
+
+* The five addressing modes
+
+An addressing mode is the rule for where an operand — or a target address — comes from. The tutorials teach three (base, PC-relative, pseudodirect); the lecture's full count is five. What matters is the formula in the last column:
+
+| mode                 | used by                            | how the operand or address is formed              |
+|----------------------+------------------------------------+---------------------------------------------------|
+| register             | add, sub, slt, shifts, jr  | operand is in a register named by rs/rt/rd        |
+| immediate            | addi, slti, andi, ori      | operand is the 16-bit imm field, sign- or zero-extended |
+| base displacement    | lw, sw                         | address = $rs + signext(imm)                      |
+| PC-relative          | beq, bne                       | target = (PC+4) + (signext(imm) << 2)             |
+| pseudodirect         | j, jal                         | target = (PC+4)[31:28] followed by (field << 2)   |
+
+The MCQs quote these formulas verbatim: branches are PC-relative, jumps are absolute within the same 256 MiB region, and the 26-bit jump field is shifted left 2 then concatenated with the upper 4 bits of PC+4. Know the fill-in-the-blank version: shifted left by 2 bits, concatenated with the upper 4 bits.
+
+* Pseudo versus real: what actually assembles
+
+=li=, =la=, =move=, =nop= are conveniences, not machine instructions. The assembler rewrites each into real instructions before encoding, and the Program panel shows the rewrite as its own rows — two rows, one source line, when the expansion is two words. Every expansion below is quoted from this kernel's assembler:
+
+| pseudo                | expands to                                                       | words |
+|-----------------------+------------------------------------------------------------------+-------|
+| li $v0, 1           | addiu $v0, $zero, 1 (0x24020001; addi works too and matches the lecture's spelling) | 1     |
+| li $t0, 0x12345678  | lui $at, 0x1234 (0x3C011234) + ori $t0, $at, 0x5678 (0x34285678) | 2 |
+| la $t4, val+228     | lui $at, 0x1001 (0x3C011001) + ori $t4, $at, 0x00E4 (0x342C00E4) | 2 |
+| move $a0, $s0       | addu $a0, $zero, $s0 (0x00102021)                            | 1     |
+| nop                 | sll $zero, $zero, 0 (0x00000000)                             | 1     |
+
+Scroll back to the decode block and run it: its first two listing rows are the =la= expansion, =3c 01 10 01= and =34 2c 00 e4=, both pointing at the single source line =la $t4, val+228=. Note that both two-word expansions route through =$at=, register 1 — the assembler's scratch register. Never keep your own data there; a later =la= or big =li= silently overwrites it.
+
+The exam angle: encoding questions are about real instructions, and HW1 restricts you to instructions learnt in class. Expand before you encode — =li $t0, 0x12345678= is two machine words, =0x3C011234= and =0x34285678=, and answering with one word is answering a different question.
+
+* Exam drills this page prepares you for
+
+- A2 — assembly to machine code in hex (HW1 Q2, 12 pts; Q5(a), 8 pts): field tables, two's-complement immediates, branch and jump offsets, and the show-your-work format that earns partial credit.
+- A3 — machine code to assembly: opcode-first decoding, funct for R-types, the shift source in =rt=, sign-bit immediates.
+- A9 — address arithmetic: branch offsets as word counts from PC+4, jump fields as word addresses, the ×4 and >>2 conversions in both directions.
+- A8 — format and addressing-mode theory MCQs: the three layouts and widths, the 26-bit jump field, PC-relative versus absolute-within-256 MiB.
+
+The Exam Gym turns each of these into self-checking drills against this same kernel; this page supplies the method and the traps.
