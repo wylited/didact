@@ -11,22 +11,7 @@ import { pythonKernel } from '@literate/kernel-python';
 import { typstKernel } from '@literate/kernel-typst';
 
 // Nav order, by page file stem (not alphabetical, not glob order).
-const PAGE_ORDER = [
-  'x86-64-assembly', 'riscv', 'mips',
-  'elec2350-01-machine-model',
-  'elec2350-02-arithmetic',
-  'elec2350-03-memory',
-  'elec2350-04-control-flow',
-  'elec2350-05-encoding',
-  'elec2350-06-procedures',
-  'elec2350-07-datapath',
-  'elec2350-08-control',
-  'elec2350-09-pipelining',
-  'elec2350-10-hazards',
-  'elec2350-11-memory-hierarchy',
-  'elec2350-12-exam-gym',
-  'c', 'python', 'typst',
-] as const;
+const PAGE_ORDER = ['x86-64-assembly', 'riscv', 'mips', 'c', 'python', 'typst'] as const;
 
 // Every lesson is one .org file in src/pages; the nav title comes from its
 // #+TITLE: line (the file stem is the fallback).
