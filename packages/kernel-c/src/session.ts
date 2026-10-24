@@ -35,7 +35,8 @@ export class CSession implements Session {
     } catch (e) {
       return {
         ok: false,
-        line: 1,
+        // no line: a toolchain boot failure is not any source line's
+        // fault, so core shows status text without an editor marker
         message: `failed to load the vendored clang toolchain: ${e instanceof Error ? e.message : String(e)}`,
       };
     }
@@ -74,15 +75,17 @@ export class CSession implements Session {
       this.wasmBytes = null;
       this.compileMs = null;
       this.diagText = diag.trim();
-      const parsed =
-        parseDiagnostic(diag, SOURCE) ??
-        {
-          line: 1,
-          message:
-            firstDiagnosticLine(diag) ??
-            `clang failed: ${e instanceof Error ? e.message : String(e)}`,
-        };
-      return { ok: false, ...parsed };
+      const parsed = parseDiagnostic(diag, SOURCE);
+      // No `lesson.c:<line>:<col>:` form (e.g. `wasm-ld: error: undefined
+      // symbol`): report the message without a line — core renders status
+      // text only and pins no editor marker to line 1.
+      const message =
+        parsed?.message ??
+        firstDiagnosticLine(diag) ??
+        `clang failed: ${e instanceof Error ? e.message : String(e)}`;
+      return parsed !== null
+        ? { ok: false, line: parsed.line, message }
+        : { ok: false, message };
     }
   }
 

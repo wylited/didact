@@ -114,6 +114,20 @@ async function main(): Promise<void> {
   s2.reset();
   assert(consoleText(s2) === '' && fieldsOf(s2).length === 0, 'reset clears console and variables');
 
+  // 9. unflushed stdout tail: captured by its own session, never dropped
+  //    and never leaked into the next session's console.
+  const s9 = makeSession();
+  await s9.load("print('no-newline tail', end='')\n");
+  const r9 = await s9.run();
+  assert(r9.finished, 'tail block finished');
+  assert(consoleText(s9) === 'no-newline tail',
+    `unflushed tail captured verbatim (got ${JSON.stringify(consoleText(s9))})`);
+  const s10 = makeSession();
+  await s10.load('print("second")\n');
+  await s10.run();
+  assert(consoleText(s10) === 'second\n',
+    `next session sees only its own output (got ${JSON.stringify(consoleText(s10))})`);
+
   console.log('\nALL PYTHON KERNEL SMOKE CHECKS PASSED');
 }
 

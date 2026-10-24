@@ -20,9 +20,12 @@ export interface RenderedDoc {
   blocks: RenderedBlock[];
 }
 
-// Inline markup: *bold* /italic/ =code= ~verbatim~ (markers must hug a
-// non-space character, so plain math like a/b stays untouched).
-const RE_INLINE = /(\*[^*\s][^*]*\*|\/[^/\s][^/]*\/|=[^=\s][^=]*=|~[^~\s][^~]*~)/g;
+// Inline markup: *bold* /italic/ =code= ~verbatim~. Org emphasis border
+// rules: an opening marker must not follow a word character or `/` (so
+// `add/addu/sub` and `src/core/main.ts` stay plain), and a closing marker
+// must not precede one (so `x/y` mid-word never closes an italic).
+const RE_INLINE =
+  /(?<![\w/])(\*[^*\s][^*]*\*|\/[^/\s][^/]*\/|=[^=\s][^=]*=|~[^~\s][^~]*~)(?![\w/])/g;
 
 /** Render org inline markup into DOM children of `into`. */
 export function renderInline(text: string, into: HTMLElement): void {
@@ -36,7 +39,7 @@ export function renderInline(text: string, into: HTMLElement): void {
     const el = document.createElement(
       m[1] === '*' ? 'strong' : m[1] === '/' ? 'em' : 'code');
     el.classList.add('lw-inline');
-    el.textContent = m[2]!;
+    renderInline(m[2]!, el); // markup nests: /see =la= here/
     into.appendChild(el);
   }
 }
@@ -59,7 +62,14 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
       case 'subtitle': {
         const p = document.createElement('p');
         p.className = 'lw-subtitle';
-        p.textContent = node.text;
+        renderInline(node.text, p);
+        root.appendChild(p);
+        break;
+      }
+      case 'para': {
+        const p = document.createElement('p');
+        p.className = 'lw-para';
+        renderInline(node.text, p);
         root.appendChild(p);
         break;
       }
@@ -67,9 +77,8 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
         const h = document.createElement(
           node.level <= 1 ? 'h2' : node.level === 2 ? 'h3' : 'h4');
         h.className = 'lw-heading';
-        h.textContent = node.text;
+        renderInline(node.text, h);
         root.appendChild(h);
-
         break;
       }
       case 'list': {

@@ -9,8 +9,11 @@
 //    surface as line-0 load failures.
 //  - run() execs to completion (Pyodide has no notion of single-statement
 //    steps, so features.stepping is false and step() never runs). stdout
-//    and stderr are captured via setStdout/setStderr into one buffer, in
-//    write order. The variables panel diffs the namespace before/after:
+//    and stderr are captured via setStdout/setStderr `write` handlers —
+//    every chunk verbatim, in write order — then flushed and reset at run
+//    end, so an unflushed tail neither vanishes nor leaks into the next
+//    session's console over the shared engine. The variables panel diffs
+//    the namespace before/after:
 //    globals defined or changed by the run, keyed by name, value =
 //    repr(value) truncated, sub = type name; dunder/underscore names and
 //    modules are skipped.
@@ -124,16 +127,44 @@ export class PythonSession implements Session {
     }
     return serialized(async () => {
       const before = await this.snapshot(py, ns);
-      py.setStdout({ batched: (s: string) => { this.out.push(s + '\n'); } });
-      py.setStderr({ batched: (s: string) => { this.out.push(s + '\n'); } });
+      // Pyodide's `batched` handlers only deliver complete lines: an
+      // unflushed tail would be dropped here and later leak into whichever
+      // session writes the next newline (the handlers are engine-global).
+      // `write` Writers receive every byte chunk verbatim instead.
+      const stdoutDecoder = new TextDecoder();
+      const stderrDecoder = new TextDecoder();
+      py.setStdout({
+        write: (b) => {
+          this.out.push(stdoutDecoder.decode(b, { stream: true }));
+          return b.length;
+        },
+      });
+      py.setStderr({
+        write: (b) => {
+          this.out.push(stderrDecoder.decode(b, { stream: true }));
+          return b.length;
+        },
+      });
       let error: string | undefined;
+      let traceback: string | undefined;
       try {
         await py.runPythonAsync(src, { globals: ns, filename: FILENAME });
       } catch (e) {
-        const traceback = message(e).trimEnd();
+        traceback = message(e).trimEnd();
         error = traceback.split('\n').pop() ?? traceback;
-        this.out.push(traceback + '\n');
+      } finally {
+        // Drain whatever CPython still holds (print with end='', a partial
+        // stderr line) into THIS session's console, then detach the handlers
+        // so nothing can leak into the next session over the shared engine.
+        try {
+          py.runPython('import sys; sys.stdout.flush(); sys.stderr.flush()');
+        } catch {
+          // flushing must never mask the run's own result
+        }
+        py.setStdout();
+        py.setStderr();
       }
+      if (traceback !== undefined) this.out.push(traceback + '\n');
       const after = await this.snapshot(py, ns);
       this.fields = diff(before, after);
       return error === undefined

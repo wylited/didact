@@ -186,6 +186,9 @@ export class BlockRuntime {
   private readonly resultsEl: HTMLElement | null;
   private readonly sample: string;
   private loadedDoc: string | null = null;
+  /** True while the session sits mid-program (paused or stepped but not
+   *  finished/errored): Run continues instead of restarting from scratch. */
+  private midFlight = false;
   private busy = false;
   private disposed = false;
 
@@ -321,20 +324,36 @@ export class BlockRuntime {
     this.busy = true;
     this.setRunning(true);
     this.setError(null);
-    this.status('running…');
-    const load = await this.session.load(this.source);
-    if (!load.ok) {
-      this.loadedDoc = null;
-      this.finish(load);
-      return;
+    try {
+      // A mid-flight session (paused at a breakpoint, or mid-stepping)
+      // continues; otherwise Run restarts from the current editor text.
+      const resume = this.midFlight && this.loadedDoc === this.source;
+      if (!resume) {
+        this.status('assembling…');
+        const load = await this.session.load(this.source);
+        if (!load.ok) {
+          this.loadedDoc = null;
+          this.midFlight = false;
+          this.finish(load);
+          return;
+        }
+        this.loadedDoc = this.source;
+      }
+      this.status('running…');
+      const result = await this.session.run(this.breakpointLines());
+      if (this.disposed) return;
+      this.setRunning(false);
+      this.midFlight = result.finished !== true && result.error === undefined;
+      this.reportResult(result, 'finished');
+      this.syncAfterExecution();
+    } catch (err) {
+      // a kernel throw must not brick the block (busy flag, outline)
+      this.setRunning(false);
+      this.statusError(`error · ${(err instanceof Error ? err.message : String(err))}`);
+    } finally {
+      this.busy = false;
+      if (!this.disposed) this.events.onActivity(this);
     }
-    this.loadedDoc = this.source;
-    const result = await this.session.run(this.breakpointLines());
-    this.setRunning(false);
-    this.reportResult(result, 'finished');
-    this.syncAfterExecution();
-    this.busy = false;
-    this.events.onActivity(this);
   }
 
   async step(): Promise<void> {
@@ -342,33 +361,43 @@ export class BlockRuntime {
     this.busy = true;
     this.setRunning(true);
     this.setError(null);
-    if (this.loadedDoc !== this.source) {
-      this.status('assembling…');
-      const load = await this.session.load(this.source);
-      if (!load.ok) {
-        this.loadedDoc = null;
-        this.finish(load);
-        return;
+    try {
+      if (this.loadedDoc !== this.source) {
+        this.status('assembling…');
+        const load = await this.session.load(this.source);
+        if (!load.ok) {
+          this.loadedDoc = null;
+          this.midFlight = false;
+          this.finish(load);
+          return;
+        }
+        this.loadedDoc = this.source;
       }
-      this.loadedDoc = this.source;
+      this.status('stepping…');
+      const { ran, result } = await this.session.step();
+      if (this.disposed) return;
+      this.setRunning(false);
+      if (ran && result !== undefined) {
+        this.midFlight = result.finished !== true && result.error === undefined;
+        this.reportResult(result, 'step');
+      } else {
+        this.status('halted · nothing left to execute');
+      }
+      this.syncAfterExecution(result);
+    } catch (err) {
+      this.setRunning(false);
+      this.statusError(`error · ${(err instanceof Error ? err.message : String(err))}`);
+    } finally {
+      this.busy = false;
+      if (!this.disposed) this.events.onActivity(this);
     }
-    this.status('stepping…');
-    const { ran, result } = await this.session.step();
-    this.setRunning(false);
-    if (ran && result !== undefined) {
-      this.reportResult(result, 'step');
-    } else {
-      this.status('halted · nothing left to execute');
-    }
-    this.syncAfterExecution(result);
-    this.busy = false;
-    this.events.onActivity(this);
   }
 
   reset(): void {
     if (this.disposed) return;
     this.session.reset();
     this.loadedDoc = null;
+    this.midFlight = false;
     this.setError(null);
     this.setMarks({ current: null });
     if (this.resultsEl !== null) this.resultsEl.textContent = '';
@@ -422,9 +451,13 @@ export class BlockRuntime {
   }
 
   /** Shared tail for a failed load: red status, line-mapped error, attach. */
-  private finish(load: { line: number; message: string }): void {
+  private finish(load: { line?: number; message: string }): void {
     this.setRunning(false);
-    this.statusError(`error · line ${load.line}: ${load.message}`);
+    this.statusError(
+      load.line !== undefined
+        ? `error · line ${load.line}: ${load.message}`
+        : `error · ${load.message}`,
+    );
     this.setError(load);
     this.setMarks({ current: null });
     this.busy = false;
@@ -463,7 +496,7 @@ export class BlockRuntime {
     this.statusEl.classList.add('lw-status-error');
   }
 
-  private setError(load: { line: number; message: string } | null): void {
+  private setError(load: { line?: number; message: string } | null): void {
     if (load === null) {
       this.errorEl.hidden = true;
       this.errorEl.textContent = '';
@@ -471,8 +504,10 @@ export class BlockRuntime {
       return;
     }
     this.errorEl.hidden = false;
-    this.errorEl.textContent = `line ${load.line}: ${load.message}`;
-    this.setMarks({ error: load.line });
+    // a line-less error (e.g. a linker failure) is text only — no marker
+    this.errorEl.textContent =
+      load.line !== undefined ? `line ${load.line}: ${load.message}` : load.message;
+    this.setMarks({ error: load.line ?? null });
   }
 
   private setRunning(on: boolean): void {

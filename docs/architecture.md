@@ -5,14 +5,20 @@ the app layer. Packages export **source TS** (`main: src/index.ts`); the app
 typechecks and bundles them — no per-package build step, no dist artifacts.
 
 ```
-packages/core            @literate/core     org parser, block runtime, panel host, theme
+packages/core            @literate/core           org parser, block runtime, panel host, theme
 packages/kernel-asm64    @literate/kernel-asm64   x86-64 via Unicorn/Keystone/Capstone wasm
-apps/site                @literate/site     the website (lesson.org + kernel registration)
+packages/kernel-riscv    @literate/kernel-riscv   RV32IM interpreter (pure TypeScript)
+packages/kernel-mips     @literate/kernel-mips    MIPS32 interpreter (pure TypeScript)
+packages/kernel-c        @literate/kernel-c       C via vendored clang wasm (wasm32-wasi)
+packages/kernel-python   @literate/kernel-python  Python via vendored Pyodide
+packages/kernel-typst    @literate/kernel-typst   Typst via vendored compiler wasm + fonts
+apps/site                @literate/site           the website (src/pages/*.org + kernel registration)
 ```
 
-Wiring: app aliases `@literate/core` → `../../packages/core/src` (tsconfig
-`paths` + vite `resolve.alias`); same for kernels. One `tsc --noEmit` in
-`apps/site` covers all three (include `../../packages/*/src`).
+Wiring: app aliases `@literate/core` and each `@literate/kernel-*` →
+`../../packages/*/src` (tsconfig `paths` + vite `resolve.alias`); one
+`tsc --noEmit` in `apps/site` covers all packages (include
+`../../packages/*/src`).
 
 ## Kernel contract (owned by core, verbatim)
 
@@ -53,7 +59,7 @@ export interface ListingRow {
 
 export type LoadResult =
   | { ok: true; summary: string }                 // 'loaded · 8 instructions'
-  | { ok: false; line: number; message: string }; // 1-based source line
+  | { ok: false; line?: number; message: string }; // 1-based source line, if known
 
 export interface RunResult {
   finished: boolean;
@@ -83,6 +89,15 @@ export interface Kernel {
   readonly label: string;             // 'x86-64 · Unicorn'
   /** UI capabilities; a missing/false flag hides the affordance. */
   readonly features?: { breakpoints?: boolean; stepping?: boolean };
+  /** Editor syntax for this kernel's blocks; mapped to a CodeMirror
+   *  language by core (see packages/core/src/languages.ts). */
+  readonly editorSyntax?:
+    | 'asm-intel'
+    | 'asm-riscv'
+    | 'asm-mips'
+    | 'c'
+    | 'python'
+    | 'plain';
   createSession(): Session;
 }
 ```
@@ -113,23 +128,25 @@ today so pyodide-style kernels need no contract change later.
 
 ## kernel-asm64 responsibilities
 
-- Vendor unicorn/keystone/capstone wasm exactly as v0.1
-  `apps/x64-unicorn/public/vendor` (copy it; keep THIRD-PARTY.md + GPLv2
-  notes) — but load via ES imports the app can code-split; loading must
-  stay fetch-free where possible.
-- Port v0.1 `apps/x64-unicorn/src/{asm,machine}.ts` logic: two-pass keystone
-  label resolution, syscall interception, budget, stepping (HOOK_CODE),
-  context restore — reshaped to `Kernel`/`Session`.
+- Vendor unicorn/keystone/capstone wasm under `packages/kernel-asm64/vendor/`
+  (licenses in THIRD-PARTY.md + GPLv2 notes), copied to
+  `apps/site/public/vendor/` for serving; load via ES imports the app can
+  code-split; loading must stay fetch-free where possible.
+- Two-pass keystone label resolution, syscall interception, budget,
+  stepping (HOOK_CODE), context restore — shaped to `Kernel`/`Session`.
 - Panel data: registers fields, EFLAGS fields, disassembly listing
   (row `tip` = the source line's trailing `;` comment), .data hexdump,
   console.
-- Exports `asm64Kernel: Kernel` (id `'asm'`).
+- Exports `asm64Kernel: Kernel` (id `'asm'`, editorSyntax `'asm-intel'`).
 
 ## apps/site responsibilities
 
-- Thin composition: import the lesson org sources raw, register
-  `[asm64Kernel]`, mount with `pages`.
-- `src/lesson.org`: port the v0.1 x86-unicorn lesson, updated workflow copy
-  (per-block controls, breakpoints, panel attach/detach, pages). Two
-  executable blocks (hello; sum loop printing 55).
+- Thin composition: glob `src/pages/*.org` raw, order them by the
+  `PAGE_ORDER` array in `src/main.ts` (stems of the page files; the nav
+  title comes from each file's `#+TITLE:` line), register
+  `[asm64Kernel, riscvKernel, mipsKernel, cKernel, pythonKernel,
+  typstKernel]`, mount with `pages`.
+- `src/pages/*.org`: one lesson per kernel (`x86-64-assembly`, `riscv`,
+  `mips`, `c`, `python`, `typst`), with per-block controls, breakpoints,
+  panel attach/detach, pages.
 - index.html (noscript in body), favicon optional, title plain text.

@@ -123,6 +123,8 @@ export class Machine {
   private stepArmed = false;
   private budgetLeft: number | null = null;
   private breakLines: ReadonlySet<number> | null = null;
+  /** True when this run started on the instruction a breakpoint paused at: skip its check once. */
+  private skipBreakOnce = false;
   private addrLines = new Map<number, number>();
   private trapAddr: number | null = null;
 
@@ -243,6 +245,9 @@ export class Machine {
     this.uc.mem_write(CODE_BASE, this.buildImage());
     this.uc.mem_write(DATA_BASE, new Uint8Array(DATA_SIZE));
     if (this.program.data.length > 0) this.uc.mem_write(DATA_BASE, this.program.data);
+    // context_restore only rewinds registers: clear the stack pages too, or
+    // bytes an earlier run pushed would survive Reset as stale memory.
+    this.uc.mem_write(STACK_BASE, new Uint8Array(STACK_SIZE));
     this.resetDynamicState();
     this.phase = 'loaded';
     this.regsBefore = this.readRegs();
@@ -259,6 +264,7 @@ export class Machine {
       return;
     }
     this.regsBefore = this.readRegs();
+    this.budgetExceeded = false; // a step is a fresh execution; the old run's budget error must not leak into its result
     this.stepMode = true;
     this.stepArmed = false;
     // The paused instruction is about to execute: drop the stale breakpoint
@@ -280,18 +286,23 @@ export class Machine {
       return;
     }
     this.regsBefore = this.readRegs();
+    this.budgetExceeded = false; // fresh budget; a stale flag must not color this run's result
     this.budgetLeft = budget;
     this.breakLines = breakpoints && breakpoints.length > 0 ? new Set(breakpoints) : null;
+    // Resuming on the very instruction a breakpoint paused at must execute
+    // it (matching step() from pause), not re-trip the same line with zero
+    // progress. A loop may legitimately re-trip that line afterwards.
+    this.skipBreakOnce =
+      this.pausedAtLine !== null &&
+      this.addrLines.get(Number(this.regsBefore.rip)) === this.pausedAtLine;
     this.pausedAtLine = null;
     this.invoke(() => this.uc!.emu_start(Number(this.regsBefore.rip), RUN_SENTINEL, 0, 0));
     this.budgetLeft = null;
     this.breakLines = null;
-    if (this.budgetExceeded) {
-      this.phase = 'error';
-      this.afterRun('error');
-    } else {
-      this.afterRun(this.finished ? 'finished' : 'paused');
-    }
+    // Budget exhaustion leaves the machine intact and steppable (riscv
+    // semantics): stay in a non-error phase — the run result carries the
+    // budget error, and a later Step must not report a phantom fault.
+    this.afterRun(this.finished ? 'finished' : 'paused');
   }
 
   private invoke(fn: () => void): void {
@@ -346,10 +357,13 @@ export class Machine {
         }
         this.stepArmed = true;
       } else {
-        // Run mode: stop BEFORE executing an instruction on a breakpoint line.
+        // Run mode: stop BEFORE executing an instruction on a breakpoint
+        // line — except once, for the instruction a resumed run started on.
+        const resumeSkip = this.skipBreakOnce;
+        this.skipBreakOnce = false;
         if (this.breakLines) {
           const line = this.addrLines.get(at);
-          if (line !== undefined && this.breakLines.has(line)) {
+          if (!resumeSkip && line !== undefined && this.breakLines.has(line)) {
             this.pausedAtLine = line;
             uc.emu_stop();
             return;

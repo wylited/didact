@@ -2,10 +2,11 @@
 // raw WebAssembly API — no npm dependency for execution.
 //
 // Implemented (enough for wasi-libc command programs like clang's output):
-//  - fd_write         stdout/stderr captured to strings (other fds: EBADF)
+//  - fd_write         stdout/stderr captured to strings, one decode per
+//                    write (iovecs merged), capped at 1 MiB per stream
 //  - proc_exit        captured as the program's exit code
 //  - random_get       crypto.getRandomValues (xorshift fallback)
-//  - clock_time_get   wall-clock stub: Date.now() in nanoseconds
+//  - clock_time_get   CLOCK_REALTIME: wall clock; other ids: monotonic
 //  - args/environ_*   empty argv and environment
 //  - fd_close, fd_fdstat_get (fds 0–2 are character devices),
 //    fd_fdstat_set_flags: no-ops; fd_seek returns errno 70 (unsupported —
@@ -46,6 +47,14 @@ export interface WasiRunResult {
 const ERRNO_BADF = 8;
 const ERRNO_UNSUPPORTED = 70;
 
+/** wasi clock id of the wall clock; every other id gets monotonic time. */
+const CLOCK_REALTIME = 0;
+
+/** Captured stdout/stderr cap per stream — 1 MiB, as in kernel-asm64. */
+const OUTPUT_LIMIT = 1 << 20;
+/** Appended to a stream that hit the cap. */
+const TRUNCATED_NOTE = '… [output truncated at 1 MiB]';
+
 const SUPPORTED = Object.freeze([
   'fd_write', 'proc_exit', 'random_get', 'clock_time_get',
   'args_sizes_get', 'args_get', 'environ_sizes_get', 'environ_get',
@@ -59,6 +68,11 @@ export function runWasi(module: WebAssembly.Module, budgetMs: number): Promise<W
     const decoder = new TextDecoder();
     let stdout = '';
     let stderr = '';
+    // bytes captured per stream — once a stream reaches OUTPUT_LIMIT it
+    // stops growing, so a runaway printf loop cannot balloon the console
+    // string (the audit's `for (;;) printf` hit 358 MB in 5 s)
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
     let calls = 0;
     const startedAt = now();
 
@@ -82,10 +96,22 @@ export function runWasi(module: WebAssembly.Module, budgetMs: number): Promise<W
       }
     };
 
+    // One merged write, capped: past OUTPUT_LIMIT bytes a stream keeps the
+    // bytes it has and drops the rest (the trailing note is added on return).
     const writeText = (fd: number, bytes: Uint8Array): void => {
-      const text = decoder.decode(bytes);
-      if (fd === 1) stdout += text;
-      else if (fd === 2) stderr += text;
+      if (fd !== 1 && fd !== 2) return;
+      const captured = fd === 1 ? stdoutBytes : stderrBytes;
+      if (captured >= OUTPUT_LIMIT) return;
+      const room = OUTPUT_LIMIT - captured;
+      const take = bytes.length <= room ? bytes : bytes.subarray(0, room);
+      const text = decoder.decode(take);
+      if (fd === 1) {
+        stdout += text;
+        stdoutBytes += take.length;
+      } else {
+        stderr += text;
+        stderrBytes += take.length;
+      }
     };
 
     const shim: Record<string, WasiFn> = {
@@ -93,15 +119,31 @@ export function runWasi(module: WebAssembly.Module, budgetMs: number): Promise<W
         guard();
         if (fd !== 1 && fd !== 2) return ERRNO_BADF;
         const { view: v, buffer } = memory();
+        // Gather every iovec into one byte buffer, then decode once: a
+        // UTF-8 sequence split across iovecs must not be decoded in pieces
+        // (each decode is a complete stream — a lone tail byte would
+        // surface as U+FFFD).
         let total = 0;
+        const parts: Uint8Array[] = [];
         for (let i = 0; i < iovsLen; i++) {
           // wasm32 iovec: { u32 iov_base; u32 iov_len } — 8 bytes
           const base = v.getUint32(iovs + i * 8, true);
           const len = v.getUint32(iovs + i * 8 + 4, true);
-          if (len > 0) writeText(fd, new Uint8Array(buffer, base, len));
+          if (len > 0) parts.push(new Uint8Array(buffer, base, len));
           total += len;
         }
         v.setUint32(nwritten, total, true);
+        if (parts.length === 1) {
+          writeText(fd, parts[0]!);
+        } else if (parts.length > 1) {
+          const merged = new Uint8Array(total);
+          let off = 0;
+          for (const part of parts) {
+            merged.set(part, off);
+            off += part.length;
+          }
+          writeText(fd, merged);
+        }
         return 0;
       },
       proc_exit(code: number): number {
@@ -123,9 +165,18 @@ export function runWasi(module: WebAssembly.Module, budgetMs: number): Promise<W
         }
         return 0;
       },
-      clock_time_get(_clockId: number, _precision: number, time: number): number {
+      clock_time_get(clockId: number, _precision: number, time: number): number {
         guard();
-        memory().view.setBigUint64(time, BigInt(Date.now()) * 1000000n, true);
+        // CLOCK_REALTIME (0) is the wall clock. Every other id —
+        // CLOCK_MONOTONIC (1), CLOCK_PROCESS_CPUTIME_ID (2), … — gets
+        // monotonic nanoseconds since page load: the web has no
+        // per-process CPU-time counter, and unlike Date.now() this never
+        // jumps when the system clock is adjusted.
+        const ns =
+          clockId === CLOCK_REALTIME
+            ? BigInt(Date.now()) * 1000000n
+            : BigInt(Math.round(now() * 1e6));
+        memory().view.setBigUint64(time, ns, true);
         return 0;
       },
       args_sizes_get(argc: number, argvBufSize: number): number {
@@ -209,6 +260,8 @@ export function runWasi(module: WebAssembly.Module, budgetMs: number): Promise<W
         error = e instanceof Error ? e.message : String(e);
       }
     }
+    if (stdoutBytes >= OUTPUT_LIMIT) stdout += TRUNCATED_NOTE;
+    if (stderrBytes >= OUTPUT_LIMIT) stderr += TRUNCATED_NOTE;
     return { stdout, stderr, exitCode, calls, ...(error !== undefined ? { error } : {}) };
   })();
 }

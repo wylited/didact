@@ -43,6 +43,9 @@ export function installTooltips(scope: ParentNode = document): Disposer {
   const onOver = (ev: Event): void => {
     const t = ev.target;
     if (!(t instanceof Element)) return;
+    // a hovered element removed from the DOM fires no pointerout — if the
+    // current target is gone (panel re-render), drop the stale tooltip
+    if (current !== null && !current.isConnected) hide();
     const el = t.closest('[data-tip]');
     if (el === null) { hide(); return; }
     if (el === current) { if (el !== null) place(el); return; }
@@ -69,6 +72,7 @@ export function installTooltips(scope: ParentNode = document): Disposer {
   };
 
   const onScroll = (): void => {
+    if (current !== null && !current.isConnected) { hide(); return; }
     if (current !== null) place(current);
   };
 

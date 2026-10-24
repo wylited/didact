@@ -496,7 +496,8 @@ function isNumericExpr(text: string): boolean {
  * Keystone reads bare numbers as hexadecimal (verified: `mov rax, 60`
  * assembles to 0x60), while teaching material must keep NASM-style decimal
  * semantics; pinning the radix makes the meaning independent of the engine.
- * Quoted literals and `0x`/`0b` prefixes are left untouched.
+ * Quoted literals and `0x`/`0X`/`0b`/`0B`/`0o`/`0O` prefixes are left
+ * untouched.
  */
 function pinNumberRadix(text: string): string {
   let out = '';
@@ -513,10 +514,12 @@ function pinNumberRadix(text: string): string {
       i = j + 1;
       continue;
     }
-    const hex = /^0x[0-9a-fA-F]+/.exec(text.slice(i));
-    if (hex) {
-      out += hex[0];
-      i += hex[0].length;
+    // Prefixed literals already pin their own radix (hex, binary, octal —
+    // both letter cases); hand them to the engine unchanged.
+    const prefixed = /^0[xX][0-9a-fA-F]+|^0[bB][01]+|^0[oO][0-7]+/.exec(text.slice(i));
+    if (prefixed) {
+      out += prefixed[0];
+      i += prefixed[0].length;
       continue;
     }
     const dec = /^\d+/.exec(text.slice(i));

@@ -37,7 +37,7 @@ export interface ListingRow {
 
 export type LoadResult =
   | { ok: true; summary: string }                 // 'loaded · 8 instructions'
-  | { ok: false; line: number; message: string }; // 1-based source line
+  | { ok: false; line?: number; message: string }; // 1-based source line, if known
 
 export interface RunResult {
   finished: boolean;

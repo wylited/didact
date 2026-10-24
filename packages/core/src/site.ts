@@ -76,13 +76,14 @@ export function mountSite(opts: MountOptions): SiteHandle {
 
   let active = -1;
   let blocks: BlockRuntime[] = [];
-  const links = pages.map((page) => {
+  const slugs = pageSlugs(pages);
+  const links = pages.map((page, i) => {
     const a = document.createElement('a');
     a.className = 'lw-nav-link';
     a.dataset.test = 'nav-item';
     // real fragment href: the click sets the hash, hashchange does the
     // switch (so the URL always names the visible page)
-    a.href = `#/${pageSlug(page.title)}`;
+    a.href = `#/${slugs[i]}`;
     a.textContent = page.title;
     nav.appendChild(a);
     return a;
@@ -120,10 +121,10 @@ export function mountSite(opts: MountOptions): SiteHandle {
   }
   // deep link: show the page named by the hash, first page otherwise;
   // later hash changes (nav clicks, back/forward) switch pages
-  const onHashChange = (): void => show(indexFromHash(pages));
+  const onHashChange = (): void => show(indexFromHash(slugs));
   window.addEventListener('hashchange', onHashChange);
   panel.detach(); // start detached: single centered column until first run/step
-  show(indexFromHash(pages));
+  show(indexFromHash(slugs));
   const disposeTooltips = installTooltips(root);
 
   return {
@@ -147,15 +148,25 @@ export function mountSite(opts: MountOptions): SiteHandle {
 }
 
 /** URL fragment slug for a page title: lowercase, non-alphanumeric runs
- *  collapsed to single '-' (the `#/` deep-link name). */
-function pageSlug(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+ *  collapsed to single '-'. Titles with no ASCII (or colliding slugs)
+ *  fall back to `page-N` so every page stays reachable. */
+function pageSlug(title: string, index: number, taken: Set<string>): string {
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (slug === '' || taken.has(slug)) return `page-${index}`;
+  taken.add(slug);
+  return slug;
+}
+
+/** Slugs for a whole page list (order-stable, collision-free). */
+function pageSlugs(pages: PageSpec[]): string[] {
+  const taken = new Set<string>();
+  return pages.map((p, i) => pageSlug(p.title, i, taken));
 }
 
 /** Page index named by `location.hash` (`#/<slug>`); unknown or missing
  *  hash resolves to the first page. */
-function indexFromHash(pages: PageSpec[]): number {
+function indexFromHash(slugs: string[]): number {
   const slug = location.hash.replace(/^#\//, '');
-  const index = pages.findIndex((p) => pageSlug(p.title) === slug);
+  const index = slugs.indexOf(slug);
   return index === -1 ? 0 : index;
 }

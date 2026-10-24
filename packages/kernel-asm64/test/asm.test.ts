@@ -31,6 +31,15 @@ function stdEncoder(text: string, addr: number): number[] | null {
   if (text === 'ret') return [0xc3];
   if (text === 'syscall') return [0x0f, 0x05];
   if (text === 'mov rax, 0x3c') return [0x48, 0xc7, 0xc0, 0x3c, 0x00, 0x00, 0x00];
+  const movRadix = /^mov r(ax|bx|cx|dx), (0[bB][01]+|0[oO][0-7]+)$/.exec(text);
+  if (movRadix) {
+    // Fixed encoding for prefixed literals: REX.W C7 /0 imm32 carrying the
+    // literal's own value — proves the text reached the engine untouched.
+    const reg = { ax: 0, cx: 1, dx: 2, bx: 3 }[movRadix[1] as 'ax' | 'bx' | 'cx' | 'dx'];
+    const lit = movRadix[2]!;
+    const imm = Number.parseInt(lit.slice(2), lit[1] === 'b' || lit[1] === 'B' ? 2 : 8);
+    return [0x48, 0xc7, 0xc0 | reg, imm & 0xff, 0, 0, 0];
+  }
   const jmp = /^jmp 0x([0-9a-f]+)$/.exec(text);
   if (jmp) {
     // rel8 short jump; verifies the assembler resolved the label to the
@@ -116,6 +125,40 @@ describe('assemble: exact encoding of a fixed instruction sequence', () => {
       { line: 2, addr: CODE_BASE, size: 7, text: 'mov rax, 0x3c' },
       { line: 3, addr: CODE_BASE + 7, size: 2, text: 'syscall' },
       { line: 4, addr: CODE_BASE + 9, size: 1, text: 'ret' },
+    ]);
+  });
+});
+
+describe('assemble: radix pinning leaves prefixed literals untouched', () => {
+  it('hands 0b/0B/0o/0O literals to the engine verbatim (decimal still pinned)', () => {
+    const src = [
+      'start:', // line 1
+      '    mov rax, 0b101', // line 2 → binary 5
+      '    mov rbx, 0B11', // line 3 → binary 3
+      '    mov rcx, 0o17', // line 4 → octal 15
+      '    mov rdx, 0O7', // line 5 → octal 7
+      '    ret', // line 6
+    ].join('\n');
+    const r = assemble(src, ks());
+    if (!r.ok) throw new Error(`expected ok, got ${JSON.stringify(r.errors)}`);
+
+    // The engine must see the user's literal text: rewriting `0b101` to
+    // `0x0b101` (=45313) or `0o17` to `0x0o17` changes or breaks the program.
+    expect(r.program.sourceLines.map((l) => l.text)).toEqual([
+      'mov rax, 0b101',
+      'mov rbx, 0B11',
+      'mov rcx, 0o17',
+      'mov rdx, 0O7',
+      'ret',
+    ]);
+    // Each `mov r, imm32` is 7 bytes; byte 4 of each is the value the
+    // encoder derived from the ORIGINAL literal: 5, 3, 15, 7.
+    expect([...r.program.code]).toEqual([
+      0x48, 0xc7, 0xc0, 5, 0, 0, 0,
+      0x48, 0xc7, 0xc3, 3, 0, 0, 0,
+      0x48, 0xc7, 0xc1, 15, 0, 0, 0,
+      0x48, 0xc7, 0xc2, 7, 0, 0, 0,
+      0xc3,
     ]);
   });
 });

@@ -19,6 +19,8 @@ import { ABI_NAMES, DATA_BASE, TEXT_BASE, type WordRow } from './asm';
 const PAGE = 4096;
 const STACK_INIT = 0x7fff_effc; // SPIM's initial $sp
 const GP_INIT = 0x1000_8000;    // SPIM's $gp (global-pointer area base)
+/** Stack segment: stores below this line may map pages on demand. */
+const STACK_LOW = 0x7ff0_0000;
 const INT32_MIN = -0x8000_0000, INT32_MAX = 0x7fff_ffff;
 const MAX_STRING = 4096;        // print_string runaway guard
 
@@ -36,7 +38,9 @@ export class MipsMachine {
   exitCode: number | null = null;
   error: string | null = null;
   steps = 0;
-  /** Names ('t0', 'hi', 'pc', …) written by the last executed instruction. */
+  /** Source line the machine is parked on (last breakpoint pause), if
+   *  any; cleared once execution moves to a different line. */
+  parkedLine: number | null = null;
   readonly changed = new Set<string>();
   readonly words: readonly WordRow[];
   readonly dataLen: number;
@@ -62,14 +66,28 @@ export class MipsMachine {
   /** Run until finished/error/budget, or *before* an instruction whose
    *  source line is in `breakpoints`; returns the paused line or null. */
   run(budget: number, breakpoints: ReadonlySet<number> | null): number | null {
+    // Resuming a parked machine must not immediately re-trip the
+    // breakpoint it is parked on: skip every word of the entry line once
+    // (a pseudo-op expands to several words with the same source line);
+    // once execution moves to a different line, later hits pause again.
+    const entryLine = this.lineMap.get(this.pc)?.line;
+    let resuming = this.parkedLine !== null && entryLine === this.parkedLine;
     while (!this.finished && this.error === null) {
       if (this.steps >= budget) {
         this.error = `instruction budget of ${budget.toLocaleString('en-US')} steps exceeded — this looks like an infinite loop`;
         break;
       }
       const info = this.lineMap.get(this.pc);
-      if (info !== undefined && breakpoints !== null && breakpoints.has(info.line)) return info.line;
+      if (info !== undefined && breakpoints !== null && breakpoints.has(info.line)) {
+        if (!resuming || info.line !== entryLine) {
+          this.parkedLine = info.line;
+          return info.line;
+        }
+      }
+      if (resuming && info !== undefined && info.line !== entryLine) resuming = false;
       this.step();
+      const nowLine = this.lineMap.get(this.pc)?.line;
+      if (nowLine !== undefined && nowLine !== this.parkedLine) this.parkedLine = null;
     }
     return null;
   }
@@ -149,6 +167,15 @@ export class MipsMachine {
         const at = (a + i) >>> 0;
         if (at >= TEXT_BASE && at < this.textEnd) {
           this.fail(line, `${src}: ${mnem} store into .text at 0x${hex8(at)} — .text is read-only in this kernel`);
+          return;
+        }
+        // Wild stores must not silently succeed (and must not map pages):
+        // only already-mapped pages (text/data) and the stack segment
+        // accept writes; everything else is an unmapped-store fault, as
+        // in SPIM.
+        const inStack = at >= STACK_LOW && at < 0x8000_0000;
+        if (!inStack && !this.pages.has(at & ~(PAGE - 1))) {
+          this.fail(line, `${src}: ${mnem} store to unmapped memory at 0x${hex8(at)} (data is at 0x10010000, the stack grows down from 0x7fffeffc)`);
           return;
         }
         this.write8(at, val >>> (8 * i));
@@ -268,6 +295,9 @@ export class MipsMachine {
     if (this.error !== null) return;
     this.pc = next >>> 0;
     this.steps++;
+    // a manual step leaves the park once execution moves to a new line
+    const nowLine = this.lineMap.get(this.pc)?.line;
+    if (nowLine !== undefined && nowLine !== this.parkedLine) this.parkedLine = null;
   }
 
   /** Listing index of the instruction at pc (about to execute), or −1. */

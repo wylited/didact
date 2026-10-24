@@ -11,9 +11,11 @@ org `#+BEGIN_SRC` language tag. Each kernel contributes an **under-the-hood
 view** (machine panel); the only tooltips are source-line comments on
 listing rows.
 
-First kernel: x86-64 assembly via Unicorn/Keystone/Capstone WASM (from v0.1
-`apps/x64-unicorn`). The system must make adding kernels (python, typst, …)
-a matter of implementing one package against `docs/architecture.md`.
+Kernels: x86-64 assembly via Unicorn/Keystone/Capstone WASM (from v0.1
+`apps/x64-unicorn`), RV32IM and MIPS32 interpreters, C via clang wasm,
+Python via Pyodide, and Typst via its compiler wasm. The system must make
+adding kernels a matter of implementing one package against
+`docs/architecture.md`.
 
 ## Behavior
 
@@ -123,9 +125,11 @@ The org file must remain valid org-babel source in Emacs.
 The site app (`apps/site`) owns no rendering: `src/main.ts` mounts core with
 the kernel registry and every `.org` in `apps/site/src/pages/` (imported via
 Vite `import.meta.glob('./pages/*.org', { query: '?raw', eager: true })`).
-Drop a new `<name>.org` there and a nav entry appears — the title is the
-file's `#+TITLE:` line (file name as fallback); the nav order is the explicit
-`PAGE_ORDER` list in `main.ts`. A block is executable when its
+Drop a new `<name>.org` there and add its stem to the `PAGE_ORDER` list in
+`main.ts` — a nav entry appears at that position, titled from the file's
+`#+TITLE:` line (file name as fallback). A globbed file missing from
+`PAGE_ORDER` logs a console warning and is skipped; zero resolvable pages
+is a hard error. A block is executable when its
 `#+BEGIN_SRC <lang>` language matches a registered kernel id; anything else
 renders read-only.
 

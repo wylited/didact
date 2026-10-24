@@ -115,16 +115,17 @@ class AsmFailure extends Error {
   constructor(readonly line: number, message: string) { super(message); }
 }
 
-/** Split a comma-separated operand list; commas inside "strings" and
- *  `off($reg)` groups never appear at top level except legitimately. */
+/** Split a comma-separated operand list; commas inside "strings", 'char
+ *  literals' and `off($reg)` groups never appear at top level. */
 function splitOps(s: string): string[] {
   const out: string[] = [];
   let cur = '';
-  let inStr = false;
+  let inStr = false, inChr = false;
   for (let i = 0; i < s.length; i++) {
     const ch = s[i]!;
-    if (ch === '"' && s[i - 1] !== '\\') inStr = !inStr;
-    if (ch === ',' && !inStr) { out.push(cur.trim()); cur = ''; continue; }
+    if (ch === '"' && !inChr && s[i - 1] !== '\\') inStr = !inStr;
+    else if (ch === "'" && !inStr && s[i - 1] !== '\\') inChr = !inChr;
+    if (ch === ',' && !inStr && !inChr) { out.push(cur.trim()); cur = ''; continue; }
     cur += ch;
   }
   out.push(cur.trim());
@@ -285,19 +286,46 @@ function expandStaged(s: StagedInsn, resolve: (name: string) => number): Real[] 
   if (!(LOADS_STORES as readonly string[]).includes(s.mnem)) return expand(s.mnem, s.ops, s.line, s.text, resolve);
   need(s.mnem, s.ops, 2, s.line);
   const operand = s.ops[1]!;
-  if (!/^(.*)\(\$\w+\)$/.test(operand)) {
-    const e = parseImmExpr(operand, s.line);
-    const bigConst = e.kind === 'const' && (e.value < INT16_MIN || e.value > INT16_MAX);
-    if (e.kind === 'label' || bigConst) {
-      const target = ((e.kind === 'label' ? resolve(e.name) + e.offset : e.value) >>> 0);
-      const hi = ((target + 0x8000) >>> 16) & 0xffff;   // compensate lo ≥ 0x8000
-      const lo = target & 0xffff;
-      const loSigned = lo >= 0x8000 ? lo - 0x10000 : lo;
-      return [
-        { mnem: 'lui', ops: ['$at', String(hi)], line: s.line, text: s.text },
-        { mnem: s.mnem, ops: [s.ops[0]!, `${loSigned}($at)`], line: s.line, text: s.text },
-      ];
+  // `off($reg)`: stays one word when the offset is a small constant; a
+  // label or big-constant offset with a base register becomes
+  // lui $at, hi / addu $at, $at, base / op rt, lo($at) (SPIM-style
+  // label+base addressing, always exactly 3 words).
+  const withBase = /^(.*)\((\$\w+)\)$/.exec(operand);
+  if (withBase !== null) {
+    const offStr = withBase[1]!.trim();
+    if (offStr !== '') {
+      let big = false, target = 0;
+      try {
+        const e = parseImmExpr(offStr, s.line);
+        if (e.kind === 'label') { target = (resolve(e.name) + e.offset) >>> 0; big = true; }
+        else if (e.value < INT16_MIN || e.value > INT16_MAX) { target = e.value >>> 0; big = true; }
+      } catch { /* junk offset: let the encoder produce its own error */ }
+      if (big) {
+        const hi = ((target + 0x8000) >>> 16) & 0xffff;   // compensate lo ≥ 0x8000
+        const lo = target & 0xffff;
+        const loSigned = lo >= 0x8000 ? lo - 0x10000 : lo;
+        const base = withBase[2]!;
+        return [
+          { mnem: 'lui', ops: ['$at', String(hi)], line: s.line, text: s.text },
+          { mnem: 'addu', ops: ['$at', '$at', base], line: s.line, text: s.text },
+          { mnem: s.mnem, ops: [s.ops[0]!, `${loSigned}($at)`], line: s.line, text: s.text },
+        ];
+      }
     }
+    return expand(s.mnem, s.ops, s.line, s.text, resolve);
+  }
+  // bare label or big absolute (no base register): lui $at + op lo($at)
+  const e = parseImmExpr(operand, s.line);
+  const bigConst = e.kind === 'const' && (e.value < INT16_MIN || e.value > INT16_MAX);
+  if (e.kind === 'label' || bigConst) {
+    const target = ((e.kind === 'label' ? resolve(e.name) + e.offset : e.value) >>> 0);
+    const hi = ((target + 0x8000) >>> 16) & 0xffff;   // compensate lo ≥ 0x8000
+    const lo = target & 0xffff;
+    const loSigned = lo >= 0x8000 ? lo - 0x10000 : lo;
+    return [
+      { mnem: 'lui', ops: ['$at', String(hi)], line: s.line, text: s.text },
+      { mnem: s.mnem, ops: [s.ops[0]!, `${loSigned}($at)`], line: s.line, text: s.text },
+    ];
   }
   return expand(s.mnem, s.ops, s.line, s.text, resolve);
 }
@@ -423,11 +451,12 @@ function lex(src: string): { lines: Line[]; comments: Map<number, string> } {
   const raw = src.split(/\r?\n/);
   for (let i = 0; i < raw.length; i++) {
     const text = raw[i]!;
-    let inStr = false, hash = -1;
+    let inStr = false, inChr = false, hash = -1;
     for (let c = 0; c < text.length; c++) {
       const ch = text[c]!;
-      if (ch === '"' && text[c - 1] !== '\\') inStr = !inStr;
-      else if (ch === '#' && !inStr) { hash = c; break; }
+      if (ch === '"' && !inChr && text[c - 1] !== '\\') inStr = !inStr;
+      else if (ch === "'" && !inStr && text[c - 1] !== '\\') inChr = !inChr;
+      else if (ch === '#' && !inStr && !inChr) { hash = c; break; }
     }
     const comment = hash >= 0 ? text.slice(hash + 1).trim() : '';
     const body = (hash >= 0 ? text.slice(0, hash) : text).trim();
@@ -482,19 +511,27 @@ export function assemble(src: string): AssembleResult {
   // 16 bits — so label-dependent expansions keep their 2-word shape here.
   const placeholder = () => TEXT_BASE;
 
-  // ---- Pass 1: labels, .data sizing, .text sizing ---------------------------
   let section: 'data' | 'text' = 'text';
   let dataOff = 0, textWords = 0;
   const dataAlign = (n: number, line: number): void => {
     if (n < 0 || n > 16) throw new AsmFailure(line, `.align ${n} is out of range`);
     dataOff = Math.ceil(dataOff / (1 << n)) * (1 << n);
   };
+  // Labels in .data bind lazily: a label in front of `.word`/`.half` must
+  // name the *aligned* item (`.byte 1` then `w: .word 5` → w is the word's
+  // address, not the unaligned byte cursor).
+  let pendingDataLabels: string[] = [];
+  const bindDataLabels = (): void => {
+    for (const name of pendingDataLabels) labels.set(name, DATA_BASE + dataOff);
+    pendingDataLabels = [];
+  };
   for (const { num, body } of lines) {
     try {
       let rest = body;
       for (let l = takeLabel(rest); l !== null; l = takeLabel(rest)) {
         if (labels.has(l.name)) throw new AsmFailure(num, `label '${l.name}' is defined twice`);
-        labels.set(l.name, section === 'text' ? TEXT_BASE + textWords * 4 : DATA_BASE + dataOff);
+        if (section === 'text') labels.set(l.name, TEXT_BASE + textWords * 4);
+        else pendingDataLabels.push(l.name);
         rest = l.rest;
       }
       if (rest === '') continue;
@@ -503,6 +540,7 @@ export function assemble(src: string): AssembleResult {
 
       if (head === '.text' || head === '.data') {
         if (operandStr !== '') throw new AsmFailure(num, `${head} takes no address in this kernel (segments are fixed)`);
+        bindDataLabels(); // a trailing .data label binds at the current cursor
         section = head === '.text' ? 'text' : 'data';
         continue;
       }
@@ -514,12 +552,20 @@ export function assemble(src: string): AssembleResult {
           need(head, ops, 1, num);
           const n = parseConst(ops[0]!, num);
           if (n < 0 || n > 0x10000) throw new AsmFailure(num, `.space ${n} is out of range`);
+          bindDataLabels();
           dataOff += n;
-        } else if (head === '.word') { need(head, ops, 1, num); dataAlign(2, num); dataOff += ops.length * 4; }
-        else if (head === '.half') { need(head, ops, 1, num); dataAlign(1, num); dataOff += ops.length * 2; }
-        else if (head === '.byte') { need(head, ops, 1, num); dataOff += ops.length; }
-        else if (head === '.ascii' || head === '.asciiz') {
+        } else if (head === '.word') {
+          if (ops.length < 1) throw new AsmFailure(num, '.word needs at least one value');
+          dataAlign(2, num); bindDataLabels(); dataOff += ops.length * 4;
+        } else if (head === '.half') {
+          if (ops.length < 1) throw new AsmFailure(num, '.half needs at least one value');
+          dataAlign(1, num); bindDataLabels(); dataOff += ops.length * 2;
+        } else if (head === '.byte') {
+          if (ops.length < 1) throw new AsmFailure(num, '.byte needs at least one value');
+          bindDataLabels(); dataOff += ops.length;
+        } else if (head === '.ascii' || head === '.asciiz') {
           need(head, ops, 1, num);
+          bindDataLabels();
           for (const o of ops) dataOff += decodeString(o, num).length + (head === '.asciiz' ? 1 : 0);
         } else throw new AsmFailure(num, `unknown directive '${head}' in .data`);
         continue;
@@ -534,6 +580,7 @@ export function assemble(src: string): AssembleResult {
       else throw e;
     }
   }
+  bindDataLabels(); // a trailing .data label binds at the final cursor
   if (errors.length > 0) return { ok: false, errors };
 
   // ---- Pass 2: resolve labels, expand, encode -------------------------------
@@ -575,19 +622,29 @@ export function assemble(src: string): AssembleResult {
         off = Math.ceil(off / 4) * 4;
         for (const o of ops) {
           const e = parseImmExpr(o, num);
-          const v = ((e.kind === 'label' ? resolve(e.name) + e.offset : e.value) >>> 0);
-          data.set([v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff], off);
+          const v = (e.kind === 'label' ? resolve(e.name) + e.offset : e.value);
+          if (v < -0x8000_0000 || v > 0xffff_ffff)
+            throw new AsmFailure(num, `.word value ${v} does not fit in 32 bits`);
+          const u = v >>> 0;
+          data.set([u & 0xff, (u >>> 8) & 0xff, (u >>> 16) & 0xff, (u >>> 24) & 0xff], off);
           off += 4;
         }
       } else if (head === '.half') {
         off = Math.ceil(off / 2) * 2;
         for (const o of ops) {
-          const v = parseConst(o, num) & 0xffff;
+          const v = parseConst(o, num);
+          if (v < -0x8000 || v > 0xffff)
+            throw new AsmFailure(num, `.half value ${v} does not fit in 16 bits`);
           data.set([v & 0xff, (v >>> 8) & 0xff], off);
           off += 2;
         }
       } else if (head === '.byte') {
-        for (const o of ops) data[off++] = parseConst(o, num) & 0xff;
+        for (const o of ops) {
+          const v = parseConst(o, num);
+          if (v < -128 || v > 255)
+            throw new AsmFailure(num, `.byte value ${v} does not fit in 8 bits`);
+          data[off++] = v & 0xff;
+        }
       } else if (head === '.ascii' || head === '.asciiz') {
         for (const o of ops) {
           data.set(decodeString(o, num), off);

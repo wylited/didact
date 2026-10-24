@@ -4,16 +4,13 @@
   "version": "0.1.0",
   "description": "Client-side literate-programming website prototypes: org-mode lessons with executable, steppable assembly blocks",
   "scripts": {
-    "build": "pnpm --dir apps/site build",
-    "dev": "pnpm --dir apps/site dev",
+    "build": "node scripts/sync-vendors.mjs && pnpm --dir apps/site build",
+    "dev": "node scripts/sync-vendors.mjs && pnpm --dir apps/site dev",
     "preview": "pnpm --dir apps/site preview",
     "typecheck": "pnpm --dir apps/site exec tsc --noEmit",
     "test": "vitest run && pnpm test:smoke",
     "test:smoke": "bun packages/kernel-riscv/test/smoke.ts && bun packages/kernel-mips/test/smoke.ts && bun packages/kernel-python/test/smoke.ts && bun packages/kernel-c/test/smoke.ts",
-    "lint": "eslint .",
-    "dev:x64-unicorn": "pnpm --dir apps/x64-unicorn dev",
-    "dev:x64-lite": "pnpm --dir apps/x64-lite dev",
-    "dev:riscv-lite": "pnpm --dir apps/riscv-lite dev"
+    "lint": "eslint ."
   },
   "devDependencies": {
     "eslint": "^10.13.0",
