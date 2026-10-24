@@ -4,10 +4,9 @@
 // (sign extension, M extension, ecall I/O), and the Session contract
 // (panels, breakpoints/pausedAt, step-from-pause, reset, changed flags).
 
-import { assemble, TEXT_BASE } from '../src/asm';
+import { assemble, TEXT_BASE, type Assembled } from '../src/asm';
 import { Cpu } from '../src/cpu';
 import { riscvKernel } from '../src/kernel';
-import { assemble, TEXT_BASE, type Assembled } from '../src/asm';
 
 type FieldsPanel = Extract<Panel, { kind: 'fields' }>;
 type ListingPanel = Extract<Panel, { kind: 'listing' }>;
@@ -410,9 +409,9 @@ console.log('session · budget & load errors');
 // ─── lesson/lesson.org: every block runs and matches its #+RESULTS: ───
 console.log('session · lesson round-trip');
 {
-  const org = await Bun.file('lesson/lesson.org').text();
   const blocks: string[] = [];
   const expected: string[] = [];
+  const org = await Bun.file(`${import.meta.dir}/../lesson/lesson.org`).text();
   const lines = org.split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (lines[i]!.startsWith('#+BEGIN_SRC riscv')) {

@@ -1,0 +1,153 @@
+#+TITLE: RISC-V in an Afternoon
+#+SUBTITLE: RV32IM assembly on a machine you can single-step, one instruction at a time
+
+* The machine you are about to drive
+
+A RISC-V RV32IM processor has 32 registers, =x0= through =x31=, and almost
+no surprises. /RISC/ stands for *Reduced Instruction Set Computer*: every
+instruction is exactly four bytes, reads at most two registers, and writes
+at most one — a machine small enough to hold in your head. The /M/ in
+RV32IM adds /m/ultiplication and /d/ivision to the base integer set.
+Register =x0= is hard-wired to zero (writes to it are discarded), which
+hands you constants, comparisons and moves for free. The registers also
+have /ABI names/, the calling conventions real programs use:
+
+| Register      | ABI name  | Convention                |
+|---------------+-----------+---------------------------|
+| x0            | zero      | always 0                  |
+| x1            | ra        | return address            |
+| x2            | sp        | stack pointer             |
+| x10–x17       | a0–a7     | arguments, ecall services |
+| x5–x7, x28–31 | t0–t6     | temporaries               |
+| x8–x9, x18–27 | s0–s11    | saved across calls        |
+
+There is no flags register: where x86 computes a condition and branches on
+it later, RISC-V /compares and branches in one instruction/ (=blt=, =bne=,
+…), so the panel shows a *branch context* — the operands and outcome of the
+most recent branch — instead of flags.
+
+# The line above is an org comment — the site hides it.
+
+* Programs talk with ecall
+
+There is no operating system here, just a small syscall convention in the
+spirit of venus and RARS: put a /service number/ in =a7=, any argument in
+=a0=, then execute the =ecall= instruction.
+
+| =a7= | Service      | Effect                              |
+|------+--------------+-------------------------------------|
+| 1    | print int    | write =a0= as a signed decimal      |
+| 4    | print string | write NUL-terminated bytes at =a0=  |
+| 11   | print char   | write the low byte of =a0=          |
+| 10   | exit         | stop the program                    |
+| 93   | exit         | same as 10 (Linux convention)       |
+
+* Block 1: hello, ecall
+
+The classic first program prints =Hello, RISC-V!= and a newline. =la=
+/loads the address/ of a label into a register and =li= /loads an
+immediate/; between them we point =a0= at the string and =a7= at service 4.
+Edit the text between the quotes and run it again.
+
+#+NAME: hello
+#+BEGIN_SRC riscv
+        .text
+hello:
+        la      a0, msg        # a0 -> address of the string
+        li      a7, 4          # service 4: print string
+        ecall
+        li      a0, 10         # '\n'
+        li      a7, 11         # service 11: print char
+        ecall
+        li      a0, 0          # exit code 0
+        li      a7, 10         # service 10: exit
+        ecall
+
+        .data
+msg:
+        .asciz "Hello, RISC-V!"
+#+END_SRC
+
+#+RESULTS:
+: Hello, RISC-V!
+
+* Block 2: a loop that adds 1..10
+
+A loop needs three things: an /induction variable/, a /limit/, and a
+backwards branch. Here =t0= counts from 1, =t2= accumulates the sum, and
+=blt t1, t0, done= leaves the loop once the counter passes the limit. Step
+through it and watch the accent color follow the registers around the loop;
+the program prints =55=.
+
+#+NAME: sum-loop
+#+BEGIN_SRC riscv
+        .text
+        li      t0, 1          # i = 1
+        li      t1, 10         # limit = 10
+        li      t2, 0          # sum = 0
+loop:
+        add     t2, t2, t0     # sum += i
+        addi    t0, t0, 1      # i++
+        blt     t1, t0, done   # if 10 < i, leave the loop
+        j       loop
+done:
+        mv      a0, t2         # a0 = 55
+        li      a7, 1          # service 1: print int
+        ecall
+        li      a0, 10         # newline
+        li      a7, 11
+        ecall
+        li      a0, 0
+        li      a7, 10         # exit
+        ecall
+#+END_SRC
+
+#+RESULTS:
+: 55
+
+* Block 3: memory, one byte at a time
+
+Loads come in signed and unsigned flavours: =lb= /sign-extends/ the byte it
+reads, while =lbu= zero-extends it. Below we store =-1= (four =FF= bytes)
+with =sw=, read the first byte both ways, and print the difference: =-1=
+then =255=. Find the overwritten =FF= bytes in the =.data= hex view.
+
+#+NAME: bytes
+#+BEGIN_SRC riscv
+        .text
+        li      t0, -1         # 0xFFFFFFFF
+        la      t1, buf        # t1 -> scratch word in .data
+        sw      t0, 0(t1)      # store the word: FF FF FF FF
+        lb      a0, 0(t1)      # sign-extend byte FF -> -1
+        li      a7, 1          # print int
+        ecall
+        li      a0, 32         # ' '
+        li      a7, 11         # print char
+        ecall
+        lbu     a0, 0(t1)      # zero-extend byte FF -> 255
+        li      a7, 1
+        ecall
+        li      a0, 10         # newline
+        li      a7, 11
+        ecall
+        li      a0, 0
+        li      a7, 10         # exit
+        ecall
+
+        .data
+buf:
+        .word 0
+#+END_SRC
+
+#+RESULTS:
+: -1 255
+
+* Where to go next
+
+- Print =t0= with service 1 /inside/ the loop body to see every partial sum.
+- Replace =blt= with =bge= and swap the operands — same exit, a different
+  comparison to reason about.
+- Set a breakpoint on the =add= line, press Run, and Step from the pause:
+  execution stops /before/ the instruction runs.
+- Break something on purpose: type =addd t2, t2, t0= and enjoy a
+  line-mapped error instead of a silent wrong answer.

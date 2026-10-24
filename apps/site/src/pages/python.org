@@ -1,0 +1,82 @@
+#+TITLE: Real Python, Right Here
+#+SUBTITLE: CPython 3.14 compiled to WebAssembly — Pyodide — running entirely in your browser
+
+This page runs *real CPython* — the same interpreter you would install on
+your machine, compiled to WebAssembly by the Pyodide project. The engine is
+about 13 MB and is fetched from this site the first time you press ▶ Run on
+a block below; from then on it stays in the browser cache. Nothing is
+pre-recorded and nothing runs on a server: =print=, loops, functions and
+exceptions all execute in this tab, and the deterministic outputs quoted in
+the prose are exactly what the blocks print.
+
+Every block is its own little program with a *fresh namespace*: names
+defined in one block — a variable, a function — are /not/ visible in the
+others, and re-running a block starts from an empty namespace again. State
+does not carry between blocks. Run means /execute to completion/: there is
+no stepping, just run and observe. Output lands under the code and in the
+console of the under-the-hood panel; the panel's *variables* section lists
+every global the run defined or changed, as =repr(value)= with its type.
+A syntax error is reported by CPython itself on the exact line; an uncaught
+exception stops the run with the exception's type and message, and the full
+traceback lands in the console.
+
+* Hello, Python
+
+The classic first program, plus one arithmetic line: precedence is real
+CPython precedence, so =2 + 3 * 4= prints =14=.
+
+#+NAME: hello
+#+BEGIN_SRC python
+print("Hello, Python!")
+print("2 + 3 * 4 =", 2 + 3 * 4)
+#+END_SRC
+
+#+RESULTS:
+: Hello, Python!
+: 2 + 3 * 4 = 14
+
+* Loops accumulate
+
+A =for= loop appends the first five squares to a list, then prints it. The
+run always ends with =squares: [1, 4, 9, 16, 25]=. After it finishes, look
+at the variables panel: =squares= (a =list=) and the leftover loop variable
+=n= (an =int=, value 5) are shown with their =repr= — this is the block's
+own namespace, the very dictionary Python executed in.
+
+#+NAME: squares
+#+BEGIN_SRC python
+squares = []
+for n in range(1, 6):
+    squares.append(n * n)
+print("squares:", squares)
+#+END_SRC
+
+#+RESULTS:
+: squares: [1, 4, 9, 16, 25]
+
+* Functions: Fibonacci
+
+An iterative =fib= — no recursion, just two rolling variables. It always
+prints =fib(10) = 55=. The variables panel shows =fib= with sub =function=:
+the function object itself lives in the block's namespace, and =repr= of a
+function is its qualified name.
+
+#+NAME: fib
+#+BEGIN_SRC python
+def fib(n):
+    a, b = 0, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
+print("fib(10) =", fib(10))
+#+END_SRC
+
+#+RESULTS:
+: fib(10) = 55
+
+Try the failure paths, too: delete the closing parenthesis on the =print=
+line and Run — the block status and error box point at the exact line.
+Then replace the body with =1 / 0= — the run finishes with
+=ZeroDivisionError: division by zero= and the console shows the traceback
+with source lines.

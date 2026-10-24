@@ -104,7 +104,20 @@ export class CSession implements Session {
   }
 
   state(): Panel[] {
-    if (!this.module || !this.wasmBytes) return [];
+    if (!this.module || !this.wasmBytes) {
+      // Compile failed (or nothing loaded yet): there is no module to show,
+      // but clang's own diagnostics are still the under-the-hood story —
+      // surface them as the panel's console instead of zero sections.
+      if (this.diagText.length === 0) return [];
+      return [
+        {
+          kind: 'console',
+          id: 'diagnostics',
+          title: 'Diagnostics',
+          text: `$ clang ${SOURCE} -o ${OUTPUT}\n${this.diagText}\n`,
+        },
+      ];
+    }
 
     const fields: Field[] = [
       {
@@ -141,7 +154,9 @@ export class CSession implements Session {
       (this.diagText.length > 0 ? this.diagText + '\n' : '(no diagnostics)\n') +
       `\n$ ./${OUTPUT}\n` +
       (this.runState !== null
-        ? this.runState.stdout + (this.runState.stderr.length > 0 ? this.runState.stderr + '\n' : '')
+        ? this.runState.stdout +
+            (this.runState.stderr.length > 0 ? this.runState.stderr + '\n' : '') +
+            (this.runState.error !== undefined ? this.runState.error + '\n' : '')
         : '(not run yet)\n');
 
     return [
@@ -155,6 +170,7 @@ export class CSession implements Session {
     this.module = null;
     this.wasmBytes = null;
     this.runState = null;
+    this.diagText = '';
   }
 }
 

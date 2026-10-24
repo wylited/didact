@@ -9,7 +9,7 @@
   --lw-tint: #f4f1e8;        /* changed-marking tint */
   --lw-gray: #8c8c8c;        /* inactive ink: nav links, hover rules */
   --lw-hover: #f4f4f4;       /* register/flag hover tint (neutral) */
-  --lw-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --lw-error: #8b1a1a;       /* error ink: status + line-mapped errors */
   --lw-serif: "Atkinson Hyperlegible", Georgia, "Times New Roman", serif;
 }
 
@@ -197,7 +197,12 @@ code.lw-inline {
 }
 .lw-block-head button:hover { border-color: var(--lw-ink); }
 
-.lw-status { margin-left: auto; }
+.lw-status {
+  margin-left: auto;
+  min-width: 0;              /* long status text wraps instead of overflowing */
+  overflow-wrap: anywhere;
+  hyphens: auto;
+}
 .lw-status-error { color: var(--lw-error); }
 
 [data-test="editor"] .cm-editor { font-size: 0.82rem; }
@@ -236,6 +241,7 @@ code.lw-inline {
   border-top: 1px solid var(--lw-hairline);
   padding: 0.4rem 0.6rem;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ---- results slot */
@@ -284,8 +290,6 @@ code.lw-inline {
 }
 .lw-panel-head button:hover { border-color: var(--lw-ink); }
 
-.lw-panel-idle { padding: 1rem 0.75rem; font-style: italic; opacity: 0.7; }
-
 .lw-section { border-bottom: 1px solid var(--lw-hairline); padding: 0.6rem 0.75rem; }
 .lw-section:last-child { border-bottom: none; }
 
@@ -305,25 +309,29 @@ code.lw-inline {
 
 .lw-field {
   background: var(--lw-paper);
-  padding: 0.3rem 0.45rem;
+  /* left padding reserves the rule slot so changed/hover states never
+     shift content (the rules are inset overlays, not borders) */
+  padding: 0.3rem 0.45rem 0.3rem calc(0.45rem + 2px);
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.35rem;
 }
+/* changed and hover share one 2px inset rule position; on a changed row
+   the changed tint + ink rule win, so hover never suppresses the marking
+   nor stacks a second rule */
 .lw-field.lw-changed {
   background: var(--lw-tint);
-  border-left: 3px solid var(--lw-ink);
-  padding-left: 0.35rem;
+  box-shadow: inset 2px 0 0 var(--lw-ink);
 }
 .lw-field-key { font-weight: 700; }
 .lw-field-val { margin-left: auto; }
 .lw-field-sub { width: 100%; opacity: 0.65; font-size: 0.72rem; }
 
-/* Hovering a register/flag row highlights it: neutral tint + left rule
-   (changed-marking language, grayed so it can't read as a change). */
+/* Hovering a register/flag row highlights it: neutral tint + gray left
+   rule (changed-marking language, grayed so it can't read as a change). */
 
-.lw-field:hover {
+.lw-field:not(.lw-changed):hover {
   background: var(--lw-hover);
   box-shadow: inset 2px 0 0 var(--lw-gray);
 }

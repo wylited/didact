@@ -23,7 +23,9 @@ a matter of implementing one package against `docs/architecture.md`.
    Step button entirely).
 2. **Run** = assemble + execute to completion (kernel budget bounded). The
    block being executed gets a visible *running* highlight; when finished,
-   status shows `finished · exit summary · N steps`. On a breakpoint pause,
+   status shows `finished · exit summary · N steps` (kernels with
+   `features.stepping === false` omit the `· N steps` suffix — the count
+   is meaningless without instructions). On a breakpoint pause,
    status shows `paused · line N` (mono, normal ink — not error red), the
    paused line gets the current-line decoration, and the panel shows the
    paused machine state. Load errors: red status + line-mapped message
@@ -43,8 +45,10 @@ a matter of implementing one package against `docs/architecture.md`.
 5. **Block Reset** restores that block's machine to its just-assembled
    state and clears its output; code and breakpoints are kept.
 6. **Under-the-hood panel** is a single right-hand pane attached to at
-   most ONE block at a time — the last block that ran/stepped. Its header
-   shows the attached block (`#name` or `Block N`) and kernel label, plus
+   most ONE block at a time — the last block that ran/stepped. The panel
+   **starts detached**: at load no panel pane exists and the document
+   renders in the single centered column; the first run/step of any
+   block attaches it. Its header shows the attached block (`#name` or `Block N`) and kernel label, plus
    a **detach** button. Detaching hides the panel entirely — the panel
    element leaves the DOM and the layout collapses to a single centered
    column (~70ch prose measure; code blocks may extend wider). Any later
@@ -61,12 +65,18 @@ a matter of implementing one package against `docs/architecture.md`.
    register/flag row instead highlights it: pure-CSS neutral tint + gray
    2px left rule — the changed-marking language in neutral gray, so it
    can't be read as a change.
-9. Machine state UI renders even before first run (zeroed / idle states).
+9. Machine state UI renders zeroed / idle states before first execution
+   (visible once the panel is attached).
 10. **Pages.** One mount renders several org documents. A slim textbook
     nav bar sits atop the site (hairline bottom border): site label left
     (the first page's title), page titles as plain text links right —
-    active page underlined and near-black, others gray. Clicking switches
-    the rendered document: the old page's blocks are disposed and the
+    active page underlined and near-black, others gray. Pages are
+    hash-routed: each page's fragment is `#/<slug>` (slug = kebab-cased
+    page title: lowercased, non-alphanumeric runs collapsed to single
+    '-'). On mount the site reads `location.hash` and shows that page
+    (unknown or missing hash → the first page); nav links are fragment
+    hrefs, and `hashchange` (nav click, back/forward) switches the
+    rendered document: the old page's blocks are disposed and the
     panel detaches until the next run/step.
 
 ## Visual language — "textbook, light"
@@ -95,7 +105,8 @@ a matter of implementing one package against `docs/architecture.md`.
 Org-first content: lessons are real `.org` files imported via Vite `?raw`,
 parsed client-side by the core org-subset parser (grammar in this file).
 `#+BEGIN_SRC <lang>` blocks are executable when `lang` matches a registered
-kernel id (`asm` for the x86-64 kernel); other languages render read-only.
+kernel id (`asm`, `riscv`, `mips`, `c`, `python`, `typst`); other languages
+render read-only.
 The org file must remain valid org-babel source in Emacs.
 
 ### Org-subset grammar
@@ -106,6 +117,17 @@ The org file must remain valid org-babel source in Emacs.
 - `#+RESULTS:` slot replaced by live output on run (DOM only).
 - Paragraphs with `*bold*` `/italic/` `=code=` `~verbatim~`; `- ` bullet
   lists; `| a | b |` tables; `# ` comments hidden.
+
+## Pages
+
+The site app (`apps/site`) owns no rendering: `src/main.ts` mounts core with
+the kernel registry and every `.org` in `apps/site/src/pages/` (imported via
+Vite `import.meta.glob('./pages/*.org', { query: '?raw', eager: true })`).
+Drop a new `<name>.org` there and a nav entry appears — the title is the
+file's `#+TITLE:` line (file name as fallback); the nav order is the explicit
+`PAGE_ORDER` list in `main.ts`. A block is executable when its
+`#+BEGIN_SRC <lang>` language matches a registered kernel id; anything else
+renders read-only.
 
 ## E2E test hooks (binding)
 

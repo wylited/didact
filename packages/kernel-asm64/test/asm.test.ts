@@ -1,4 +1,4 @@
-import { describe, expect, it, test } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   CODE_BASE,
   assemble,
@@ -66,6 +66,31 @@ describe('assemble: two-pass label resolution', () => {
       { line: 4, addr: CODE_BASE + 2, size: 1, text: 'ret' },
     ]);
   });
+
+  it('encodes a backward rel8 jump with a negative displacement byte', () => {
+    const src = [
+      'start:', // line 1
+      '    ret', // line 2 → 1 byte @0x401000
+      'loop:', // line 3
+      '    jmp start', // line 4 → 2 bytes @0x401001, target 0x401000
+    ].join('\n');
+
+    const r = assemble(src, ks());
+    if (!r.ok) throw new Error(`expected ok, got ${JSON.stringify(r.errors)}`);
+
+    // rel = target − (addr + 2) = 0x401000 − 0x401003 = −3 → byte 0xfd.
+    expect([...r.program.code]).toEqual([0xc3, 0xeb, 0xfd]);
+    expect(r.program.labels.get('start')).toBe(CODE_BASE);
+    expect(r.program.labels.get('loop')).toBe(CODE_BASE + 1);
+    expect(r.program.sourceLines).toEqual([
+      { line: 2, addr: CODE_BASE, size: 1, text: 'ret' },
+      { line: 4, addr: CODE_BASE + 1, size: 2, text: `jmp 0x${CODE_BASE.toString(16)}` },
+    ]);
+    // the displacement byte really is the signed negative offset
+    const disp = r.program.code[2]!;
+    expect(disp).toBe(0xfd);
+    expect((disp << 24) >> 24).toBe(-3);
+  });
 });
 
 describe('assemble: exact encoding of a fixed instruction sequence', () => {
@@ -113,6 +138,23 @@ describe('assemble: error reporting carries exact 1-based lines', () => {
       errors: [{ line: 2, message: "cannot assemble this instruction: 'frobnicate rax'" }],
     });
   });
+
+  it('reports two errors on lines 2 and 4 together, in source order', () => {
+    const src = [
+      'start:', // line 1
+      '    frobnicate rax', // line 2 — unencodable
+      '    ret', // line 3 — fine
+      '    frobnicate rbx', // line 4 — unencodable
+    ].join('\n');
+    const r = assemble(src, ks());
+    expect(r).toEqual({
+      ok: false,
+      errors: [
+        { line: 2, message: "cannot assemble this instruction: 'frobnicate rax'" },
+        { line: 4, message: "cannot assemble this instruction: 'frobnicate rbx'" },
+      ],
+    });
+  });
 });
 
 describe('lineComments: trailing-comment map', () => {
@@ -130,6 +172,24 @@ describe('lineComments: trailing-comment map', () => {
       [5, 'spaced'],
     ]);
   });
-});
 
-test.todo('line→comment map exposed via assemble() program (once the sibling comment-map work lands)');
+  it('the program-level map composes with assemble(): every listing row can find its comment', () => {
+    const src = [
+      'start:', // 1
+      '    mov rax, 60 ; exit code', // 2
+      '    syscall', // 3
+      '    ret ; done', // 4
+    ].join('\n');
+    const r = assemble(src, ks());
+    if (!r.ok) throw new Error(`expected ok, got ${JSON.stringify(r.errors)}`);
+
+    // This is exactly how the session derives listing tips: sourceLines ×
+    // lineComments — the program-level exposure the comment-map work landed.
+    const comments = lineComments(src);
+    expect(r.program.sourceLines.map((l) => [l.line, comments.get(l.line)])).toEqual([
+      [2, 'exit code'],
+      [3, undefined],
+      [4, 'done'],
+    ]);
+  });
+});

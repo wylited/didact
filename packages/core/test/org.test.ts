@@ -122,3 +122,36 @@ describe('parseOrg: #+RESULTS pairing', () => {
     ]);
   });
 });
+
+// spec note: org.ts strips `/^\s*:\s?/` from each results line — exactly one
+// leading colon plus at most one space. Emacs org-babel would treat `::` as
+// a deeper nesting level and `:` alone as an empty line; this parser keeps
+// the remainder verbatim. Pinned as-is; change deliberately if the org
+// grammar is ever widened.
+describe('parseOrg: #+RESULTS colon stripping', () => {
+  it('strips one colon and at most one space, whatever precedes or follows', () => {
+    const src = [
+      '#+RESULTS:',
+      ': plain', // colon + space
+      '  : indented', // leading whitespace before the colon
+      ':no-space', // tight colon, no space
+      ':  two spaces', // two spaces: only the first goes
+      ':: double', // second colon survives
+    ].join('\n');
+    expect(parseOrg(src)).toEqual([
+      {
+        kind: 'results',
+        name: null,
+        canned: 'plain\nindented\nno-space\n two spaces\n: double',
+      },
+    ]);
+  });
+
+  it('ends the block at the first line without a leading colon', () => {
+    const src = ['#+RESULTS:', ': 42', 'not a results line', ': orphan'].join('\n');
+    expect(parseOrg(src)).toEqual([
+      { kind: 'results', name: null, canned: '42' },
+      { kind: 'para', text: 'not a results line : orphan' }, // later : lines are prose
+    ]);
+  });
+});

@@ -1,0 +1,93 @@
+#+TITLE: C, Compiled in Your Browser
+#+SUBTITLE: Real clang → wasm32-wasi → WebAssembly, all in this tab
+
+The blocks on this page are /real, editable C/, and the compiler is *real
+clang* — the same LLVM 22 compiler you would run on the command line, here
+delivered as a ~86 MB WebAssembly build (the YoWASP project's packaging,
+served once from this site and then cached). Pressing ▶ Run downloads the
+toolchain if needed, compiles your block to a =wasm32-wasi= module, and shows
+the compiler's own diagnostics — a missing semicolon is reported on the exact
+1-based source line, because it is clang, not a toy, reporting it. C is the
+target here; the C++ standard library was left out of the vendored sysroot to
+keep the download within budget.
+
+The compiled module then runs *in the same tab* on the browser's built-in
+WebAssembly engine. A WebAssembly module cannot call the operating system, so
+a small hand-written WASI shim stands in for one: it captures =fd_write=
+(standard output and standard error), records =proc_exit= as the program's
+exit code, fills =random_get= from the browser's crypto, answers
+=clock_time_get= with a wall-clock stub, and reports *empty* arguments and
+environment. There is no file system: anything else — opening files,
+=nanosleep=, process spawning — fails with a clean "unsupported WASI call"
+error naming the call, rather than a silent stub.
+
+Each block compiles independently, with its own session; the under-the-hood
+panel attaches to the block you last ran. Its console shows the compile step
+and the program's output, the fields show the exit code, the module size and
+the compile time, and the hexdump shows the first 256 bytes of the produced
+=wasm= file — the module clang's =wasm-ld= linked for you. Runs are bounded
+by a wall-clock guard; a program that loops forever *without* touching I/O
+cannot be preempted on the raw WebAssembly API and will hang the tab.
+
+* Hello, =puts= and =printf=
+
+This program prints =Hello, world!= with =puts= (which appends the newline
+itself) and =2 + 3 = 5= with =printf=. Its output is fully deterministic.
+
+#+NAME: hello
+#+BEGIN_SRC c
+#include <stdio.h>
+
+int main(void) {
+  puts("Hello, world!");
+  printf("2 + 3 = %d\n", 2 + 3);
+  return 0;
+}
+#+END_SRC
+
+#+RESULTS:
+: Hello, world!
+: 2 + 3 = 5
+
+* A loop that sums 1..10
+
+The loop accumulates 1 through 10 into =sum= and prints =55= — one line,
+deterministic, computed by the module this block just compiled.
+
+#+NAME: sum-loop
+#+BEGIN_SRC c
+#include <stdio.h>
+
+int main(void) {
+  int sum = 0;
+  for (int i = 1; i <= 10; i++) sum += i;
+  printf("%d\n", sum);
+  return 0;
+}
+#+END_SRC
+
+#+RESULTS:
+: 55
+
+* Recursion: factorial(10)
+
+=factorial= calls itself down to the base case; ten multiplications later
+the module prints =3628800=. Watch the module size and compile time in the
+panel — recursion costs the compiler nothing extra.
+
+#+NAME: factorial
+#+BEGIN_SRC c
+#include <stdio.h>
+
+long factorial(int n) {
+  return n <= 1 ? 1L : n * factorial(n - 1);
+}
+
+int main(void) {
+  printf("%ld\n", factorial(10));
+  return 0;
+}
+#+END_SRC
+
+#+RESULTS:
+: 3628800

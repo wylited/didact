@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "Literate website: composes @literate/core with the @literate/kernel-asm64 x86-64 kernel",
+  "description": "Literate website: composes @literate/core with six kernels (x86-64, RISC-V, MIPS, C, Python, Typst)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -11,7 +11,12 @@
   },
   "dependencies": {
     "@literate/core": "workspace:*",
-    "@literate/kernel-asm64": "workspace:*"
+    "@literate/kernel-asm64": "workspace:*",
+    "@literate/kernel-riscv": "workspace:*",
+    "@literate/kernel-mips": "workspace:*",
+    "@literate/kernel-c": "workspace:*",
+    "@literate/kernel-python": "workspace:*",
+    "@literate/kernel-typst": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.9.3",

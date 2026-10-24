@@ -1,7 +1,10 @@
 // site.ts — mountSite: parse → render → block runtimes + panel host +
-// tooltip engine, in the textbook-light two-pane layout. Multi-page: a
-// slim nav bar switches the rendered document; switching disposes the old
-// page's blocks and detaches the panel until the next run/step.
+// tooltip engine, in the textbook-light two-pane layout. Multi-page with
+// hash routing: each page's fragment is `#/<slug>` (kebab-cased title);
+// mount reads location.hash, nav links target fragments, and hashchange
+// switches the rendered document, disposing the old page's blocks and
+// detaching the panel until the next run/step. The panel starts detached
+// — no right pane at load; the first run/step attaches it.
 
 import { BlockRuntime } from './block';
 import type { Kernel } from './kernel';
@@ -73,16 +76,14 @@ export function mountSite(opts: MountOptions): SiteHandle {
 
   let active = -1;
   let blocks: BlockRuntime[] = [];
-  const links = pages.map((page, index) => {
+  const links = pages.map((page) => {
     const a = document.createElement('a');
     a.className = 'lw-nav-link';
     a.dataset.test = 'nav-item';
-    a.href = '#';
+    // real fragment href: the click sets the hash, hashchange does the
+    // switch (so the URL always names the visible page)
+    a.href = `#/${pageSlug(page.title)}`;
     a.textContent = page.title;
-    a.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      show(index);
-    });
     nav.appendChild(a);
     return a;
   });
@@ -117,8 +118,12 @@ export function mountSite(opts: MountOptions): SiteHandle {
       else a.removeAttribute('aria-current');
     }
   }
-
-  show(0);
+  // deep link: show the page named by the hash, first page otherwise;
+  // later hash changes (nav clicks, back/forward) switch pages
+  const onHashChange = (): void => show(indexFromHash(pages));
+  window.addEventListener('hashchange', onHashChange);
+  panel.detach(); // start detached: single centered column until first run/step
+  show(indexFromHash(pages));
   const disposeTooltips = installTooltips(root);
 
   return {
@@ -132,10 +137,25 @@ export function mountSite(opts: MountOptions): SiteHandle {
     show,
     dispose(): void {
       disposeTooltips();
+      window.removeEventListener('hashchange', onHashChange);
       for (const block of blocks) block.dispose();
       blocks = [];
       root.replaceChildren();
       root.classList.remove('lw-site', 'lw-no-fonts', 'lw-detached');
     },
   };
+}
+
+/** URL fragment slug for a page title: lowercase, non-alphanumeric runs
+ *  collapsed to single '-' (the `#/` deep-link name). */
+function pageSlug(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** Page index named by `location.hash` (`#/<slug>`); unknown or missing
+ *  hash resolves to the first page. */
+function indexFromHash(pages: PageSpec[]): number {
+  const slug = location.hash.replace(/^#\//, '');
+  const index = pages.findIndex((p) => pageSlug(p.title) === slug);
+  return index === -1 ? 0 : index;
 }

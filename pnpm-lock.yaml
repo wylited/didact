@@ -29,6 +29,21 @@ importers:
       '@literate/kernel-asm64':
         specifier: workspace:*
         version: link:../../packages/kernel-asm64
+      '@literate/kernel-c':
+        specifier: workspace:*
+        version: link:../../packages/kernel-c
+      '@literate/kernel-mips':
+        specifier: workspace:*
+        version: link:../../packages/kernel-mips
+      '@literate/kernel-python':
+        specifier: workspace:*
+        version: link:../../packages/kernel-python
+      '@literate/kernel-riscv':
+        specifier: workspace:*
+        version: link:../../packages/kernel-riscv
+      '@literate/kernel-typst':
+        specifier: workspace:*
+        version: link:../../packages/kernel-typst
     devDependencies:
       typescript:
         specifier: 5.9.3
@@ -65,6 +80,8 @@ importers:
         version: 2.0.1(@codemirror/language@6.13.1)(@codemirror/state@6.7.6)(@codemirror/view@6.43.15)
 
   packages/kernel-asm64: {}
+
+  packages/kernel-c: {}
 
   packages/kernel-mips: {}
 

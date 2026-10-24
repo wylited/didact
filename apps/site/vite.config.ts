@@ -1,10 +1,11 @@
 import { defineConfig } from 'vite';
 
-// Vendored engine files (unicorn/keystone/capstone wasm + UMD loader shims)
-// are static assets under apps/site/public/vendor — copied there from
-// packages/kernel-asm64/vendor (see apps/site/README.md) — so the kernel's
-// default vendor base `<page-base>/vendor/` resolves in dev and dist with
-// base './' and no bundler magic.
+// Vendored engine files are static assets under apps/site/public —
+// vendor/ (unicorn/keystone/capstone, from packages/kernel-asm64/vendor),
+// vendor-typst/, vendor-python/ and vendor-c/ (each copied from the
+// matching packages/kernel-*/vendor) — so each kernel's default vendor
+// base `<page-base>/<dir>/` resolves in dev and dist with base './' and
+// no bundler magic.
 
 export default defineConfig({
   base: './',
@@ -14,6 +15,26 @@ export default defineConfig({
         .pathname,
       '@literate/kernel-asm64': new URL(
         '../../packages/kernel-asm64/src',
+        import.meta.url,
+      ).pathname,
+      '@literate/kernel-riscv': new URL(
+        '../../packages/kernel-riscv/src',
+        import.meta.url,
+      ).pathname,
+      '@literate/kernel-mips': new URL(
+        '../../packages/kernel-mips/src',
+        import.meta.url,
+      ).pathname,
+      '@literate/kernel-c': new URL(
+        '../../packages/kernel-c/src',
+        import.meta.url,
+      ).pathname,
+      '@literate/kernel-python': new URL(
+        '../../packages/kernel-python/src',
+        import.meta.url,
+      ).pathname,
+      '@literate/kernel-typst': new URL(
+        '../../packages/kernel-typst/src',
         import.meta.url,
       ).pathname,
     },

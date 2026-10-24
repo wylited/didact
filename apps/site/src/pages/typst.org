@@ -1,0 +1,97 @@
+#+TITLE: Typst: Real Typesetting in Your Browser
+#+SUBTITLE: A document compiler as a wasm engine — every block below is compiled and rendered on this page
+
+Typst is a real typesetting language: a compiled, Turing-complete markup
+language for producing pages, in the same business as LaTeX but with a
+modern syntax. What you type is /source code/; a compiler checks it,
+resolves fonts and layout, and emits a typeset document. On this page that
+compiler — the actual Typst 0.15 compiler built as WebAssembly — runs inside
+your browser. No server sees your edits.
+
+Here *Run means compile & render*: pressing ▶ Run compiles the block's
+source and the *under-the-hood* panel shows the result — the typeset *page*
+itself as vector graphics, a *document* summary with the page count and
+compile time, and a *warnings* console if Typst has anything to complain
+about. There is nothing to single-step through (typesetting is a one-shot
+transform, not an execution), so the step control is hidden for these
+blocks and the panel is about the output, not the machine.
+
+Every block compiles independently — edit one, run one, break one, and the
+others are untouched. Each block below sets =width: auto= and
+=height: auto= on its page so the output shrinks to its content instead of
+an A4 sheet; each compiles to exactly *one page*. Anything that fails to
+compile is reported on the exact source line, in red, in the editor.
+
+* Math inside sentences
+
+Typst puts math in the flow of prose: a dollar sign opens it, a dollar sign
+closes it, and inside you write exponents, roots and fractions with plain
+symbols. This sentence-sized block produces a single line of typeset text
+with both formulas baseline-aligned with the words around them.
+
+#+NAME: pythagoras
+#+BEGIN_SRC typst
+#set page(width: auto, height: auto, margin: 1em)
+
+In the plane, the distance from the origin to $(x, y)$ is
+$root(2, x^2 + y^2)$, and for the sides of a right triangle
+Euclid gives us $x^2 + y^2 = z^2$.
+#+END_SRC
+
+#+RESULTS:
+: one page: the sentence with $sqrt(x^2+y^2)$ and $x^2 + y^2 = z^2$ typeset
+
+* A table, styled
+
+Structure is functional: =table= takes =columns=, =inset= and a per-cell
+=align= function, and =table.header= styles its row as a header. The bold
+column titles are just content marked with asterisks, and the math cells
+mix formulas into table cells exactly as they mix into sentences.
+
+#+NAME: primes
+#+BEGIN_SRC typst
+#set page(width: auto, height: auto, margin: 1em)
+
+#table(
+  columns: (auto, auto, auto),
+  inset: 6pt,
+  align: (x, y) => if y == 0 { center } else { right },
+  table.header([*n*], [*n^2*], [*n^3*]),
+  [2], [$2^2 = 4$],   [$2^3 = 8$],
+  [3], [$3^2 = 9$],   [$3^3 = 27$],
+  [5], [$5^2 = 25$],  [$5^3 = 125$],
+)
+#+END_SRC
+
+#+RESULTS:
+: one page: a 4-row table, centered bold header, right-aligned cells
+
+* A theorem with a numbered proof
+
+Longer structure composes the same way: a heading, a bold *Theorem.*
+statement, and an enumerated proof. The numbering style is itself a
+=set= rule — =numbering: "i."= asks for lowercase Roman numerals — which is
+the general Typst idea: documents are programs, and layout is configuration.
+
+#+NAME: euclid
+#+BEGIN_SRC typst
+#set page(width: auto, height: auto, margin: 1em)
+#set enum(numbering: "i.")
+
+= The Infinitude of Primes
+
+*Theorem.* There are infinitely many prime numbers.
+
++ Suppose the primes were finite: $p_1, p_2, dots.c, p_n$.
++ Let $N = p_1 p_2 dots.c p_n + 1$, one larger than their product.
++ Some prime divides $N$ — but no $p_i$ does, since each leaves remainder $1$.
++ So a prime exists outside the list: contradiction.
+#+END_SRC
+
+#+RESULTS:
+: one page: heading, theorem statement, roman-numbered four-step proof
+
+A good experiment: delete one of the closing dollar signs above and run
+again — the compiler reports /unclosed delimiter/ pinned to the exact line,
+and the block's status shows the error while its neighbors keep their
+rendered pages.

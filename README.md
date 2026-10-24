@@ -53,12 +53,21 @@ markup, lists, tables) is in [`docs/design.md`](docs/design.md).
 
 ## Kernels
 
-- **`asm`** — x86-64 assembly, emulated via Unicorn/Keystone/Capstone WASM
-  (`packages/kernel-asm64`).
+- **`asm`** — x86-64 · Unicorn — real emulation via Unicorn/Keystone/Capstone
+  WASM (`packages/kernel-asm64`).
+- **`riscv`** — RV32IM · interpreter — a TypeScript fetch–decode–execute
+  CPU (`packages/kernel-riscv`).
+- **`mips`** — MIPS32 · interpreter — SPIM/MARS-style assembler and machine
+  (`packages/kernel-mips`).
+- **`c`** — C · clang wasm — real clang → wasm32-wasi in the tab
+  (`packages/kernel-c`).
+- **`python`** — Python · Pyodide — CPython 3.14 compiled to WebAssembly
+  (`packages/kernel-python`).
+- **`typst`** — Typst · wasm — the Typst compiler rendering to SVG
+  (`packages/kernel-typst`).
 
-To add a kernel (python, typst, …), see the recipe in
-[`AGENTS.md`](AGENTS.md) and the Kernel/Session/Panel contract in
-[`docs/architecture.md`](docs/architecture.md).
+To add a kernel, see the recipe in [`AGENTS.md`](AGENTS.md) and the
+Kernel/Session/Panel contract in [`docs/architecture.md`](docs/architecture.md).
 
 ## Tests & quality
 

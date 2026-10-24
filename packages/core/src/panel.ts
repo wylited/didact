@@ -1,9 +1,10 @@
 // panel.ts — under-the-hood panel host. Renders Session.state() Panel[]
 // generically; attached to at most one block (the last that ran/stepped).
-// Detaching unmounts the panel from the DOM entirely (the host layout
-// drops the right pane); the next attach re-mounts it. Full re-render on
-// every state() snapshot. Tooltips are comment-only: listing rows carry
-// their source-line comment via data-tip; nothing else gets one.
+// The panel starts detached: it is not in the DOM until the first
+// attach() (first run/step), and detaching unmounts it entirely (the host
+// layout drops the right pane); the next attach re-mounts it. Full
+// re-render on every state() snapshot. Tooltips are comment-only: listing
+// rows carry their source-line comment via data-tip; nothing else gets one.
 
 import type { Panel } from './kernel';
 
@@ -52,8 +53,7 @@ export class PanelHost {
     this.sectionsEl.dataset.test = 'uth-sections';
     this.root.appendChild(this.sectionsEl);
 
-    mount.appendChild(this.root);
-    this.render();
+    // not mounted: the first attach() puts the panel into the DOM
   }
 
   attach(block: AttachedBlock): void {
@@ -75,19 +75,13 @@ export class PanelHost {
   }
 
   private render(): void {
-    if (this.block === null) {
-      this.titleEl.textContent = '';
-      this.sectionsEl.replaceChildren();
-      const idle = document.createElement('p');
-      idle.className = 'lw-panel-idle';
-      idle.textContent = 'idle — run or step a block to look under the hood';
-      this.sectionsEl.appendChild(idle);
-      return;
-    }
-    const { title, kernelLabel } = this.block;
-    this.titleEl.textContent = `${title} · ${kernelLabel}`;
+    // render() only runs while attached: attach() always sets the block.
+    // NB: call this.block.state() as a method — destructuring `state` off
+    // the block would detach it from its `this` and throw.
+    const block = this.block!;
+    this.titleEl.textContent = `${block.title} · ${block.kernelLabel}`;
     this.sectionsEl.replaceChildren();
-    for (const panel of this.block.state()) {
+    for (const panel of block.state()) {
       this.sectionsEl.appendChild(renderSection(panel));
     }
   }

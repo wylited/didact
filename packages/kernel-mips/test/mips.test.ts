@@ -166,3 +166,58 @@ describe('session contract', () => {
     s.dispose();
   });
 });
+
+describe('calls: jal links and jr returns (no branch delay slots)', () => {
+  it('jal sets $ra to the instruction AFTER the call site — pc+4, not pc+8', () => {
+    // machine.ts links jal as `w(31, this.pc + 4)`: MARS/SPIM teaching mode,
+    // no delay slot, so $ra is the next instruction in program order.
+    const src = [
+      '        .text', // 1
+      'main:   li      $a0, 7', // 2 @0x00400000 (li small → 1 word)
+      '        jal     f', // 3 @0x00400004
+      '        li      $v0, 10', // 4 @0x00400008 ← $ra lands here
+      '        syscall', // 5
+      'f:      jr      $ra', // 6 @0x00400010
+    ].join('\n');
+    const m = run(src);
+    expect(m.error).toBeNull();
+    expect(m.finished).toBe(true);
+    expect(m.exitCode).toBe(0);
+    expect(m.regs[31]).toBe(0x00400008); // exactly one instruction past the jal
+    expect(m.regs[ABI_NAMES.indexOf('a0')]).toBe(7); // $a0 survived the call
+    expect(m.steps).toBe(5); // li, jal, jr, li, syscall
+  });
+});
+
+describe('session: breakpoints, finish', () => {
+  it('a breakpoint re-trips on every loop iteration with exact step counts', async () => {
+    const s = mipsKernel.createSession();
+    await s.load(PROGRAMS.sum);
+
+    const first = await s.run([5]); // line 5 = the loop's addu
+    expect(first.pausedAt).toBe(5);
+    expect(first.steps).toBe(2); // the two leading li (1 word each)
+
+    expect((await s.step()).ran).toBe(true); // execute the addu
+
+    const second = await s.run([5]); // re-trips on iteration 2
+    expect(second.pausedAt).toBe(5);
+    expect(second.steps).toBe(7); // + addiu i++, then ble imm = addiu $at, slt, beq
+
+    const done = await s.run(); // continue with no breakpoints
+    expect(done.finished).toBe(true);
+    expect(done.exit).toBe('exit(0)');
+    s.dispose();
+  });
+
+  it('step() after the program finished reports { ran: false } with the final result', async () => {
+    const s = mipsKernel.createSession();
+    await s.load(PROGRAMS.sum);
+    const done = await s.run();
+    expect(done.finished).toBe(true);
+    const after = await s.step();
+    expect(after.ran).toBe(false);
+    expect(after.result).toMatchObject({ finished: true, steps: done.steps, exit: 'exit(0)' });
+    s.dispose();
+  });
+});

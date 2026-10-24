@@ -261,6 +261,9 @@ export class Machine {
     this.regsBefore = this.readRegs();
     this.stepMode = true;
     this.stepArmed = false;
+    // The paused instruction is about to execute: drop the stale breakpoint
+    // pause so the result reports a step, not the old pausedAt line.
+    this.pausedAtLine = null;
     this.invoke(() =>
       this.uc!.emu_start(Number(this.regsBefore.rip), RUN_SENTINEL, 0, 0),
     );

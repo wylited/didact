@@ -444,6 +444,12 @@ export class BlockRuntime {
       ? ` · ${result.exit}` : '';
     const verb = mode === 'step' ? 'stepped'
       : result.finished ? 'finished' : 'halted';
+    // no step count for kernels that opted out of stepping — the count
+    // is meaningless there (e.g. whole-program interpreters/compilers)
+    if (this.kernel.features?.stepping === false) {
+      this.status(`${verb}${exit}`);
+      return;
+    }
     this.status(`${verb}${exit} · ${result.steps} step${result.steps === 1 ? '' : 's'}`);
   }
 

@@ -103,10 +103,17 @@ export function loadEngine(): Promise<TypstEngine> {
           'the Typst engine needs Chrome/Edge 137+, Firefox 153+ or Safari 27+',
       );
     }
+    // Compile asynchronously and in parallel. `new WebAssembly.Module`
+    // is synchronous and stock Chromium refuses sync compilation of
+    // buffers larger than 8 MB on the main thread (engine.core.wasm is
+    // ~22.8 MB); `WebAssembly.compile` has no size limit and hands the
+    // engine the same `WebAssembly.Module` it would have built.
     const coreModules = {} as Record<(typeof ENGINE_FILES)[number], WebAssembly.Module>;
-    for (const name of ENGINE_FILES) {
-      coreModules[name] = new WebAssembly.Module(await readBytes(name));
-    }
+    await Promise.all(
+      ENGINE_FILES.map(async (name) => {
+        coreModules[name] = await WebAssembly.compile(await readBytes(name));
+      }),
+    );
     const compiler = await createTypstCompiler({
       coreModules,
       backend: 'jspi',
