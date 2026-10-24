@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "useDefineForClassFields": true,
+    "types": ["vite/client"],
+    "paths": {
+      "@literate/core": ["../../packages/core/src"],
+      "@literate/kernel-asm64": ["../../packages/kernel-asm64/src"]
+    }
+  },
+  "include": ["src", "../../packages/*/src"]
+}

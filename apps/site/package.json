@@ -1,0 +1,20 @@
+{
+  "name": "@literate/site",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Literate website: composes @literate/core with the @literate/kernel-asm64 x86-64 kernel",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@literate/core": "workspace:*",
+    "@literate/kernel-asm64": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  }
+}

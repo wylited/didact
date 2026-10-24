@@ -1,0 +1,17 @@
+{
+  "name": "@literate/core",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Org parser, block runtime, panel host, and textbook-light theme for the literate website system",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.10.1",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/view": "^6.30.0",
+    "@fontsource/atkinson-hyperlegible": "^5.1.0",
+    "@lezer/highlight": "^1.2.1",
+    "codemirror": "^6.0.1",
+    "thememirror": "^2.0.1"
+  }
+}
