@@ -1,0 +1,204 @@
+#+TITLE: C++, the Parts That Bite
+#+SUBTITLE: Real clang++ → wasm32-wasi → WebAssembly, all in this tab
+
+The blocks on this page are /real, editable C++/, compiled by *real clang++* —
+the same LLVM 22 C++ compiler you would run on the command line, delivered as
+a ~86 MB WebAssembly build (the YoWASP project's packaging, fetched once from
+this site and then cached). Pressing ▶ Run downloads the toolchain if needed,
+compiles your block against the vendored =libc++=, links it with =wasm-ld=
+into a =wasm32-wasi= module, and shows the compiler's own diagnostics — a
+missing semicolon lands on the exact 1-based source line, because it is
+clang, not a toy, reporting it.
+
+The driver line this kernel runs is:
+
+: clang++ -std=c++20 -fno-exceptions lesson.cpp -o lesson.wasm
+
+One honest limitation, shown right on the driver line: *this toolchain's
+C++ standard library is built without exception support*. The vendored
+=libc++abi= archive contains no =__cxa_throw= at all, so a program whose
+code would throw cannot link — the kernel compiles with =-fno-exceptions=
+instead, and a =throw= statement is rejected at compile time with clang's
+own =cannot use 'throw' with exceptions disabled= diagnostic, on its exact
+line. RAII, not =try= / =finally=, is the cleanup story here.
+
+The linked module then runs *in the same tab* on the browser's built-in
+WebAssembly engine, through a small hand-written WASI shim: =fd_write= is
+captured as standard output, =proc_exit= records the exit code, and anything
+the shim does not know — opening files, =nanosleep= — fails with a clean
+"unsupported WASI call" error naming the call. Runs are bounded by a
+wall-clock guard; a loop that spins *without* touching I/O cannot be
+preempted on the raw WebAssembly API and will hang the tab. The
+under-the-hood panel shows the compile step and the program's output, the
+exit code, the module size and compile time, and the first 256 bytes of the
+=wasm= file =wasm-ld= linked for you.
+
+* RAII: destructors run in reverse order
+
+=Trace= prints from its constructor and destructor. Two locals in nested
+scopes are constructed outer-then-inner and destroyed *in exactly the
+reverse order* — =inner= is gone before the line after its scope, and
+=outer= is the last to go. No =finally=, no manual cleanup: scope /is/ the
+cleanup.
+
+#+NAME: raii
+#+BEGIN_SRC cpp
+#include <cstdio>
+
+struct Trace {
+  const char* name;
+  explicit Trace(const char* n) : name(n) {
+    std::printf("construct %s\n", name);
+  }
+  ~Trace() { std::printf("destroy %s\n", name); }
+};
+
+int main() {
+  Trace outer("outer");
+  {
+    Trace inner("inner");
+    std::printf("--- inner scope ends ---\n");
+  }
+  std::printf("--- inner already gone ---\n");
+  return 0;
+}
+#+END_SRC
+
+#+RESULTS:
+: construct outer
+: construct inner
+: --- inner scope ends ---
+: destroy inner
+: --- inner already gone ---
+: destroy outer
+
+* =std::vector= grows by doubling
+
+Every =push_back= that would exceed the current allocation makes =vector=
+buy twice the memory and move everything over. Watch =capacity= leap
+1 → 2 → 4 → 8 while =size= creeps up one at a time — and notice =capacity=
+does /not/ change on the fourth push, because there was still room. The
+range-based =for= then walks the elements in order.
+
+#+NAME: vector-growth
+#+BEGIN_SRC cpp
+#include <vector>
+#include <cstdio>
+
+int main() {
+  std::vector<int> v;
+  for (int i = 1; i <= 5; i++) {
+    v.push_back(i * i);
+    std::printf("push %2d: size=%zu capacity=%zu\n", i * i, v.size(), v.capacity());
+  }
+  for (size_t i = 0; i < v.size(); ++i)
+    std::printf(i == 0 ? "%d" : " %d", v[i]);
+  std::printf("\n");
+  return 0;
+}
+#+END_SRC
+
+#+RESULTS:
+: push  1: size=1 capacity=1
+: push  4: size=2 capacity=2
+: push  9: size=3 capacity=4
+: push 16: size=4 capacity=4
+: push 25: size=5 capacity=8
+: 1 4 9 16 25
+
+* Templates: one =max=, three types
+
+=max<T>= is written once; each call with a new =T= makes the compiler
+instantiate a fresh copy for exactly that type. =int=, =double= and =char=
+below are three different machine-code functions stamped from the same
+source — no boxing, no dynamic dispatch.
+
+#+NAME: templates
+#+BEGIN_SRC cpp
+#include <cstdio>
+
+template <typename T>
+T max(T a, T b) {
+  return a > b ? a : b;
+}
+
+int main() {
+  std::printf("max(3, 9)        = %d\n", max(3, 9));
+  std::printf("max(2.5, 2.25)   = %.1f\n", max(2.5, 2.25));
+  std::printf("max('a', 'z')    = %c\n", max('a', 'z'));
+  return 0;
+}
+#+END_SRC
+
+#+RESULTS:
+: max(3, 9)        = 9
+: max(2.5, 2.25)   = 2.5
+: max('a', 'z')    = z
+
+* References vs pointers: two swaps
+
+=swapRef= takes =int&= — call it with the variables themselves. =swapPtr=
+takes =int*= — call it with their addresses and move the values through
+=*= and =&=. Same effect, but the reference version cannot be null, cannot
+be reseated, and the call site cannot forget it mutates its arguments:
+there is no =&x= to read as "maybe".
+
+#+NAME: refs-vs-pointers
+#+BEGIN_SRC cpp
+#include <cstdio>
+
+void swapRef(int& a, int& b) {
+  int t = a; a = b; b = t;
+}
+
+void swapPtr(int* a, int* b) {
+  int t = *a; *a = *b; *b = t;
+}
+
+int main() {
+  int x = 1, y = 2;
+  swapRef(x, y);
+  std::printf("after swapRef(x, y): x=%d y=%d\n", x, y);
+  swapPtr(&x, &y);
+  std::printf("after swapPtr(&x, &y): x=%d y=%d\n", x, y);
+  return 0;
+}
+#+END_SRC
+
+#+RESULTS:
+: after swapRef(x, y): x=2 y=1
+: after swapPtr(&x, &y): x=1 y=2
+
+* Lambdas: what a capture really copies
+
+=addBase= captures =base= /by copy/ — =[base]= snapshots 10 into the
+closure at the moment of creation. =bump= captures =counter= /by
+reference/ — =[&counter]=, so it increments the real variable. The bite is
+the last line: reassigning =base= to 100 changes nothing for =addBase=,
+because the closure owns a stale copy.
+
+#+NAME: lambdas
+#+BEGIN_SRC cpp
+#include <cstdio>
+
+int main() {
+  int base = 10;
+  auto addBase = [base](int x) { return base + x; };
+  int counter = 0;
+  auto bump = [&counter]() { ++counter; };
+
+  std::printf("addBase(5) = %d\n", addBase(5));
+  bump();
+  bump();
+  bump();
+  std::printf("counter after 3 bumps = %d\n", counter);
+  base = 100;
+  std::printf("after base = 100, addBase(5) = %d (copied at capture!)\n", addBase(5));
+  return 0;
+}
+#+END_SRC
+
+#+RESULTS:
+: addBase(5) = 15
+: counter after 3 bumps = 3
+: after base = 100, addBase(5) = 15 (copied at capture!)

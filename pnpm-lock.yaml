@@ -264,6 +264,12 @@ importers:
         specifier: 22.0.0-git20542-10
         version: 22.0.0-git20542-10
 
+  packages/kernel-cpp:
+    dependencies:
+      '@yowasp/clang':
+        specifier: 22.0.0-git20542-10
+        version: 22.0.0-git20542-10
+
   packages/kernel-mips: {}
 
   packages/kernel-python:
