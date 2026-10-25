@@ -11,29 +11,29 @@ export default defineConfig({
   base: './',
   resolve: {
     alias: {
-      '@literate/core': new URL('../../packages/core/src', import.meta.url)
+      '@didact/core': new URL('../../packages/core/src', import.meta.url)
         .pathname,
-      '@literate/kernel-asm64': new URL(
+      '@didact/kernel-asm64': new URL(
         '../../packages/kernel-asm64/src',
         import.meta.url,
       ).pathname,
-      '@literate/kernel-riscv': new URL(
+      '@didact/kernel-riscv': new URL(
         '../../packages/kernel-riscv/src',
         import.meta.url,
       ).pathname,
-      '@literate/kernel-mips': new URL(
+      '@didact/kernel-mips': new URL(
         '../../packages/kernel-mips/src',
         import.meta.url,
       ).pathname,
-      '@literate/kernel-c': new URL(
+      '@didact/kernel-c': new URL(
         '../../packages/kernel-c/src',
         import.meta.url,
       ).pathname,
-      '@literate/kernel-python': new URL(
+      '@didact/kernel-python': new URL(
         '../../packages/kernel-python/src',
         import.meta.url,
       ).pathname,
-      '@literate/kernel-typst': new URL(
+      '@didact/kernel-typst': new URL(
         '../../packages/kernel-typst/src',
         import.meta.url,
       ).pathname,

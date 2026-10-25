@@ -1,4 +1,4 @@
-# Literate Website — Design Contract (v0.2 refactor)
+# didact — Design Contract (v0.2 refactor)
 
 One product, kernel-extensible, textbook-styled. Binding for all packages.
 

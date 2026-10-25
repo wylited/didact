@@ -1,9 +1,11 @@
-# literate-website
+# didact
 
-Drop `.org` files in, get a running literate site — entirely in the browser.
-A page is prose plus executable code blocks; running a block also drives an
-under-the-hood view of the machine (registers, disassembly, memory, console)
-with hover tooltips explaining every element. No server, no runtime network:
+A client-side literate-programming site framework. Drop `.org` files in and
+get a site where prose interleaves with executable, steppable code blocks;
+each block drives an under-the-hood machine panel — registers, disassembly,
+memory, console; a disassembly row shows its source line's `;` comment on
+hover. Six kernels ship out of the box: x86-64, RV32IM, MIPS32, C, Python,
+and Typst. No server, no runtime network beyond same-origin vendor assets:
 parsing, assembly, execution, and stepping are all client-side.
 
 ## Quickstart
@@ -14,10 +16,21 @@ pnpm dev
 ```
 
 Open the printed URL. (If pnpm blocks esbuild's install script, run
-`pnpm approve-builds` once.)
+`pnpm approve-builds --all -y` once.)
 
 `pnpm build` emits a fully static site to `apps/site/dist` — `base` is
-`'./'`, so host it anywhere, at any path. `pnpm preview` checks the build.
+`'./'`, so it hosts anywhere, at any path. `pnpm preview` checks the build.
+
+## Kernels
+
+| id | label | editor syntax | package | vendor assets |
+| --- | --- | --- | --- | --- |
+| `asm` | x86-64 · Unicorn | `asm-intel` | `packages/kernel-asm64` | `public/vendor/` (~8.6 MB, unicorn/keystone/capstone wasm) |
+| `riscv` | RV32IM · interpreter | `asm-riscv` | `packages/kernel-riscv` | none (pure TypeScript CPU) |
+| `mips` | MIPS32 · interpreter | `asm-mips` | `packages/kernel-mips` | none (pure TypeScript CPU) |
+| `c` | C · clang wasm | `c` | `packages/kernel-c` | `public/vendor-c/` (~83 MB, clang → wasm32-wasi) |
+| `python` | Python · Pyodide | `python` | `packages/kernel-python` | `public/vendor-python/` (~13 MB, CPython 3.14 wasm) |
+| `typst` | Typst · wasm | `plain` | `packages/kernel-typst` | `public/vendor-typst/` (~25 MB, compiler wasm + fonts) |
 
 ## Authoring a page
 
@@ -44,8 +57,9 @@ Step through this block and watch =rax= change:
 #+BEGIN_SRC asm
 ; put a value in rax, then exit cleanly
 mov rax, 42
+mov rax, 60
 mov rdi, 0
-exit
+syscall
 #+END_SRC
 
 #+RESULTS:
@@ -55,19 +69,21 @@ Output replaces the block's `#+RESULTS:` slot when it runs. Lessons stay
 valid org-babel documents in Emacs; the full grammar (headings, `#+NAME:`,
 markup, lists, tables) is in [`docs/design.md`](docs/design.md).
 
-## Kernels
+## Adding a kernel
 
-| id | label | editor syntax | package | vendor assets |
-| --- | --- | --- | --- | --- |
-| `asm` | x86-64 · Unicorn | `asm-intel` | `packages/kernel-asm64` | `public/vendor/` (~8.6 MB, unicorn/keystone/capstone wasm) |
-| `riscv` | RV32IM · interpreter | `asm-riscv` | `packages/kernel-riscv` | none (pure TypeScript CPU) |
-| `mips` | MIPS32 · interpreter | `asm-mips` | `packages/kernel-mips` | none (pure TypeScript CPU) |
-| `c` | C · clang wasm | `c` | `packages/kernel-c` | `public/vendor-c/` (~83 MB, clang → wasm32-wasi) |
-| `python` | Python · Pyodide | `python` | `packages/kernel-python` | `public/vendor-python/` (~13 MB, CPython 3.14 wasm) |
-| `typst` | Typst · wasm | `plain` | `packages/kernel-typst` | `public/vendor-typst/` (~25 MB, compiler wasm + fonts) |
+Follow the recipe in [`AGENTS.md`](AGENTS.md) — package layout, vendored
+wasm assets, and registration in `apps/site`. The Kernel/Session/Panel
+contract those steps implement is specified in
+[`docs/architecture.md`](docs/architecture.md) and
+[`packages/core/src/kernel.ts`](packages/core/src/kernel.ts).
 
-To add a kernel, see the recipe in [`AGENTS.md`](AGENTS.md) and the
-Kernel/Session/Panel contract in [`docs/architecture.md`](docs/architecture.md).
+## Deploy to GitHub Pages
+
+The repo ships [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
+which builds and publishes the site on every push to `main`. One-time
+setup: repo Settings → Pages → Build and deployment → Source:
+**GitHub Actions**. The site then lives at
+`https://<owner>.github.io/didact/`; no other config needed.
 
 ## Tests & quality
 
@@ -75,8 +91,3 @@ Kernel/Session/Panel contract in [`docs/architecture.md`](docs/architecture.md).
   [bun](https://bun.sh) on PATH)
 - `pnpm lint` — eslint across the repo
 - `pnpm typecheck` — `tsc --noEmit` covering all packages
-
-## History
-
-The v0.1 prototypes (`x64-unicorn`, `x64-lite`, `riscv-lite`) are preserved
-at git tag `v0.1`.

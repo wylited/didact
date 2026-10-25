@@ -1,5 +1,5 @@
 {
-  "name": "@literate/kernel-mips",
+  "name": "@didact/kernel-mips",
   "version": "0.3.0",
   "private": true,
   "main": "src/index.ts",

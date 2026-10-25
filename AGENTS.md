@@ -6,14 +6,14 @@ one `tsc --noEmit` + `vite build` covers everything. No per-package build step.
 
 ## Repo map
 
-- `packages/core` — `@literate/core`: org parser, block runtime, panel host, theme.
-- `packages/kernel-asm64` — `@literate/kernel-asm64`: x86-64 kernel on vendored Unicorn/Keystone/Capstone wasm.
-- `packages/kernel-riscv` — `@literate/kernel-riscv`: RV32IM interpreter kernel (pure TypeScript).
-- `packages/kernel-mips` — `@literate/kernel-mips`: MIPS32 interpreter kernel (SPIM/MARS-style, pure TypeScript).
-- `packages/kernel-c` — `@literate/kernel-c`: C kernel on vendored clang wasm.
-- `packages/kernel-python` — `@literate/kernel-python`: Python kernel on vendored Pyodide.
-- `packages/kernel-typst` — `@literate/kernel-typst`: Typst kernel on vendored typst wasm + fonts.
-- `apps/site` — `@literate/site`: the website; `src/pages/*.org` + kernel registration only.
+- `packages/core` — `@didact/core`: org parser, block runtime, panel host, theme.
+- `packages/kernel-asm64` — `@didact/kernel-asm64`: x86-64 kernel on vendored Unicorn/Keystone/Capstone wasm.
+- `packages/kernel-riscv` — `@didact/kernel-riscv`: RV32IM interpreter kernel (pure TypeScript).
+- `packages/kernel-mips` — `@didact/kernel-mips`: MIPS32 interpreter kernel (SPIM/MARS-style, pure TypeScript).
+- `packages/kernel-c` — `@didact/kernel-c`: C kernel on vendored clang wasm.
+- `packages/kernel-python` — `@didact/kernel-python`: Python kernel on vendored Pyodide.
+- `packages/kernel-typst` — `@didact/kernel-typst`: Typst kernel on vendored typst wasm + fonts.
+- `apps/site` — `@didact/site`: the website; `src/pages/*.org` + kernel registration only.
 
 ## Kernel contract
 
@@ -42,9 +42,9 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
    `apps/site/public/vendor-<name>/` automatically on `pnpm dev`/`pnpm build`
    (the copies are git-ignored build inputs — `vendor/` for kernel-asm64,
    `vendor-c/`, `vendor-python/`, `vendor-typst/` are the existing examples).
-4. Add `"@literate/kernel-<name>": "workspace:*"` to `apps/site/package.json`
+4. Add `"@didact/kernel-<name>": "workspace:*"` to `apps/site/package.json`
    dependencies.
-5. Add `@literate/kernel-<name>` → `../../packages/kernel-<name>/src` to
+5. Add `@didact/kernel-<name>` → `../../packages/kernel-<name>/src` to
    both `apps/site/tsconfig.json` `paths` and `apps/site/vite.config.ts`
    `resolve.alias`.
 6. Register it in `apps/site/src/main.ts`: import the kernel and add it to
@@ -65,7 +65,7 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
 ## Style
 
 - Textbook-light visual language: white background, no border radius, no
-  accent color. Atkinson Hyperlegile for text, a mono face for code
+  accent color. Atkinson Hyperlegible for text, a mono face for code
   (`packages/core/src/theme.css` owns the tokens).
 - DOM hooks for tests/tools use `data-test` attributes
   (e.g. `data-test="results"` on results slots, `.lw-block-slot` mounts).

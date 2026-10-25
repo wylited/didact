@@ -1,8 +1,9 @@
 {
-  "name": "literate-website",
+  "name": "didact",
   "private": true,
   "version": "0.1.0",
-  "description": "Client-side literate-programming website prototypes: org-mode lessons with executable, steppable assembly blocks",
+  "packageManager": "pnpm@12.4.2",
+  "description": "Didact: client-side literate-programming site framework — org-mode lessons with executable, steppable code blocks and machine panels",
   "scripts": {
     "build": "node scripts/sync-vendors.mjs && pnpm --dir apps/site build",
     "dev": "node scripts/sync-vendors.mjs && pnpm --dir apps/site dev",

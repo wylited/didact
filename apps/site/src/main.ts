@@ -1,14 +1,14 @@
 // Thin composition layer (see docs/architecture.md): everything — org
-// parsing, block runtimes, machine panel, theme — lives in @literate/core.
+// parsing, block runtimes, machine panel, theme — lives in @didact/core.
 // The app only supplies the pages and the kernel registry.
-import { mountSite } from '@literate/core';
-import type { PageSpec } from '@literate/core';
-import { asm64Kernel } from '@literate/kernel-asm64';
-import { riscvKernel } from '@literate/kernel-riscv';
-import { mipsKernel } from '@literate/kernel-mips';
-import { cKernel } from '@literate/kernel-c';
-import { pythonKernel } from '@literate/kernel-python';
-import { typstKernel } from '@literate/kernel-typst';
+import { mountSite } from '@didact/core';
+import type { PageSpec } from '@didact/core';
+import { asm64Kernel } from '@didact/kernel-asm64';
+import { riscvKernel } from '@didact/kernel-riscv';
+import { mipsKernel } from '@didact/kernel-mips';
+import { cKernel } from '@didact/kernel-c';
+import { pythonKernel } from '@didact/kernel-python';
+import { typstKernel } from '@didact/kernel-typst';
 
 // Nav order, by page file stem (not alphabetical, not glob order).
 const PAGE_ORDER = ['x86-64-assembly', 'riscv', 'mips', 'c', 'python', 'typst'] as const;

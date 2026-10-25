@@ -1,4 +1,4 @@
-// @literate/core — org parser, block runtime, panel host, textbook-light
+// @didact/core — org parser, block runtime, panel host, textbook-light
 // theme. Packages export source TS; the app typechecks and bundles them.
 
 import '@fontsource/atkinson-hyperlegible/400.css';

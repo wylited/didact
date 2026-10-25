@@ -13,13 +13,13 @@
     "useDefineForClassFields": true,
     "types": ["vite/client"],
     "paths": {
-      "@literate/core": ["../../packages/core/src"],
-      "@literate/kernel-asm64": ["../../packages/kernel-asm64/src"],
-      "@literate/kernel-riscv": ["../../packages/kernel-riscv/src"],
-      "@literate/kernel-mips": ["../../packages/kernel-mips/src"],
-      "@literate/kernel-c": ["../../packages/kernel-c/src"],
-      "@literate/kernel-python": ["../../packages/kernel-python/src"],
-      "@literate/kernel-typst": ["../../packages/kernel-typst/src"]
+      "@didact/core": ["../../packages/core/src"],
+      "@didact/kernel-asm64": ["../../packages/kernel-asm64/src"],
+      "@didact/kernel-riscv": ["../../packages/kernel-riscv/src"],
+      "@didact/kernel-mips": ["../../packages/kernel-mips/src"],
+      "@didact/kernel-c": ["../../packages/kernel-c/src"],
+      "@didact/kernel-python": ["../../packages/kernel-python/src"],
+      "@didact/kernel-typst": ["../../packages/kernel-typst/src"]
     }
   },
   "include": ["src", "../../packages/*/src"]

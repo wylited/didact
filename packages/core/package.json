@@ -1,8 +1,8 @@
 {
-  "name": "@literate/core",
+  "name": "@didact/core",
   "version": "0.2.0",
   "type": "module",
-  "description": "Org parser, block runtime, panel host, and textbook-light theme for the literate website system",
+  "description": "Org parser, block runtime, panel host, and textbook-light theme for the didact system",
   "main": "src/index.ts",
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

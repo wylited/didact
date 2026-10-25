@@ -1,4 +1,4 @@
-// smoke.ts — bun smoke test for @literate/kernel-riscv.
+// smoke.ts — bun smoke test for @didact/kernel-riscv.
 // Run from the package root: `bun test/smoke.ts`.
 // Covers: assembler encodings + line-mapped errors, interpreter semantics
 // (sign extension, M extension, ecall I/O), and the Session contract

@@ -1,4 +1,4 @@
-// smoke.ts — bun smoke test for @literate/kernel-c.
+// smoke.ts — bun smoke test for @didact/kernel-c.
 // Run from anywhere: `bun packages/kernel-c/test/smoke.ts`.
 //
 // Drives the real vendored clang (YoWASP wasm build, ~86 MB under vendor/)

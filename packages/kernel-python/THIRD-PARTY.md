@@ -1,4 +1,4 @@
-# Third-party assets — @literate/kernel-python
+# Vendored third-party assets
 
 Everything in `vendor/` is copied unmodified from the `pyodide` npm package,
 version 314.0.7 (Pyodide's CPython 3.14 build). These are exactly the five

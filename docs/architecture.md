@@ -5,17 +5,17 @@ the app layer. Packages export **source TS** (`main: src/index.ts`); the app
 typechecks and bundles them — no per-package build step, no dist artifacts.
 
 ```
-packages/core            @literate/core           org parser, block runtime, panel host, theme
-packages/kernel-asm64    @literate/kernel-asm64   x86-64 via Unicorn/Keystone/Capstone wasm
-packages/kernel-riscv    @literate/kernel-riscv   RV32IM interpreter (pure TypeScript)
-packages/kernel-mips     @literate/kernel-mips    MIPS32 interpreter (pure TypeScript)
-packages/kernel-c        @literate/kernel-c       C via vendored clang wasm (wasm32-wasi)
-packages/kernel-python   @literate/kernel-python  Python via vendored Pyodide
-packages/kernel-typst    @literate/kernel-typst   Typst via vendored compiler wasm + fonts
-apps/site                @literate/site           the website (src/pages/*.org + kernel registration)
+packages/core            @didact/core           org parser, block runtime, panel host, theme
+packages/kernel-asm64    @didact/kernel-asm64   x86-64 via Unicorn/Keystone/Capstone wasm
+packages/kernel-riscv    @didact/kernel-riscv   RV32IM interpreter (pure TypeScript)
+packages/kernel-mips     @didact/kernel-mips    MIPS32 interpreter (pure TypeScript)
+packages/kernel-c        @didact/kernel-c       C via vendored clang wasm (wasm32-wasi)
+packages/kernel-python   @didact/kernel-python  Python via vendored Pyodide
+packages/kernel-typst    @didact/kernel-typst   Typst via vendored compiler wasm + fonts
+apps/site                @didact/site           the website (src/pages/*.org + kernel registration)
 ```
 
-Wiring: app aliases `@literate/core` and each `@literate/kernel-*` →
+Wiring: app aliases `@didact/core` and each `@didact/kernel-*` →
 `../../packages/*/src` (tsconfig `paths` + vite `resolve.alias`); one
 `tsc --noEmit` in `apps/site` covers all packages (include
 `../../packages/*/src`).
@@ -34,7 +34,7 @@ Rules: sessions are single-tenant (one per block); `state()` must be cheap
 and complete (core re-renders the whole panel from it); async signatures
 today so pyodide-style kernels need no contract change later.
 
-## Core responsibilities (`@literate/core`)
+## Core responsibilities (`@didact/core`)
 
 
 - `parseOrg(src): OrgDoc` — grammar per `docs/design.md`.

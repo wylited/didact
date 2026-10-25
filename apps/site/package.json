@@ -1,22 +1,22 @@
 {
-  "name": "@literate/site",
+  "name": "@didact/site",
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "Literate website: composes @literate/core with six kernels (x86-64, RISC-V, MIPS, C, Python, Typst)",
+  "description": "Didact site: composes @didact/core with six kernels (x86-64, RISC-V, MIPS, C, Python, Typst)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@literate/core": "workspace:*",
-    "@literate/kernel-asm64": "workspace:*",
-    "@literate/kernel-riscv": "workspace:*",
-    "@literate/kernel-mips": "workspace:*",
-    "@literate/kernel-c": "workspace:*",
-    "@literate/kernel-python": "workspace:*",
-    "@literate/kernel-typst": "workspace:*"
+    "@didact/core": "workspace:*",
+    "@didact/kernel-asm64": "workspace:*",
+    "@didact/kernel-riscv": "workspace:*",
+    "@didact/kernel-mips": "workspace:*",
+    "@didact/kernel-c": "workspace:*",
+    "@didact/kernel-python": "workspace:*",
+    "@didact/kernel-typst": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.9.3",

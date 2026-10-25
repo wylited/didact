@@ -1,5 +1,5 @@
 {
-  "name": "@literate/kernel-c",
+  "name": "@didact/kernel-c",
   "version": "0.3.0",
   "private": true,
   "main": "src/index.ts",

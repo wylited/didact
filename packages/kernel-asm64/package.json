@@ -1,5 +1,5 @@
 {
-  "name": "@literate/kernel-asm64",
+  "name": "@didact/kernel-asm64",
   "version": "0.2.0",
   "private": true,
   "main": "src/index.ts",

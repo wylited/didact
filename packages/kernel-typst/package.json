@@ -1,5 +1,5 @@
 {
-  "name": "@literate/kernel-typst",
+  "name": "@didact/kernel-typst",
   "version": "0.3.0",
   "private": true,
   "main": "src/index.ts",
