@@ -123,6 +123,11 @@ export function toNumber(v: Value): number {
   if (typeof v === 'string') {
     const t = v.trim();
     if (t === '') return 0;
+    // Radix integer literals (0x1F, 0b101, 0o17; case-insensitive, no sign —
+    // the StringToNumber grammar allows '+'/'-' only on decimal forms).
+    if (/^0[xX][0-9a-fA-F]+$/.test(t) || /^0[bB][01]+$/.test(t) || /^0[oO][0-7]+$/.test(t)) {
+      return Number(t);
+    }
     if (!/^[+-]?(Infinity|\d+\.?\d*([eE][+-]?\d+)?|\.\d+([eE][+-]?\d+)?)$/.test(t)) return NaN;
     return Number(t);
   }
@@ -693,7 +698,15 @@ export class Interpreter {
   ): Generator<YieldInfo, void> {
     let r: Value = v;
     if (onFulfilled !== undefined) r = yield* this.callValue(onFulfilled, [v], line);
-    settlePromise(result, isPromise(r) ? r.value : r);
+    if (isPromise(r)) {
+      // Assimilation: the outer promise settles with r's eventual value, not
+      // r's current (unsettled ⇒ undefined) one. An already-settled r settles
+      // now; a pending one forwards through its own waiting queue.
+      if (r.settled) settlePromise(result, r.value);
+      else r.waiting.push((w) => settlePromise(result, w));
+      return;
+    }
+    settlePromise(result, r);
   }
   // -- properties -----------------------------------------------------
 

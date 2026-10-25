@@ -21,6 +21,9 @@ export class JsSession implements Session {
   private pending: IteratorResult<YieldInfo, void> | null = null;
   /** Display snapshot that `changed` flags in the Scopes panel diff on. */
   private prevScope = new Map<string, string>();
+  /** Error that crashed the current run; sticky until reset() (house pattern
+   *  from kernel-lisp: a crashed program must not report exit(0) on re-run). */
+  private runError: string | null = null;
 
   async load(src: string): Promise<LoadResult> {
     try {
@@ -41,6 +44,7 @@ export class JsSession implements Session {
     this.gen = null;
     this.pending = null;
     this.prevScope = new Map();
+    this.runError = null;
   }
 
   // -- driver -----------------------------------------------------------
@@ -68,9 +72,17 @@ export class JsSession implements Session {
     return { finished: this.interp?.isDone() ?? false, steps, ...overrides };
   }
 
+  /** Record a run error and report it; sticky until reset(). */
+  private fail(e: unknown): RunResult {
+    this.runError = this.fmtErr(e);
+    return this.result({ finished: false, error: this.runError });
+  }
+
   /** Run to completion, pausing *before* any statement on a breakpoint line. */
   async run(breakpoints?: number[]): Promise<RunResult> {
     if (this.interp === null) return this.result({ error: 'no program loaded' });
+    // A crashed run keeps reporting its error instead of a clean exit.
+    if (this.runError !== null) return this.result({ finished: false, error: this.runError });
     const bps = breakpoints ?? [];
     this.snapshotScopes(); // `changed` flags diff across this run segment
     for (;;) {
@@ -78,7 +90,7 @@ export class JsSession implements Session {
       try {
         next = this.peek();
       } catch (e) {
-        return this.result({ finished: false, error: this.fmtErr(e) });
+        return this.fail(e);
       }
       if (next.done) {
         return this.result({ exit: 'exit(0)' });
@@ -92,7 +104,7 @@ export class JsSession implements Session {
       try {
         this.consume();
       } catch (e) {
-        return this.result({ finished: false, error: this.fmtErr(e) });
+        return this.fail(e);
       }
       if (info.task !== undefined) {
         // statements inside a task were consumed above; loop to next marker
@@ -101,13 +113,13 @@ export class JsSession implements Session {
           try {
             inner = this.peek();
           } catch (err) {
-            return this.result({ finished: false, error: this.fmtErr(err) });
+            return this.fail(err);
           }
           if (inner.done || inner.value.task !== undefined) break;
           try {
             this.consume();
           } catch (err) {
-            return this.result({ finished: false, error: this.fmtErr(err) });
+            return this.fail(err);
           }
         }
       }
@@ -117,18 +129,20 @@ export class JsSession implements Session {
   /** One step: a single statement in the body, one whole task between tasks. */
   async step(): Promise<{ ran: boolean; result?: RunResult }> {
     if (this.interp === null) return { ran: false, result: this.result({ error: 'no program loaded' }) };
+    // A crashed run keeps reporting its error instead of a clean exit.
+    if (this.runError !== null) return { ran: false, result: this.result({ finished: false, error: this.runError }) };
     this.snapshotScopes(); // `changed` flags diff across this step
     let next: IteratorResult<YieldInfo, void>;
     try {
       next = this.peek();
     } catch (e) {
-      return { ran: false, result: this.result({ finished: false, error: this.fmtErr(e) }) };
+      return { ran: false, result: this.fail(e) };
     }
     if (next.done) return { ran: false, result: this.result({ exit: this.interp.isDone() ? 'exit(0)' : undefined }) };
     try {
       this.consume();
     } catch (e) {
-      return { ran: true, result: this.result({ finished: false, error: this.fmtErr(e) }) };
+      return { ran: true, result: this.fail(e) };
     }
     // A task invocation covers all statements it runs; keep consuming them.
     if (next.value.task !== undefined) {
@@ -137,13 +151,13 @@ export class JsSession implements Session {
         try {
           inner = this.peek();
         } catch (err) {
-          return { ran: true, result: this.result({ finished: false, error: this.fmtErr(err) }) };
+          return { ran: true, result: this.fail(err) };
         }
         if (inner.done || inner.value.task !== undefined) break;
         try {
           this.consume();
         } catch (err) {
-          return { ran: true, result: this.result({ finished: false, error: this.fmtErr(err) }) };
+          return { ran: true, result: this.fail(err) };
         }
       }
     }

@@ -118,6 +118,27 @@ describe('loose equality (abstract op) vs strict equality', () => {
     expect(toNumber('x')).toBe(NaN);
   });
 
+  it("ToNumber accepts 0x/0b/0o integer literals ('0x1' == 1 is true, per ES)", () => {
+    expect(toNumber('0x1')).toBe(1);
+    expect(toNumber('0X1F')).toBe(31);
+    expect(toNumber('0b11')).toBe(3);
+    expect(toNumber('0B101')).toBe(5);
+    expect(toNumber('0o7')).toBe(7);
+    expect(toNumber('0O17')).toBe(15);
+    // the StringToNumber grammar allows a sign only on decimal forms
+    expect(toNumber('+0x1')).toBe(NaN);
+    expect(toNumber('-0b1')).toBe(NaN);
+    // a prefix with no (or out-of-radix) digits is not a numeric literal
+    expect(toNumber('0x')).toBe(NaN);
+    expect(toNumber('0b2')).toBe(NaN);
+    expect(toNumber('0o8')).toBe(NaN);
+  });
+
+  it("runtime == compares '0x1' == 1, '0b11' == 3, '0o7' == 7 as true", async () => {
+    const { out } = await run("console.log('0x1' == 1, '0b11' == 3, '0o7' == 7);");
+    expect(out).toBe('true true true\n');
+  });
+
   it('the interpreter produces the same table at runtime', async () => {
     const { out } = await run(`
 console.log([] == false, '' == 0, '1' == 1, null == undefined, NaN == NaN, [] === false);
@@ -188,6 +209,26 @@ console.log('queued');`);
     expect(rows[0]!.line).toBe(2);
     expect(rows[1]!.line).toBe(1);
     session.dispose();
+  });
+
+  it('a .then callback returning a pending promise settles the outer one with its eventual value', async () => {
+    // Regression: assimilation used to read the unsettled promise's .value
+    // (undefined) instead of following its settlement — real JS logs 20.
+    const { out, r } = await run(`
+Promise.resolve(1).then(function (v) {
+  return Promise.resolve(2).then(function (w) { return w * 10; });
+}).then(function (v) { console.log('got', v); });
+`);
+    expect(r.finished).toBe(true);
+    expect(out).toBe('got 20\n');
+  });
+
+  it('a .then callback returning an already-settled promise still adopts its value', async () => {
+    const { out, r } = await run(`
+Promise.resolve(1).then(function (v) { return Promise.resolve(v + 1); }).then(function (v) { console.log('got', v); });
+`);
+    expect(r.finished).toBe(true);
+    expect(out).toBe('got 2\n');
   });
 });
 
@@ -440,6 +481,43 @@ notFn();`);
     const { r } = await run(`const frozen = 1;
 frozen = 2;`);
     expect(r.error).toBe('line 2: Assignment to constant variable.');
+  });
+
+  it('a crashed run re-reports the same error on run()/step() until reset()', async () => {
+    // Regression: the crashed generator just looked "done", so a second
+    // run() reported {finished:false, exit:'exit(0)'} — a clean exit for a
+    // crashed program.
+    const session = jsKernel.createSession();
+    await session.load("console.log('start');\nnope();");
+    const first = await session.run();
+    expect(first.finished).toBe(false);
+    expect(first.exit).toBeUndefined();
+    expect(first.error).toBe('line 2: nope is not defined');
+
+    // second run() reports the SAME error, never exit(0)
+    const again = await session.run();
+    expect(again.finished).toBe(false);
+    expect(again.exit).toBeUndefined();
+    expect(again.error).toBe(first.error);
+
+    // step() is sticky too — it must not resume a dead generator
+    const stepped = await session.step();
+    expect(stepped.ran).toBe(false);
+    expect(stepped.result?.error).toBe(first.error);
+
+    // reset() clears the crash: the program restarts from line 1
+    session.reset();
+    const fresh = await session.step();
+    expect(fresh.ran).toBe(true);
+    expect(fresh.result?.error).toBeUndefined();
+    expect(consoleOf(session.state())).toBe('start\n');
+
+    // a fixed program loaded afresh exits cleanly
+    await session.load("console.log('fixed');");
+    const clean = await session.run();
+    expect(clean.error).toBeUndefined();
+    expect(clean.exit).toBe('exit(0)');
+    session.dispose();
   });
 });
 
