@@ -1,11 +1,11 @@
-// Loader for the C++ engine. Adapted from packages/kernel-c/src/vendor.ts
-// (same vendored toolchain, served under this package's own vendor-cpp/ dir);
-// the engine itself is shared, not forked:
+// Loader for the C++ engine. Adapted from packages/kernel-c/src/vendor.ts;
+// the engine is shared, not forked:
 //
 //   @yowasp/clang 22.0.0-git20542-10 (real clang++ + wasm-ld + wasi-libc and
 //   libc++ sysroots, built for WebAssembly by the YoWASP project), an npm
-//   dependency of this package; scripts/sync-vendors.mjs copies it into the
-//   app's public/vendor-cpp/clang/ for serving at integration time.
+//   dependency of this package. kernel-c and kernel-cpp pin the same
+//   version, so sync-vendors serves ONE copy under public/vendor-c/clang/
+//   and this loader points at it — no duplicate ~105 MB download.
 //
 // How the engine finds its assets (verified by reading bundle.js): every
 // resource — llvm.core.wasm … llvm.core4.wasm and llvm-resources.tar (the
@@ -16,8 +16,9 @@
 // untars the sysroot, and instantiates the toolchain. No CDN is contacted.
 //
 // First use lazily fetches ~105 MB from the vendor base (the site serves
-// vendor-cpp/ as plain static files); repeat visits are served from the HTTP
-// cache, and the imported module is cached in `enginePromise`.
+// vendor-c/ as plain static files, shared with kernel-c); repeat visits
+// are served from the HTTP cache, and the imported module is cached in
+// `enginePromise`.
 
 /** File-tree values accepted/returned by the YoWASP API. */
 export type Tree = { [name: string]: Tree | string | Uint8Array };
@@ -34,7 +35,7 @@ export interface ClangBundle {
 
 function defaultVendorBase(): string {
   if (typeof document !== 'undefined') {
-    return new URL('vendor-cpp/', document.baseURI).href;
+    return new URL('vendor-c/', document.baseURI).href;
   }
   return ''; // headless runs import the npm dependency directly
 }

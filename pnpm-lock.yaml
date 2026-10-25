@@ -190,6 +190,15 @@ importers:
       '@didact/kernel-c':
         specifier: workspace:*
         version: link:../../packages/kernel-c
+      '@didact/kernel-cpp':
+        specifier: workspace:*
+        version: link:../../packages/kernel-cpp
+      '@didact/kernel-javascript':
+        specifier: workspace:*
+        version: link:../../packages/kernel-javascript
+      '@didact/kernel-lisp':
+        specifier: workspace:*
+        version: link:../../packages/kernel-lisp
       '@didact/kernel-mips':
         specifier: workspace:*
         version: link:../../packages/kernel-mips
@@ -269,6 +278,10 @@ importers:
       '@yowasp/clang':
         specifier: 22.0.0-git20542-10
         version: 22.0.0-git20542-10
+
+  packages/kernel-javascript: {}
+
+  packages/kernel-lisp: {}
 
   packages/kernel-mips: {}
 

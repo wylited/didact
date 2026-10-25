@@ -29,8 +29,20 @@ export default defineConfig({
         '../../packages/kernel-c/src',
         import.meta.url,
       ).pathname,
+      '@didact/kernel-cpp': new URL(
+        '../../packages/kernel-cpp/src',
+        import.meta.url,
+      ).pathname,
       '@didact/kernel-python': new URL(
         '../../packages/kernel-python/src',
+        import.meta.url,
+      ).pathname,
+      '@didact/kernel-javascript': new URL(
+        '../../packages/kernel-javascript/src',
+        import.meta.url,
+      ).pathname,
+      '@didact/kernel-lisp': new URL(
+        '../../packages/kernel-lisp/src',
         import.meta.url,
       ).pathname,
       '@didact/kernel-typst': new URL(

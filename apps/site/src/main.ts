@@ -7,11 +7,14 @@ import { asm64Kernel } from '@didact/kernel-asm64';
 import { riscvKernel } from '@didact/kernel-riscv';
 import { mipsKernel } from '@didact/kernel-mips';
 import { cKernel } from '@didact/kernel-c';
+import { cppKernel } from '@didact/kernel-cpp';
 import { pythonKernel } from '@didact/kernel-python';
+import { jsKernel } from '@didact/kernel-javascript';
+import { lispKernel } from '@didact/kernel-lisp';
 import { typstKernel } from '@didact/kernel-typst';
 
 // Nav order, by page file stem (not alphabetical, not glob order).
-const PAGE_ORDER = ['x86-64-assembly', 'riscv', 'mips', 'c', 'python', 'typst'] as const;
+const PAGE_ORDER = ['x86-64-assembly', 'riscv', 'mips', 'c', 'cpp', 'python', 'javascript', 'lisp', 'typst'] as const;
 
 // Every lesson is one .org file in src/pages; the nav title comes from its
 // #+TITLE: line (the file stem is the fallback).
@@ -46,6 +49,6 @@ if (!root) throw new Error('apps/site: #root not found');
 
 mountSite({
   root,
-  kernels: [asm64Kernel, riscvKernel, mipsKernel, cKernel, pythonKernel, typstKernel],
+  kernels: [asm64Kernel, riscvKernel, mipsKernel, cKernel, cppKernel, pythonKernel, jsKernel, lispKernel, typstKernel],
   pages,
 });

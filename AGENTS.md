@@ -10,9 +10,11 @@ one `tsc --noEmit` + `vite build` covers everything. No per-package build step.
 - `packages/kernel-asm64` — `@didact/kernel-asm64`: x86-64 kernel on vendored Unicorn/Keystone/Capstone wasm.
 - `packages/kernel-riscv` — `@didact/kernel-riscv`: RV32IM interpreter kernel (pure TypeScript).
 - `packages/kernel-mips` — `@didact/kernel-mips`: MIPS32 interpreter kernel (SPIM/MARS-style, pure TypeScript).
-- `packages/kernel-c` — `@didact/kernel-c`: C kernel on vendored clang wasm.
+- `packages/kernel-c` — `@didact/kernel-c`: C kernel on the clang wasm engine.
+- `packages/kernel-cpp` — `@didact/kernel-cpp`: C++ kernel on the same clang wasm engine (libc++, c++20, no exceptions).
+- `packages/kernel-javascript` — `@didact/kernel-javascript`: JavaScript teaching-subset interpreter kernel (pure TypeScript).
+- `packages/kernel-lisp` — `@didact/kernel-lisp`: Scheme-flavored Lisp interpreter kernel with cons-heap panels (pure TypeScript).
 - `packages/kernel-python` — `@didact/kernel-python`: Python kernel on vendored Pyodide.
-- `packages/kernel-typst` — `@didact/kernel-typst`: Typst kernel on vendored typst wasm + fonts.
 - `apps/site` — `@didact/site`: the website; `src/pages/*.org` + kernel registration only.
 
 ## Kernel contract

@@ -5,14 +5,17 @@ the app layer. Packages export **source TS** (`main: src/index.ts`); the app
 typechecks and bundles them — no per-package build step, no dist artifacts.
 
 ```
-packages/core            @didact/core           org parser, block runtime, panel host, theme
-packages/kernel-asm64    @didact/kernel-asm64   x86-64 via Unicorn/Keystone/Capstone wasm
-packages/kernel-riscv    @didact/kernel-riscv   RV32IM interpreter (pure TypeScript)
-packages/kernel-mips     @didact/kernel-mips    MIPS32 interpreter (pure TypeScript)
-packages/kernel-c        @didact/kernel-c       C via vendored clang wasm (wasm32-wasi)
-packages/kernel-python   @didact/kernel-python  Python via vendored Pyodide
-packages/kernel-typst    @didact/kernel-typst   Typst via vendored compiler wasm + fonts
-apps/site                @didact/site           the website (src/pages/*.org + kernel registration)
+packages/core              @didact/core             org parser, block runtime, panel host, theme
+packages/kernel-asm64      @didact/kernel-asm64      x86-64 via Unicorn/Keystone/Capstone wasm
+packages/kernel-riscv      @didact/kernel-riscv      RV32IM interpreter (pure TypeScript)
+packages/kernel-mips       @didact/kernel-mips       MIPS32 interpreter (pure TypeScript)
+packages/kernel-c          @didact/kernel-c          C via vendored clang wasm (wasm32-wasi)
+packages/kernel-cpp        @didact/kernel-cpp        C++ via the same clang engine (libc++, -fno-exceptions)
+packages/kernel-javascript @didact/kernel-javascript JavaScript teaching-subset interpreter (pure TypeScript)
+packages/kernel-lisp       @didact/kernel-lisp       Scheme-flavored Lisp interpreter, cons-heap panels (pure TypeScript)
+packages/kernel-python     @didact/kernel-python     Python via vendored Pyodide
+packages/kernel-typst      @didact/kernel-typst      Typst via vendored compiler wasm + fonts
+apps/site                  @didact/site             the website (src/pages/*.org + kernel registration)
 ```
 
 Wiring: app aliases `@didact/core` and each `@didact/kernel-*` →

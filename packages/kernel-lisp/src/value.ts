@@ -129,6 +129,12 @@ export class Heap {
 
 // ---- Environments ---------------------------------------------------------
 
+/** Walk a frame chain outward (global last) without aliasing `this`. */
+function* envChain(start: Env | null): Generator<Env, void, undefined> {
+  let e = start;
+  while (e !== null) { yield e; e = e.parent; }
+}
+
 /** One frame of bindings: a name → value map plus a parent pointer. */
 export class Env {
   readonly vars = new Map<string, Value>();
@@ -139,25 +145,20 @@ export class Env {
   ) {}
 
   lookup(name: string): Value | undefined {
-    let e: Env | null = this;
-    while (e !== null) {
+    for (const e of envChain(this)) {
       const v = e.vars.get(name);
       if (v !== undefined) return v;
-      e = e.parent;
     }
     return undefined;
   }
 
   /** Find the frame that owns `name`, or null if unbound anywhere. */
   owner(name: string): Env | null {
-    let e: Env | null = this;
-    while (e !== null) {
+    for (const e of envChain(this)) {
       if (e.vars.has(name)) return e;
-      e = e.parent;
     }
     return null;
   }
-
   define(name: string, value: Value): void {
     this.vars.set(name, value);
   }
@@ -165,8 +166,7 @@ export class Env {
   /** Chain from this frame out to global, e.g. "let (line 4) → global". */
   chain(): string {
     const names: string[] = [];
-    let e: Env | null = this;
-    while (e !== null) { names.push(e.name); e = e.parent; }
+    for (const e of envChain(this)) names.push(e.name);
     return names.join(' → ');
   }
 }

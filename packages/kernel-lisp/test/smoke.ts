@@ -5,7 +5,7 @@
 // bounds, the Session contract (panels, breakpoints, reset), and a
 // round-trip of every lesson block against its #+RESULTS.
 
-import assert from 'node:assert/strict';
+
 import { lispKernel, Machine, makeBuiltins, readProgram, renderWrite, withHeap } from '../src/index';
 import type { Panel } from '../src/index';
 

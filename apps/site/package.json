@@ -15,7 +15,10 @@
     "@didact/kernel-riscv": "workspace:*",
     "@didact/kernel-mips": "workspace:*",
     "@didact/kernel-c": "workspace:*",
+    "@didact/kernel-cpp": "workspace:*",
     "@didact/kernel-python": "workspace:*",
+    "@didact/kernel-javascript": "workspace:*",
+    "@didact/kernel-lisp": "workspace:*",
     "@didact/kernel-typst": "workspace:*"
   },
   "devDependencies": {

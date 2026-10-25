@@ -18,7 +18,10 @@
       "@didact/kernel-riscv": ["../../packages/kernel-riscv/src"],
       "@didact/kernel-mips": ["../../packages/kernel-mips/src"],
       "@didact/kernel-c": ["../../packages/kernel-c/src"],
+      "@didact/kernel-cpp": ["../../packages/kernel-cpp/src"],
       "@didact/kernel-python": ["../../packages/kernel-python/src"],
+      "@didact/kernel-javascript": ["../../packages/kernel-javascript/src"],
+      "@didact/kernel-lisp": ["../../packages/kernel-lisp/src"],
       "@didact/kernel-typst": ["../../packages/kernel-typst/src"]
     }
   },
