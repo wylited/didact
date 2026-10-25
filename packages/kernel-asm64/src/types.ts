@@ -75,6 +75,7 @@ export interface Kernel {
     | 'c'
     | 'cpp'
     | 'javascript'
+    | 'lua'
     | 'python'
     | 'scheme'
     | 'plain';
