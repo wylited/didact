@@ -76,9 +76,9 @@ today so pyodide-style kernels need no contract change later.
 - Thin composition: glob `src/pages/*.org` raw, order them by the
   `PAGE_ORDER` array in `src/main.ts` (stems of the page files; the nav
   title comes from each file's `#+TITLE:` line), register
-  `[asm64Kernel, riscvKernel, mipsKernel, cKernel, pythonKernel,
-  typstKernel]`, mount with `pages`.
+  `[asm64Kernel, riscvKernel, mipsKernel, cKernel, cppKernel,
+  pythonKernel, jsKernel, lispKernel, typstKernel]`, mount with `pages`.
 - `src/pages/*.org`: one lesson per kernel (`x86-64-assembly`, `riscv`,
-  `mips`, `c`, `python`, `typst`), with per-block controls, breakpoints,
-  panel attach/detach, pages.
+  `mips`, `c`, `cpp`, `python`, `javascript`, `lisp`, `typst`), with
+  per-block controls, breakpoints, panel attach/detach, pages.
 - index.html (noscript in body), favicon optional, title plain text.

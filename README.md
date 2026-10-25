@@ -4,9 +4,10 @@ A client-side literate-programming site framework. Drop `.org` files in and
 get a site where prose interleaves with executable, steppable code blocks;
 each block drives an under-the-hood machine panel — registers, disassembly,
 memory, console; a disassembly row shows its source line's `;` comment on
-hover. Six kernels ship out of the box: x86-64, RV32IM, MIPS32, C, Python,
-and Typst. No server, no runtime network beyond same-origin vendor assets:
-parsing, assembly, execution, and stepping are all client-side.
+hover. Nine kernels ship out of the box: x86-64, RV32IM, MIPS32, C, C++,
+Python, JavaScript, Lisp, and Typst. No server, no runtime network beyond
+same-origin vendor assets: parsing, assembly, execution, and stepping are
+all client-side.
 
 ## Quickstart
 

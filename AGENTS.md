@@ -15,6 +15,7 @@ one `tsc --noEmit` + `vite build` covers everything. No per-package build step.
 - `packages/kernel-javascript` — `@didact/kernel-javascript`: JavaScript teaching-subset interpreter kernel (pure TypeScript).
 - `packages/kernel-lisp` — `@didact/kernel-lisp`: Scheme-flavored Lisp interpreter kernel with cons-heap panels (pure TypeScript).
 - `packages/kernel-python` — `@didact/kernel-python`: Python kernel on vendored Pyodide.
+- `packages/kernel-typst` — `@didact/kernel-typst`: Typst kernel on typst wasm + fonts.
 - `apps/site` — `@didact/site`: the website; `src/pages/*.org` + kernel registration only.
 
 ## Kernel contract
@@ -37,7 +38,8 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
    kernel's `id` must match the org `#+BEGIN_SRC <lang>` word; declare
    `editorSyntax` with one of the ids supported in
    `packages/core/src/languages.ts` (`asm-intel`, `asm-riscv`, `asm-mips`,
-   `c`, `python`, `plain`; missing/unknown → plain text).
+   `c`, `cpp`, `javascript`, `python`, `scheme`, `plain`;
+   missing/unknown → plain text).
 3. Declare the wasm engine as an npm dependency of the kernel package
    (exact version, no caret) and record licenses in `THIRD-PARTY.md`;
    keep license texts under `packages/kernel-<name>/vendor/`. Add the

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "Didact site: composes @didact/core with six kernels (x86-64, RISC-V, MIPS, C, Python, Typst)",
+  "description": "Didact site: composes @didact/core with nine kernels (x86-64, RISC-V, MIPS, C, C++, Python, JavaScript, Lisp, Typst)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
