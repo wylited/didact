@@ -1,0 +1,175 @@
+#+TITLE: JavaScript, the Weird Parts, Step by Step
+#+SUBTITLE: A small interpreter you can single-step through — ==, closures, hoisting and the event loop, on a machine small enough to hold in your head
+
+* The subset you are driving
+
+This page runs a hand-written JavaScript interpreter, not your browser's.
+It speaks a deliberately small dialect: =var=/=let=/=const=, functions and
+arrow functions, =if=/=while=/=for(;;)=, and a few builtins (=Math=,
+=console=, array and string methods). There are no classes, no =this=, no
+async/await — those are separate lessons. Anything outside the subset is
+rejected *before anything runs*, with the offending line named.
+
+That smallness is the method: every rule below is implemented in a few
+hundred lines of TypeScript you could read on a slow afternoon, and the
+panels let you watch each rule fire — the /Scopes/ panel shows every live
+binding, the /Call stack/ panel every live frame, and the /Event loop/
+panel the two task queues we meet in the last section.
+
+* == versus ===, or why [] == false
+
+JavaScript has two equality operators. Strict equality (===) is what it
+says: different types are different, forever. Loose equality (==) is a
+/coercion machine/: when the two sides have different types it converts
+them, using the same abstract operations the spec names =ToNumber= and
+=ToPrimitive=, until the types match.
+
+The rules the interpreter implements, exactly:
+
+| Comparison            | Coercion performed                | Result  |
+|-----------------------+-----------------------------------+---------|
+| ='' == 0=             | =ToNumber('')= is 0               | true    |
+| ='1' == 1=            | =ToNumber('1')= is 1              | true    |
+| =[] == false=         | =[]= → =''= → =0=; =false= → =0= | true    |
+| =null == undefined=   | special pair, equal to nothing else | true  |
+| =NaN == NaN=          | NaN equals nothing, not even itself | false |
+| =[] === false=        | none — types differ                | false   |
+
+The array case is the famous one: an empty array coerces to the empty
+string (that is =Array.prototype.join= with nothing to join), the empty
+string coerces to 0, and =false= coerces to 0. Two coercions on the left,
+one on the right, and suddenly an array equals a boolean. Watch the
+middle column happen line by line with the Step button.
+
+#+BEGIN_SRC javascript
+console.log('' == 0, '1' == 1);
+console.log([] == false, [] == 0, [7] == 7);
+console.log(null == undefined, null == 0, undefined == 0);
+console.log(NaN == NaN, NaN === NaN);
+console.log([] === false, '1' === 1);
+#+END_SRC
+
+#+RESULTS:
+: true true
+: true true true
+: true false false
+: false false
+: false false
+
+The teaching rule most style guides settled on: use === unless you can
+say out loud which row of the table you are relying on.
+
+* Closures: what a function remembers
+
+A function value carries its birth environment with it. In the loop
+below, the pushed functions all close over the *same* =var i= binding —
+there is only one, function-scoped — so by the time they run, the loop
+is long finished and =i= is 3. With =let=, each iteration gets its
+/fresh/ binding (the interpreter copies the loop variable after each
+pass), so each closure captures the value it was created with.
+
+#+BEGIN_SRC javascript
+var withVar = [];
+for (var i = 0; i < 3; i = i + 1) {
+  withVar.push(function () { return i; });
+}
+var withLet = [];
+for (let j = 0; j < 3; j = j + 1) {
+  withLet.push(function () { return j; });
+}
+console.log(withVar[0](), withVar[1](), withVar[2]());
+console.log(withLet[0](), withLet[1](), withLet[2]());
+#+END_SRC
+
+#+RESULTS:
+: 3 3 3
+: 0 1 2
+
+Set a breakpoint on the =console.log= lines and look at the Scopes
+panel: the =var= closures share one =i=; the =let= closures each hold a
+different =j=. A closure is not a copy of a value — it is a live
+reference to an environment slot, and the two loops differ only in how
+many slots exist.
+
+* Hoisting: declarations move, initialisations do not
+
+Before the first statement of a scope runs, the interpreter walks the
+whole scope and pre-creates the declarations: every =var= becomes
+=undefined= immediately, and function declarations become fully callable
+functions. The *initialisations* stay where you wrote them. The window
+between the top of the scope and the declaration line is the temporal
+dead zone for =let=/=const= — touching it throws, with the line of the
+/read/, which is why the first log below never prints.
+
+#+BEGIN_SRC javascript
+console.log(hoistedVar, typeof hoistedFn);
+var hoistedVar = 'now set';
+function hoistedFn() { return 'callable before its line'; }
+console.log(hoistedVar, hoistedFn());
+console.log(later);
+let later = 'never reached';
+#+END_SRC
+
+#+RESULTS:
+: undefined function
+: now set callable before its line
+
+The third log throws =Cannot access 'later' before initialization= and
+the block stops there — the results above are everything that ran. Step
+from the top and watch =hoistedVar= appear in the Scopes panel /before/
+line 1 executes: that is hoisting, visible.
+
+* The event loop: sync, micro, macro
+
+Everything in this dialect runs on one of three layers. The program body
+runs first, to completion, one statement at a time — no callback
+interrupts it. =Promise.resolve().then(f)= queues =f= as a /microtask/.
+=setTimeout(f, ms)= queues =f= as a /macrotask/; the delay is clamped
+away here, so what matters is queue order. The loop the interpreter runs
+after the body is the same one browsers run: drain /all/ microtasks,
+then /one/ macrotask, then microtasks again, until both queues are
+empty. Microtasks always win.
+
+#+BEGIN_SRC javascript
+console.log('1 sync');
+setTimeout(function () { console.log('4 macrotask'); }, 0);
+Promise.resolve().then(function () { console.log('3 microtask'); });
+console.log('2 still sync');
+#+END_SRC
+
+#+RESULTS:
+: 1 sync
+: 2 still sync
+: 3 microtask
+: 4 macrotask
+
+Breakpoint on line 4 and the Event loop panel shows both queues with
+their heads marked: the microtask sits in front regardless of the
+=setTimeout= delay. Chain =.then= calls and they queue in order, each
+one still ahead of every macrotask — that ordering is the whole reason
+promise libraries feel instant.
+
+* Small data work: map and filter
+
+The array methods here are implemented in the interpreter itself, and
+the callbacks are ordinary closures — so you can breakpoint /inside/ a
+callback and watch the call stack grow a frame per element.
+
+#+BEGIN_SRC javascript
+var numbers = [1, 2, 3, 4, 5, 6];
+var evens = numbers.filter(function (n) { return n % 2 === 0; });
+var doubled = evens.map(function (n) { return n * 2; });
+console.log(evens);
+console.log(doubled);
+console.log(doubled.join(' · '));
+#+END_SRC
+
+#+RESULTS:
+: [ 2, 4, 6 ]
+: [ 4, 8, 12 ]
+: 4 · 8 · 12
+
+That is the whole tour: one coercion table, one rule about what closures
+capture, one pass of hoisting, one event loop, and the ordinary
+functions that tie them together. Break something and read the error —
+every message names its line.
