@@ -1,7 +1,7 @@
 // smoke.ts — bun smoke test for @didact/kernel-c.
 // Run from anywhere: `bun packages/kernel-c/test/smoke.ts`.
 //
-// Drives the real vendored clang (YoWASP wasm build, ~86 MB under vendor/)
+// Drives the real clang (YoWASP wasm build, ~105 MB via node_modules)
 // headlessly through the package's public API: the hello block from
 // lesson/lesson.org is compiled to a wasm32-wasip1 module and executed on
 // the hand-written WASI shim; a broken block must surface clang's own

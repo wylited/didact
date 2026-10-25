@@ -1,4 +1,4 @@
-// Loader for the vendored Pyodide distribution shipped in vendor/.
+// Loader for the Pyodide distribution (pyodide@314.0.7 npm dependency).
 //
 // What the browser fetches at engine boot (verified by reading pyodide.js
 // from pyodide 314.0.7): the UMD entry `pyodide.js` (a classic script that
@@ -8,10 +8,10 @@
 //   - pyodide.asm.wasm    — CPython 3.14 compiled to WebAssembly
 //   - python_stdlib.zip   — the standard library, mounted at boot
 //   - pyodide-lock.json   — package index used by pyodide.loadPackage
-// Exactly those five files are vendored; nothing is ever fetched from a CDN
+// Exactly those five files are served; nothing is ever fetched from a CDN
 // and no other network access happens at runtime.
 //
-// The app copies vendor/ into its public root; the default base
+// sync-vendors copies them from node_modules into the app's public root;
 // <page-base>/vendor-python/ resolves under Vite dev/build/preview with
 // base './'. If the app serves the assets elsewhere it calls
 // setVendorBase() before creating a session. The engine boots lazily on

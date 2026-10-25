@@ -7,9 +7,9 @@ delivered as a ~86 MB WebAssembly build (the YoWASP project's packaging,
 served once from this site and then cached). Pressing ▶ Run downloads the
 toolchain if needed, compiles your block to a =wasm32-wasi= module, and shows
 the compiler's own diagnostics — a missing semicolon is reported on the exact
-1-based source line, because it is clang, not a toy, reporting it. C is the
-target here; the C++ standard library was left out of the vendored sysroot to
-keep the download within budget.
+1-based source line, because it is clang, not a toy, reporting it. The
+toolchain ships unmodified from the =@yowasp/clang= npm package (~105 MB,
+fetched on first use); C is the target language.
 
 The compiled module then runs *in the same tab* on the browser's built-in
 WebAssembly engine. A WebAssembly module cannot call the operating system, so

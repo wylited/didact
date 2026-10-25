@@ -1,10 +1,10 @@
 import { defineConfig } from 'vite';
 
-// Vendored engine files are static assets under apps/site/public —
-// vendor/ (unicorn/keystone/capstone, from packages/kernel-asm64/vendor),
-// vendor-typst/, vendor-python/ and vendor-c/ (each copied from the
-// matching packages/kernel-*/vendor) — so each kernel's default vendor
-// base `<page-base>/<dir>/` resolves in dev and dist with base './' and
+// Engine assets are static files under apps/site/public — vendor/
+// (unicorn/keystone/capstone), vendor-typst/, vendor-python/ and
+// vendor-c/, each copied from the kernel's node_modules by
+// scripts/sync-vendors.mjs — so each kernel's default vendor base
+// `<page-base>/<dir>/` resolves in dev and dist with base './' and
 // no bundler magic.
 
 export default defineConfig({

@@ -1,4 +1,4 @@
-// Loader for the vendored Emscripten builds shipped in vendor/.
+// Loader for the Emscripten builds (@alexaltea/* npm dependencies).
 //
 // How each wrapper finds its WASM (verified by reading the shipped sources):
 //  - unicorn_x86.js  — classic-script UMD defining global `MUnicorn`; the x86
@@ -10,10 +10,11 @@
 //    explicit `locateFile` AND a pre-fetched `wasmBinary` so resolution never
 //    depends on document.currentScript or the page base path.
 //
-// The assets are served as plain static files: the app copies vendor/ into its
-// public root, and the default base `<page-base>/vendor/` resolves correctly
-// under Vite dev/build/preview with base './'. If the app serves them
-// elsewhere it calls setVendorBase() before creating a session. No network
+// The assets are served as plain static files: sync-vendors copies them
+// from node_modules into the app's public root, and the default base
+// `<page-base>/vendor/` resolves correctly under Vite dev/build/preview
+// with base './'. If the app serves them elsewhere it calls
+// setVendorBase() before creating a session. No network
 // beyond same-origin asset fetches happens at runtime.
 
 export interface KeystoneAsmResult {

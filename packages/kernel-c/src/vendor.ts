@@ -47,7 +47,10 @@ export function setVendorBase(url: string): void {
 /** The bundle's URL: served copy in the browser, npm copy headless. */
 function bundleUrl(): string {
   if (typeof document !== 'undefined') return `${vendorBase}clang/bundle.js`;
-  return new URL('../node_modules/@yowasp/clang/gen/bundle.js', import.meta.url).href;
+  // Headless (bun): the engine is the @yowasp/clang npm dependency. Built
+  // from parts so Vite cannot rewrite it into a dead emitted asset.
+  const dir = '../node_modules/@yowasp/clang/gen/';
+  return new URL(dir + 'bundle.js', import.meta.url).href;
 }
 
 /** Load (once) the clang engine — bundle.js resolves its siblings itself. */

@@ -1,6 +1,6 @@
 // wasi.test.ts — unit tests for the hand-written WASI shim (src/wasi.ts)
 // on tiny hand-encoded wasm modules. No clang, no vendored engine, so these
-// run in the normal vitest suite (unlike smoke.ts, which boots the ~86 MB
+// run in the normal vitest suite (unlike smoke.ts, which boots the ~105 MB
 // toolchain and is excluded from vitest on purpose).
 //
 // The modules are assembled by `buildModule` from plain section bytes; their
