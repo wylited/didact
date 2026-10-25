@@ -1,0 +1,185 @@
+#+TITLE: Lisp from Cons Cells Up
+#+SUBTITLE: A Scheme-flavored Lisp on an interpreter you can single-step, one reduction at a time
+
+* One data structure to rule them all
+
+Classic Lisp is built from a single ingredient: the /cons cell/, a pair of
+two slots named =car= (the first slot) and =cdr= (the second slot). Every
+list, every program, every value in this lesson is either an /atom/ — a
+number, a symbol like =x=, =#t=/=#f=, a string — or a cons cell pointing
+at two more values. That is the whole ontology.
+
+A /list/ is not a primitive here. The list =(1 2)= is just an agreement to
+read cons cells left-to-right:
+
+: (cons 1 (cons 2 '()))          ; two cells, and '() — the empty list —
+                                 ; is an atom, not a cell
+
+Run the block below and watch the *Heap* panel. The kernel gives every cons
+cell a stable address (0x0000, 0x0010, 0x0020, … — one cell is a car word
+plus a cdr word). Evaluating =(cons 2 '())= allocates the /first/ cell:
+=car 2 · cdr ()=. Evaluating =(cons 1 …)= allocates the /second/, whose
+cdr points at the first. Nothing is ever moved, and nothing is ever freed:
+the heap holds 4096 cells and there is no garbage collector — when it fills
+up, you get a clean, line-numbered error instead of a silent slowdown.
+
+=car= and =cdr= take a list apart exactly where =cons= put it together.
+Note the last line: a pair whose cdr is not a list prints as a /dotted
+pair=, =(1 . 2)= — that is what every cons cell really is.
+
+#+NAME: cons-101
+#+BEGIN_SRC lisp
+(define lst (cons 1 (cons 2 '())))
+(display (car lst))
+(newline)
+(display (cdr lst))
+(newline)
+(display lst)
+(newline)
+(display (cons 1 2))
+(newline)
+#+END_SRC
+
+#+RESULTS:
+: 1
+: (2)
+: (1 2)
+: (1 . 2)
+
+* Quote: data is code is data
+
+Prefixing an expression with ='= (short for =quote=) says: /don't evaluate
+this, hand me the structure itself/. The reader has already parsed it into
+cons cells, so ='(1 2 3)= arrives as a real list living on the heap — three
+fresh cells, every time you evaluate it.
+
+Quasiquote, written with a backquote, starts as a quote and opens holes:
+=,= (unquote) evaluates one subexpression, =,@= (unquote-splicing)
+evaluates one and splices /all its elements/ into the surrounding list.
+Under the hood the kernel expands `` `(a ,b ,@c d) `` into ordinary
+=(cons …)= and =(append …)= calls — step through a quasiquoted form and
+you will see that expansion happen on the control stack.
+
+#+NAME: quote-vs-quasiquote
+#+BEGIN_SRC lisp
+(display '(1 2 3))
+(newline)
+(define x 10)
+(display `(x is ,x and doubled is ,(* 2 x)))
+(newline)
+(display `(start ,@(list 1 2 3) end))
+(newline)
+#+END_SRC
+
+#+RESULTS:
+: (1 2 3)
+: (x is 10 and doubled is 20)
+: (start 1 2 3 end)
+
+* Recursion, and why tail position is free
+
+A recursive function that /accumulates on the way back down/ — like this
+naive =fact=, where the multiplication happens /after/ the recursive call
+returns — needs one pending continuation per call. The interpreter keeps
+those continuations on an explicit /control stack/ (there is a panel for
+it), so deep recursion is bounded by the run budget, not by any machine
+limit: the kernel performs at most 1 000 000 reductions and then stops
+with a clean error naming the line.
+
+But a call in /tail position/ — the very last thing =sum-to= does — needs
+no return trip. The evaluator is a trampoline: a tail call replaces the
+current reduction instead of stacking on a new one, so =sum-to= counting
+to 100 000 runs in constant control-stack space and finishes without a
+whimper. Step through both functions with the Control-stack panel open and
+watch one of them pile up frames while the other does not.
+
+#+NAME: tail-calls
+#+BEGIN_SRC lisp
+(define (sum-to n acc)
+  (if (= n 0)
+      acc
+      (sum-to (- n 1) (+ n acc))))
+(display (sum-to 100000 0))
+(newline)
+(define (fact n)
+  (if (= n 0)
+      1
+      (* n (fact (- n 1)))))
+(display (fact 10))
+(newline)
+#+END_SRC
+
+#+RESULTS:
+: 5000050000
+: 3628800
+
+* Closures: functions with a memory
+
+=(lambda …)= captures the environment it was created in. =make-counter=
+below creates a =let= frame holding =n=, and returns a lambda whose
+parent chain runs =lambda → let → global= — the Environment panel titles
+show exactly that chain, and =set!= highlights =n= each time it changes.
+Two calls to =make-counter= make two /distinct/ =let= frames, so the two
+counters count independently: =a= has been bumped three times, =b= once.
+
+#+NAME: closures
+#+BEGIN_SRC lisp
+(define (make-counter)
+  (let ((n 0))
+    (lambda () (set! n (+ n 1)) n)))
+(define a (make-counter))
+(define b (make-counter))
+(a) (a)
+(display (list (a) (b)))
+(newline)
+#+END_SRC
+
+#+RESULTS:
+: (3 1)
+
+This is also where =eq?= versus =equal?= earns its keep: =eq?= compares
+/addresses/ — two lists built by two calls to =list= live at different
+addresses, so =(eq? (list 1 2) (list 1 2))= is =#f= — while =equal?=
+walks the heap and compares structure, giving =#t=.
+
+* define-macro: programs that write programs
+
+A macro is a function that runs /before/ evaluation, on the unevaluated
+forms themselves, and returns new code. =my-if= below receives =c=, =t=
+and =e= as /syntax/, and its quasiquote template stitches them into a
+=cond=. It is deliberately /unhygienic/, the classic teachable kind: the
+=swap!= macro gets away with using a variable literally named =tmp=
+because it happens not to collide with anything at its call site. Use
+=macroexpand-1= to see one expansion without running it — then step
+through a macro call and watch the expansion replace the original form on
+the control stack.
+
+#+NAME: macros
+#+BEGIN_SRC lisp
+(define-macro (my-if c t e) `(cond (,c ,t) (else ,e)))
+(display (macroexpand-1 '(my-if (= 1 1) 'yes 'no)))
+(newline)
+(display (my-if (= 1 2) 'yes 'no))
+(newline)
+(define-macro (swap! x y) `(let ((tmp ,x)) (set! ,x ,y) (set! ,y tmp)))
+(define p 1)
+(define q 2)
+(swap! p q)
+(display (list p q))
+(newline)
+#+END_SRC
+
+#+RESULTS:
+: (cond ((= 1 1) (quote yes)) (else (quote no)))
+: no
+: (2 1)
+
+* Where to go next
+
+Everything you met here is one machine: a reader that turns text into
+cons-cell-shaped syntax trees, an evaluator that reduces one form at a
+time over an explicit stack, a heap of stable addresses, and a chain of
+environment frames. Breakpoints pause before any source line; single-step
+watches each reduction mark its heap cells and its bindings. Try
+ =(append '(1 2) '(3 4))= and check with =eq?= that only the last list is
+shared — then write a macro of your own and expand it.
