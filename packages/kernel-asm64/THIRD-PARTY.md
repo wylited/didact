@@ -1,11 +1,14 @@
 # Vendored third-party assets
 
-All vendored files live in `vendor/` inside this package and are served as
-plain static files from `<page-base>/vendor/` (see `src/vendor.ts`; apps copy
-`packages/kernel-asm64/vendor/` into their public root, and the loader pins
+The engine ships as npm dependencies (exact versions pinned in
+`package.json` and `pnpm-lock.yaml`): `@alexaltea/unicorn-js@2.1.4`,
+`@alexaltea/keystone-js@0.9.2`, `@alexaltea/capstone-js@5.0.9`.
+`scripts/sync-vendors.mjs` copies the payload from `node_modules/` into the
+app's `public/vendor/` at build time (the loader in `src/vendor.ts` pins
 every URL to the page base so `vite dev`, `vite build` and `vite preview`
-with `base: './'` all resolve identically). Each file is byte-identical to the
-matching npm package release; the same versions are pinned for provenance.
+with `base: './'` all resolve identically); `vendor/` here keeps only the
+license texts. The manifest below records each file's upstream source —
+each was byte-identical to its npm release when pinned.
 
 ## Manifest
 

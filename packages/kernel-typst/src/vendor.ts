@@ -1,4 +1,5 @@
-// Loader for the vendored typst-wasm engine shipped in vendor/.
+// Loader for the typst-wasm engine (npm deps; sync-vendors copies the
+// payload into the app's public/vendor-typst/ for serving).
 //
 // Engine choice: `typst-wasm` 1.0.0 (MIT) — JS bindings around the real
 // Typst 0.15.0 compiler compiled to WebAssembly. It compiles a document to
@@ -63,13 +64,12 @@ export const FONT_FILES = [
 ] as const;
 
 function defaultBase(): string {
-  // Browser: assets live at <page-base>/vendor-typst/ (the app copies this
-  // package's vendor/ into its public root). Headless (bun/vitest): resolve
-  // against this module so the package's own vendor/ is used.
-  if (typeof document !== 'undefined') {
-    return new URL('vendor-typst/', document.baseURI).href;
-  }
-  return new URL('../vendor/', import.meta.url).href;
+  // Browser: assets live at <page-base>/vendor-typst/ (sync-vendors copies
+  // them from node_modules into the app's public root). Headless
+  // (bun/vitest) never uses this — see assetUrl().
+  return typeof document !== 'undefined'
+    ? new URL('vendor-typst/', document.baseURI).href
+    : '';
 }
 
 let vendorDir = defaultBase();
@@ -79,10 +79,21 @@ export function setVendorBase(url: string): void {
   vendorDir = url.endsWith('/') ? url : url + '/';
 }
 
+/** One asset's URL: served copy in the browser, npm copy headless. */
+function assetUrl(name: string): string {
+  if (typeof document !== 'undefined') return vendorDir + name;
+  // Headless (bun/vitest): engine and fonts are separate npm packages.
+  const dir = name.endsWith('.wasm')
+    ? '../node_modules/typst-wasm/dist/engine/'
+    : '../node_modules/@typst-wasm/fonts/dist/files/';
+  return new URL(dir + name, import.meta.url).href;
+}
+
 async function readBytes(name: string): Promise<Uint8Array<ArrayBuffer>> {
-  const res = await fetch(vendorDir + name);
+  const url = assetUrl(name);
+  const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(`cannot load ${name} from ${vendorDir}: HTTP ${res.status}`);
+    throw new Error(`cannot load ${name} from ${url}: HTTP ${res.status}`);
   }
   return new Uint8Array(await res.arrayBuffer());
 }

@@ -5,6 +5,7 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
+    "@typst-wasm/fonts": "1.0.0",
     "typst-wasm": "1.0.0"
   }
 }

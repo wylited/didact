@@ -1,16 +1,17 @@
 # Vendored third-party assets
 
-All vendored files live in `vendor/` inside this package and are served as
-plain static files from `<page-base>/vendor-typst/` (see `src/vendor.ts`;
-apps copy `packages/kernel-typst/vendor/` into their public root as
-`vendor-typst/`, and the loader pins every URL to the page base so
-`vite dev`, `vite build` and `vite preview` with `base: './'` all resolve
-identically — or call `setVendorBase()` before creating a session). Each
-file is byte-identical to the matching npm package release (verified by
-shasum at vendor time). Nothing is fetched from a CDN: the engine takes
-its wasm as caller-built `WebAssembly.Module`s and its fonts as byte
-arrays, and every fetch the library might perform for typst packages or
-URL imports is stubbed out.
+The engine and fonts ship as npm dependencies (pinned in `package.json`
+and `pnpm-lock.yaml`): `typst-wasm@1.0.0` (engine) and
+`@typst-wasm/fonts@1.0.0` (faces). `scripts/sync-vendors.mjs` copies the
+payload from `node_modules/` into the app's `public/vendor-typst/` (see
+`src/vendor.ts`; the loader pins every URL to the page base so `vite dev`,
+`vite build` and `vite preview` with `base: './'` all resolve identically —
+or call `setVendorBase()` before creating a session); `vendor/` here keeps
+only the license texts. Each payload file is byte-identical to its npm
+release (verified by shasum at conversion). Nothing is fetched from a CDN:
+the engine takes its wasm as caller-built `WebAssembly.Module`s and its
+fonts as byte arrays, and every fetch the library might perform for typst
+packages or URL imports is stubbed out.
 
 ## Engine
 

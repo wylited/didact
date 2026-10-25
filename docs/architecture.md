@@ -56,11 +56,11 @@ today so pyodide-style kernels need no contract change later.
 
 ## kernel-asm64 responsibilities
 
-- Vendor unicorn/keystone/capstone wasm under `packages/kernel-asm64/vendor/`
-  (licenses in THIRD-PARTY.md + GPLv2 notes), copied to
-  `apps/site/public/vendor/` for serving by `scripts/sync-vendors.mjs` (run
-  automatically by `pnpm dev`/`pnpm build`); load via ES imports the app
-  can code-split; loading must stay fetch-free where possible.
+- unicorn/keystone/capstone wasm come from npm deps (`@alexaltea/*`,
+  licenses in THIRD-PARTY.md + `vendor/` texts), copied to
+  `apps/site/public/vendor/` for serving by `scripts/sync-vendors.mjs`
+  (run automatically by `pnpm dev`/`pnpm build`); load via ES imports the
+  app can code-split; loading must stay fetch-free where possible.
 - Two-pass keystone label resolution, syscall interception, budget,
   stepping (HOOK_CODE), context restore — shaped to `Kernel`/`Session`.
 - Panel data: registers fields, EFLAGS fields, disassembly listing

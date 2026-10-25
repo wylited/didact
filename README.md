@@ -28,9 +28,13 @@ Open the printed URL. (If pnpm blocks esbuild's install script, run
 | `asm` | x86-64 · Unicorn | `asm-intel` | `packages/kernel-asm64` | `public/vendor/` (~8.6 MB, unicorn/keystone/capstone wasm) |
 | `riscv` | RV32IM · interpreter | `asm-riscv` | `packages/kernel-riscv` | none (pure TypeScript CPU) |
 | `mips` | MIPS32 · interpreter | `asm-mips` | `packages/kernel-mips` | none (pure TypeScript CPU) |
-| `c` | C · clang wasm | `c` | `packages/kernel-c` | `public/vendor-c/` (~83 MB, clang → wasm32-wasi) |
+| `c` | C · clang wasm | `c` | `packages/kernel-c` | `public/vendor-c/` (~105 MB, clang → wasm32-wasi) |
 | `python` | Python · Pyodide | `python` | `packages/kernel-python` | `public/vendor-python/` (~13 MB, CPython 3.14 wasm) |
 | `typst` | Typst · wasm | `plain` | `packages/kernel-typst` | `public/vendor-typst/` (~25 MB, compiler wasm + fonts) |
+
+Engine payloads are npm dependencies pinned by `pnpm-lock.yaml`;
+`scripts/sync-vendors.mjs` copies them into `public/` at build time — the
+repository itself is source-only.
 
 ## Authoring a page
 

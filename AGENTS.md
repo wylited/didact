@@ -36,12 +36,14 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
    `editorSyntax` with one of the ids supported in
    `packages/core/src/languages.ts` (`asm-intel`, `asm-riscv`, `asm-mips`,
    `c`, `python`, `plain`; missing/unknown → plain text).
-3. Vendor any wasm engines under `packages/kernel-<name>/vendor/` and record
-   licenses in `THIRD-PARTY.md`. Add the canonical → served pair to `PAIRS`
-   in `scripts/sync-vendors.mjs`; it copies the assets into
-   `apps/site/public/vendor-<name>/` automatically on `pnpm dev`/`pnpm build`
-   (the copies are git-ignored build inputs — `vendor/` for kernel-asm64,
-   `vendor-c/`, `vendor-python/`, `vendor-typst/` are the existing examples).
+3. Declare the wasm engine as an npm dependency of the kernel package
+   (exact version, no caret) and record licenses in `THIRD-PARTY.md`;
+   keep license texts under `packages/kernel-<name>/vendor/`. Add the
+   `node_modules → public` file mapping to `GROUPS` in
+   `scripts/sync-vendors.mjs`; it copies the files into
+   `apps/site/public/vendor-<name>/` automatically on `pnpm dev`/`pnpm
+   build` (git-ignored build inputs). Engine payload never lives in git —
+   `pnpm-lock.yaml` pins versions and integrity.
 4. Add `"@didact/kernel-<name>": "workspace:*"` to `apps/site/package.json`
    dependencies.
 5. Add `@didact/kernel-<name>` → `../../packages/kernel-<name>/src` to
@@ -95,6 +97,8 @@ environment is node. The assembler tests inject a deterministic fake
 
 ## Vendor policy
 
-All runtime assets are local static files under `vendor/` (served by the app's
-`public/`). Licenses recorded in each package's `THIRD-PARTY.md`. No CDN and
-no network requests at runtime beyond same-origin asset fetches.
+Runtime assets are npm dependencies pinned by `pnpm-lock.yaml`;
+`scripts/sync-vendors.mjs` materializes them as static files under the
+app's `public/` at build time. Licenses are recorded in each package's
+`THIRD-PARTY.md`, with texts under `vendor/`. No CDN and no network
+requests at runtime beyond same-origin asset fetches.

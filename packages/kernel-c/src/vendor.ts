@@ -1,23 +1,19 @@
-// Loader for the vendored C engine: @yowasp/clang 22.0.0-git20542-10
-// (real clang + wasm-ld + wasi-libc sysroot, built for WebAssembly by the
-// YoWASP project), vendored verbatim under vendor/clang/.
+// Loader for the C engine: @yowasp/clang 22.0.0-git20542-10 (real clang +
+// wasm-ld + wasi-libc sysroot, built for WebAssembly by the YoWASP project),
+// an npm dependency of this package; scripts/sync-vendors.mjs copies it
+// into the app's public/vendor-c/clang/ for serving.
 //
 // How the engine finds its assets (verified by reading bundle.js): every
 // resource — llvm.core.wasm … llvm.core4.wasm and llvm-resources.tar (the
 // sysroot + clang resource headers) — is resolved with
 // `new URL("./<file>", import.meta.url)`, i.e. RELATIVE TO bundle.js itself.
-// So this loader only has to dynamically import `${base}clang/bundle.js`
-// from the right base; the engine's own runtime then fetches its siblings,
-// untars the sysroot, and instantiates the toolchain. No CDN is contacted.
+// So this loader only has to dynamically import bundle.js from the right
+// place; the engine's own runtime then fetches its siblings, untars the
+// sysroot, and instantiates the toolchain. No CDN is contacted.
 //
-// First use lazily fetches ~86 MB from the vendor base (the site serves
-// vendor/ as plain static files); repeat visits are served from the HTTP
+// First use lazily fetches ~105 MB from the vendor base (the site serves
+// vendor-c/ as plain static files); repeat visits are served from the HTTP
 // cache, and the imported module is cached in `enginePromise`.
-//
-// What was trimmed for the size budget (see THIRD-PARTY.md): the C++ stdlib
-// (libc++.a/libc++abi.a, include/c++/v1, libc++ module maps), the optional
-// libc-printscan variants and the .so stub libraries were removed from
-// llvm-resources.tar. C compilation is unaffected; C++ is out of scope.
 
 /** File-tree values accepted/returned by the YoWASP API. */
 export type Tree = { [name: string]: Tree | string | Uint8Array };
@@ -36,8 +32,7 @@ function defaultVendorBase(): string {
   if (typeof document !== 'undefined') {
     return new URL('vendor-c/', document.baseURI).href;
   }
-  // Headless runs (bun) resolve the package's own vendor/ directory.
-  return new URL('../vendor/', import.meta.url).href;
+  return ''; // headless runs import the npm dependency directly
 }
 
 let vendorBase = defaultVendorBase();
@@ -49,13 +44,20 @@ export function setVendorBase(url: string): void {
   enginePromise = null; // re-resolve on the next load
 }
 
-/** Load (once) the vendored clang engine from the vendor base. */
+/** The bundle's URL: served copy in the browser, npm copy headless. */
+function bundleUrl(): string {
+  if (typeof document !== 'undefined') return `${vendorBase}clang/bundle.js`;
+  return new URL('../node_modules/@yowasp/clang/gen/bundle.js', import.meta.url).href;
+}
+
+/** Load (once) the clang engine — bundle.js resolves its siblings itself. */
 export function loadEngine(): Promise<ClangBundle> {
   if (!enginePromise) {
-    enginePromise = import(/* @vite-ignore */ `${vendorBase}clang/bundle.js`).then(
+    const url = bundleUrl();
+    enginePromise = import(/* @vite-ignore */ url).then(
       (mod: { runClang?: unknown }) => {
         if (typeof mod.runClang !== 'function') {
-          throw new Error(`vendored clang bundle at ${vendorBase}clang/bundle.js does not export runClang`);
+          throw new Error(`clang bundle at ${url} does not export runClang`);
         }
         return mod as ClangBundle;
       },
