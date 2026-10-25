@@ -65,9 +65,15 @@ export function makeBuiltins(expander: (formValue: Value, env: BuiltinCtx['env']
     ['modulo', 2, 2, (a, c) => {
       const x = num(a, 0, 'modulo', c.line);
       const y = num(a, 1, 'modulo', c.line);
+      if (y === 0) throw new LispError('modulo: division by zero', c.line);
       return x - Math.floor(x / y) * y;
     }],
-    ['remainder', 2, 2, (a, c) => num(a, 0, 'remainder', c.line) % num(a, 1, 'remainder', c.line)],
+    ['remainder', 2, 2, (a, c) => {
+      const x = num(a, 0, 'remainder', c.line);
+      const y = num(a, 1, 'remainder', c.line);
+      if (y === 0) throw new LispError('remainder: division by zero', c.line);
+      return x % y;
+    }],
     ['abs', 1, 1, (a, c) => Math.abs(num(a, 0, 'abs', c.line))],
     ['min', 1, Infinity, (a, c) => Math.min(...a.map((_, i) => num(a, i, 'min', c.line)))],
     ['max', 1, Infinity, (a, c) => Math.max(...a.map((_, i) => num(a, i, 'max', c.line)))],
@@ -91,9 +97,12 @@ export function makeBuiltins(expander: (formValue: Value, env: BuiltinCtx['env']
         if (lst === null) continue;
         if (!(lst instanceof Ref)) throw new LispError(`append: expected a list, got ${renderWrite(lst)}`, c.line);
         const elems: Value[] = [];
-        for (let cur: Value = lst; cur instanceof Ref; cur = c.heap.get(cur.addr).cdr) {
+        let cur: Value = lst;
+        for (; cur instanceof Ref; cur = c.heap.get(cur.addr).cdr) {
           elems.push(c.heap.get(cur.addr).car);
         }
+        // A dotted tail here would be silently dropped — refuse instead.
+        if (cur !== null) throw new LispError('append: expected a proper list', c.line);
         for (let j = elems.length - 1; j >= 0; j--) acc = c.heap.alloc(elems[j]!, acc);
       }
       return acc;

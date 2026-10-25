@@ -89,6 +89,11 @@ export function readProgram(src: string): Form[] {
 
 /** Read one form at `pos`; returns [form, next position]. */
 function readForm(tokens: Token[], pos: number): [Form, number] {
+  if (pos >= tokens.length) {
+    // A ' ` , ,@ or . whose operand never arrived — report the last
+    // token's line instead of leaking a TypeError about `undefined`.
+    throw new LispError('unexpected end of input', tokens[tokens.length - 1]?.line ?? 1);
+  }
   const tok = tokens[pos]!;
   if (tok.text === '(') return readList(tokens, pos + 1, tok.line);
   if (tok.text === ')') throw new LispError('unexpected )', tok.line);

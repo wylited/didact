@@ -49,9 +49,9 @@ pair=, =(1 . 2)= — that is what every cons cell really is.
 * Quote: data is code is data
 
 Prefixing an expression with ='= (short for =quote=) says: /don't evaluate
-this, hand me the structure itself/. The reader has already parsed it into
-cons cells, so ='(1 2 3)= arrives as a real list living on the heap — three
-fresh cells, every time you evaluate it.
+this, hand me the structure itself/. The reader only builds a syntax tree;
+quoted data becomes real cons cells when =quote= evaluates it — ='(1 2 3)=
+allocates three fresh cells on the heap, every time you evaluate it.
 
 Quasiquote, written with a backquote, starts as a quote and opens holes:
 =,= (unquote) evaluates one subexpression, =,@= (unquote-splicing)
@@ -116,9 +116,12 @@ watch one of them pile up frames while the other does not.
 * Closures: functions with a memory
 
 =(lambda …)= captures the environment it was created in. =make-counter=
-below creates a =let= frame holding =n=, and returns a lambda whose
-parent chain runs =lambda → let → global= — the Environment panel titles
-show exactly that chain, and =set!= highlights =n= each time it changes.
+below creates a =let= frame holding =n= and returns a lambda that =define=
+then names =a=, so calling =(a)= builds the chain the Environment panel
+titles show: =a (line 3) → let (line 2) → make-counter (line 1) → global=.
+The =let= frame lives inside =make-counter='s own call frame, which is why
+that frame appears in the chain — and =set!= highlights =n= each time it
+changes.
 Two calls to =make-counter= make two /distinct/ =let= frames, so the two
 counters count independently: =a= has been bumped three times, =b= once.
 

@@ -162,11 +162,11 @@ export class Machine {
           return;
         case 'and':
           if (args.length === 0) { this.focus = { t: 'value', value: true }; return; }
-          this.focusOperandwise(args, env, 'and');
+          this.focusOperandwise(args, env, 'and', line);
           return;
         case 'or':
           if (args.length === 0) { this.focus = { t: 'value', value: false }; return; }
-          this.focusOperandwise(args, env, 'or');
+          this.focusOperandwise(args, env, 'or', line);
           return;
         case 'set!': {
           expectArity(args, 2, 'set!', line);
@@ -202,11 +202,13 @@ export class Machine {
     this.focus = { t: 'eval', form: forms[0]!, env, line: lineOf(forms[0]!, line) };
   }
 
-  /** Shared operand iteration for `and`/`or` (tail position on the last). */
-  private focusOperandwise(args: Form[], env: Env, which: 'and' | 'or'): void {
-    const line = lineOf(args[0]!, 1);
-    if (args.length > 1) this.stack.push({ t: which, rest: args.slice(1), env, line });
-    this.focus = { t: 'eval', form: args[0]!, env, line };
+  /** Shared operand iteration for `and`/`or` (tail position on the last).
+   *  `line` is the enclosing form's line — the fallback for atom operands,
+   *  which carry no line of their own. */
+  private focusOperandwise(args: Form[], env: Env, which: 'and' | 'or', line: number): void {
+    const first = lineOf(args[0]!, line);
+    if (args.length > 1) this.stack.push({ t: which, rest: args.slice(1), env, line: first });
+    this.focus = { t: 'eval', form: args[0]!, env, line: first };
   }
 
   private dispatchCondClause(clauses: FormArray[], env: Env): void {
@@ -439,10 +441,10 @@ export class Machine {
       }
       case 'expand': {
         // The transformer produced the expansion as a list value; run it as
-        // code in the caller's environment (unhygienic by design).
-        const form = this.valueToForm(v);
-        if (Array.isArray(form)) (form as FormArray).line = frame.line;
-        this.focus = { t: 'eval', form, env: frame.env, line: frame.line };
+        // code in the caller's environment (unhygienic by design). The
+        // expansion has no source lines of its own, so every form in it —
+        // nested ones included — maps to the macro call's line.
+        this.focus = { t: 'eval', form: this.valueToForm(v, frame.line), env: frame.env, line: frame.line };
         return;
       }
     }
@@ -463,22 +465,24 @@ export class Machine {
     return f;
   }
 
-  /** Macro-expansion output (a list value) back to an executable form. */
-  valueToForm(v: Value): Form {
+  /** Macro-expansion output (a list value) back to an executable form.
+   *  The expansion has no source lines of its own — every form, nested
+   *  ones included, is stamped with the macro call's `line`. */
+  valueToForm(v: Value, line = 1): Form {
     if (v instanceof Ref) {
       const elems: Form[] = [];
       let cur: Value = v;
       while (cur instanceof Ref) {
         const cell = this.heap.get(cur.addr);
-        elems.push(this.valueToForm(cell.car));
+        elems.push(this.valueToForm(cell.car, line));
         cur = cell.cdr;
       }
       const f = elems as FormArray;
-      f.line = 1;
-      if (cur !== null) (f as FormArray & { dot?: Form }).dot = this.valueToForm(cur);
+      f.line = line;
+      if (cur !== null) (f as FormArray & { dot?: Form }).dot = this.valueToForm(cur, line);
       return f;
     }
-    if (v === null) return mkForm([]); // () as code — errors only if evaluated
+    if (v === null) return mkForm([], line); // () as code — errors only if evaluated
     // VOID cannot appear in macro output; anything else is an atom form.
     return v as Form;
   }
@@ -518,6 +522,11 @@ export class Machine {
       if (peeked !== null) last = peeked.value;
       this.reduce();
     }
+    // The guard tripped: the transformer never finished. Drop whatever
+    // half-reduced state the sub-run left behind (frames it pushed, a
+    // partial `last` value) before restoring the caller's machine.
+    const ranOut = !this.stopped();
+    this.stack.splice(0, this.stack.length);
     this.stack.push(...savedStack);
     this.focus = savedFocus;
     if (this.error !== null) {
@@ -525,6 +534,7 @@ export class Machine {
       this.error = savedError;
       throw new LispError(e);
     }
+    if (ranOut) throw new LispError('macro transformer too long (over 10 000 reductions)');
     if (this.focus.t === 'value') return this.focus.value;
     if (last !== VOID) return last;
     throw new LispError('macro transformer did not produce a value');

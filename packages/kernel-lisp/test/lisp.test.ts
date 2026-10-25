@@ -52,6 +52,22 @@ describe('reader + arithmetic', () => {
     expect(paren.ok).toBe(false);
     if (!paren.ok) expect(paren.line).toBe(2); // the stray ) on line 2
   });
+
+  it('a trailing quote or dot at end of input is a clean reader error', async () => {
+    const s = lispKernel.createSession();
+    const quote = await s.load("(define x 1)\n(display x)\n'");
+    expect(quote.ok).toBe(false);
+    if (!quote.ok) {
+      expect(quote.line).toBe(3); // the ' on line 3 has no operand after it
+      expect(quote.message).toBe('unexpected end of input');
+    }
+    const dot = await s.load('(a . ');
+    expect(dot.ok).toBe(false);
+    if (!dot.ok) {
+      expect(dot.line).toBe(1); // the . on line 1 has no tail after it
+      expect(dot.message).toBe('unexpected end of input');
+    }
+  });
 });
 
 describe('quote, quasiquote, unquote-splicing', () => {
@@ -105,6 +121,27 @@ describe('proper tail calls', () => {
     expect(result.error).toBeUndefined();
   });
 
+  it('the 100 000 tail loop runs in constant control-stack space', () => {
+    let m!: Machine;
+    const b = makeBuiltins((fv, env) => m.macroExpandOnce(fv, env));
+    m = new Machine(readProgram(`
+(define (loop n)
+  (if (= n 0)
+      'done
+      (loop (- n 1))))
+(loop 100000)`), b);
+    let maxStack = 0;
+    while (!m.finished && m.error === null) {
+      m.step();
+      maxStack = Math.max(maxStack, m.stack.length);
+    }
+    // Broken tail calls would push one frame per call and grow the stack
+    // past 100 000; the real bound is the operand/args frames in flight.
+    expect(m.error).toBeNull();
+    expect(m.finished).toBe(true);
+    expect(maxStack).toBeLessThanOrEqual(4);
+  });
+
   it('a runaway loop stops at the budget with a clean error', async () => {
     const { result } = await runSession('(define (spin n) (spin (+ n 1)))\n(spin 0)');
     expect(result.finished).toBe(false);
@@ -143,6 +180,18 @@ describe('define-macro', () => {
 (twice (set! n (+ n 1)))
 n`)).toBe('2');
   });
+
+  it('errors inside a macro expansion map to the macro call site', async () => {
+    const { result } = await runSession("; comment\n(define-macro (m) (list 'begin (list 'undefined-thing)))\n(m)");
+    expect(result.finished).toBe(false);
+    expect(result.error).toBe('unbound variable: undefined-thing (line 3)');
+  });
+
+  it('macroexpand-1 refuses a transformer that never finishes', async () => {
+    const { result } = await runSession("(define (spin n) (spin (+ n 1)))\n(define-macro (m) (spin 0))\n(macroexpand-1 '(m))");
+    expect(result.finished).toBe(false);
+    expect(result.error).toBe('macro transformer too long (over 10 000 reductions) (line 3)');
+  });
 });
 
 describe('eq?, eqv?, equal?, and the heap', () => {
@@ -160,6 +209,12 @@ describe('eq?, eqv?, equal?, and the heap', () => {
 (define b (list 3 4))
 (define c (append a b))
 (list (eq? (cdr (cdr c)) b) (eq? c a))`)).toBe('(#t #f)');
+  });
+
+  it('append refuses a dotted non-final argument instead of dropping the tail', async () => {
+    const { result } = await runSession('(define x 1)\n(append (cons 1 2) (list 3))');
+    expect(result.finished).toBe(false);
+    expect(result.error).toBe('append: expected a proper list (line 2)');
   });
 
   it('renders dotted pairs honestly', async () => {
@@ -285,6 +340,22 @@ describe('error mapping and honesty', () => {
     const { result } = await runSession('(define (grow l)\n  (grow (cons 0 l)))\n(grow (list))');
     expect(result.finished).toBe(false);
     expect(result.error).toMatch(/heap overflow: 4096 cells \(line 2\)/);
+  });
+
+  it('and/or attribute atom-operand errors to the enclosing form line', async () => {
+    const andErr = await runSession('(define x 1)\n(and #t nope)');
+    expect(andErr.result.error).toBe('unbound variable: nope (line 2)');
+    const orErr = await runSession('(define x 1)\n(or #f nope)');
+    expect(orErr.result.error).toBe('unbound variable: nope (line 2)');
+  });
+
+  it('modulo and remainder by zero raise line-mapped errors like /', async () => {
+    const mod = await runSession('(define x 1)\n(modulo 5 0)');
+    expect(mod.result.finished).toBe(false);
+    expect(mod.result.error).toBe('modulo: division by zero (line 2)');
+    const rem = await runSession('(define x 1)\n(remainder 5 0)');
+    expect(rem.result.finished).toBe(false);
+    expect(rem.result.error).toBe('remainder: division by zero (line 2)');
   });
 });
 
