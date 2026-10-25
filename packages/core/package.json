@@ -6,6 +6,8 @@
   "main": "src/index.ts",
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-cpp": "^6.0.3",
+    "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/language": "^6.10.1",
     "@codemirror/legacy-modes": "^6.5.5",
     "@codemirror/state": "^6.4.1",

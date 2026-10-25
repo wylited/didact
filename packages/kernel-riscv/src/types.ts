@@ -73,7 +73,10 @@ export interface Kernel {
     | 'asm-riscv'
     | 'asm-mips'
     | 'c'
+    | 'cpp'
+    | 'javascript'
     | 'python'
+    | 'scheme'
     | 'plain';
   createSession(): Session;
 }
