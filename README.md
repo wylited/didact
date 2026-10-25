@@ -71,7 +71,8 @@ Kernel/Session/Panel contract in [`docs/architecture.md`](docs/architecture.md).
 
 ## Tests & quality
 
-- `pnpm test` — vitest suite plus kernel smoke scripts (bun)
+- `pnpm test` — vitest suite plus kernel smoke scripts (the smokes need
+  [bun](https://bun.sh) on PATH)
 - `pnpm lint` — eslint across the repo
 - `pnpm typecheck` — `tsc --noEmit` covering all packages
 

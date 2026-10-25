@@ -1,7 +1,7 @@
-// Mirror of @literate/core's kernel.ts (verbatim from docs/architecture.md).
-// MUST stay in sync with packages/core/src/kernel.ts; the app wires the real
-// contract through `@literate/core` — this local copy exists only so the
-// package typechecks standalone.
+// Mirror of the kernel contract in packages/core/src/kernel.ts; MUST stay
+// byte-identical to it (enforced by packages/core/test/mirror.test.ts).
+// The app wires the real contract through @literate/core; this local copy
+// exists only so the package typechecks standalone.
 
 /** One rendered under-the-hood section. */
 export type Panel =
@@ -19,9 +19,9 @@ export type Panel =
       html: string };
 
 export interface Field {
-  key: string;          // 'pages' | 'compile' | …
-  value: string;        // display value
-  sub?: string;         // secondary display
+  key: string;          // 'rax' | 'ZF' | …
+  value: string;        // hex display
+  sub?: string;         // signed decimal etc.
   changed?: boolean;    // since previous step
   tip?: string;         // hover explanation (teaching text)
 }
@@ -36,14 +36,14 @@ export interface ListingRow {
 }
 
 export type LoadResult =
-  | { ok: true; summary: string }                 // 'compiled · 1 page · 40 ms'
+  | { ok: true; summary: string }                 // 'loaded · 8 instructions'
   | { ok: false; line?: number; message: string }; // 1-based source line, if known
 
 export interface RunResult {
   finished: boolean;
   steps: number;
   exit?: string;      // 'exit(0)'
-  error?: string;     // engine failure, compile failure, …
+  error?: string;     // budget exceeded, runtime fault, …
   /** 1-based source line where execution paused at a breakpoint. */
   pausedAt?: number;
 }
@@ -57,14 +57,14 @@ export interface Session {
    */
   run(breakpoints?: number[]): Promise<RunResult>;
   step(): Promise<{ ran: boolean; result?: RunResult }>;
-  reset(): void;                      // back to just-compiled state
+  reset(): void;                      // back to just-assembled state
   state(): Panel[];                   // full under-the-hood snapshot
   dispose(): void;
 }
 
 export interface Kernel {
-  readonly id: string;                // org lang tag, e.g. 'typst'
-  readonly label: string;             // 'Typst · wasm'
+  readonly id: string;                // org lang tag, e.g. 'asm'
+  readonly label: string;             // 'x86-64 · Unicorn'
   /** UI capabilities; a missing/false flag hides the affordance. */
   readonly features?: { breakpoints?: boolean; stepping?: boolean };
   /** Editor syntax for this kernel's blocks (defaults to 'plain'). */
@@ -77,3 +77,4 @@ export interface Kernel {
     | 'plain';
   createSession(): Session;
 }
+

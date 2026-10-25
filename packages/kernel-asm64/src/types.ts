@@ -1,7 +1,7 @@
-// Mirror of @literate/core's kernel.ts (verbatim from docs/architecture.md).
-// MUST stay in sync with packages/core/src/kernel.ts; the app wires the real
-// contract through `@literate/core` — this local copy exists only so the
-// package typechecks standalone.
+// Mirror of the kernel contract in packages/core/src/kernel.ts; MUST stay
+// byte-identical to it (enforced by packages/core/test/mirror.test.ts).
+// The app wires the real contract through @literate/core; this local copy
+// exists only so the package typechecks standalone.
 
 /** One rendered under-the-hood section. */
 export type Panel =

@@ -20,87 +20,15 @@ Wiring: app aliases `@literate/core` and each `@literate/kernel-*` →
 `tsc --noEmit` in `apps/site` covers all packages (include
 `../../packages/*/src`).
 
-## Kernel contract (owned by core, verbatim)
+## Kernel contract (owned by core)
 
-`packages/core/src/kernel.ts`:
+The single source of truth is `packages/core/src/kernel.ts`: `Kernel`,
+`Session`, and the five `Panel` kinds (`fields`, `listing`, `hexdump`,
+`console`, `html`), plus `Field`, `ListingRow`, `LoadResult`, `RunResult`.
+Read that file before touching how blocks run or render panels.
 
-```ts
-/** One rendered under-the-hood section. */
-export type Panel =
-  | { kind: 'fields'; id: string; title: string; tip?: string;
-      fields: Field[] }
-  | { kind: 'listing'; id: string; title: string; tip?: string;
-      rows: ListingRow[] }
-  | { kind: 'hexdump'; id: string; title: string; tip?: string;
-      rows: { addr: number; bytes: number[]; ascii: string }[] }
-  | { kind: 'console'; id: string; title: string; tip?: string;
-      text: string }
-  /** Trusted kernel-generated markup (e.g. rendered SVG), never raw user
-   *  input; rendered inline in the panel and the block's results slot. */
-  | { kind: 'html'; id: string; title: string; tip?: string;
-      html: string };
-
-export interface Field {
-  key: string;          // 'rax' | 'ZF' | …
-  value: string;        // hex display
-  sub?: string;         // signed decimal etc.
-  changed?: boolean;    // since previous step
-  tip?: string;         // hover explanation (teaching text)
-}
-
-export interface ListingRow {
-  addr: number;
-  bytes: string;        // rendered hex bytes
-  text: string;         // mnemonic + operands
-  line?: number;        // 1-based source line in the block
-  current?: boolean;
-  tip?: string;
-}
-
-export type LoadResult =
-  | { ok: true; summary: string }                 // 'loaded · 8 instructions'
-  | { ok: false; line?: number; message: string }; // 1-based source line, if known
-
-export interface RunResult {
-  finished: boolean;
-  steps: number;
-  exit?: string;      // 'exit(0)'
-  error?: string;     // budget exceeded, runtime fault, …
-  /** 1-based source line where execution paused at a breakpoint. */
-  pausedAt?: number;
-}
-
-export interface Session {
-  load(src: string): Promise<LoadResult>;
-  /**
-   * Run to completion, or stop immediately *before* executing any
-   * instruction whose 1-based source line is in `breakpoints`. Kernels
-   * that cannot honor breakpoints ignore the argument.
-   */
-  run(breakpoints?: number[]): Promise<RunResult>;
-  step(): Promise<{ ran: boolean; result?: RunResult }>;
-  reset(): void;                      // back to just-assembled state
-  state(): Panel[];                   // full under-the-hood snapshot
-  dispose(): void;
-}
-
-export interface Kernel {
-  readonly id: string;                // org lang tag, e.g. 'asm'
-  readonly label: string;             // 'x86-64 · Unicorn'
-  /** UI capabilities; a missing/false flag hides the affordance. */
-  readonly features?: { breakpoints?: boolean; stepping?: boolean };
-  /** Editor syntax for this kernel's blocks; mapped to a CodeMirror
-   *  language by core (see packages/core/src/languages.ts). */
-  readonly editorSyntax?:
-    | 'asm-intel'
-    | 'asm-riscv'
-    | 'asm-mips'
-    | 'c'
-    | 'python'
-    | 'plain';
-  createSession(): Session;
-}
-```
+Every kernel package keeps a byte-identical mirror at `src/types.ts` (so it
+typechecks standalone); `packages/core/test/mirror.test.ts` fails on drift.
 
 Rules: sessions are single-tenant (one per block); `state()` must be cheap
 and complete (core re-renders the whole panel from it); async signatures
@@ -130,8 +58,9 @@ today so pyodide-style kernels need no contract change later.
 
 - Vendor unicorn/keystone/capstone wasm under `packages/kernel-asm64/vendor/`
   (licenses in THIRD-PARTY.md + GPLv2 notes), copied to
-  `apps/site/public/vendor/` for serving; load via ES imports the app can
-  code-split; loading must stay fetch-free where possible.
+  `apps/site/public/vendor/` for serving by `scripts/sync-vendors.mjs` (run
+  automatically by `pnpm dev`/`pnpm build`); load via ES imports the app
+  can code-split; loading must stay fetch-free where possible.
 - Two-pass keystone label resolution, syscall interception, budget,
   stepping (HOOK_CODE), context restore — shaped to `Kernel`/`Session`.
 - Panel data: registers fields, EFLAGS fields, disassembly listing

@@ -28,7 +28,8 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
    `packages/kernel-*/package.json` as a pattern). Add a local
    `src/types.ts` mirror of the `Kernel`/`Session` contract so the package
    typechecks standalone (see `packages/kernel-mips/src/types.ts` for the
-   pattern); it MUST stay in sync with `packages/core/src/kernel.ts`.
+   pattern); it MUST stay byte-identical to `packages/core/src/kernel.ts`
+   (enforced by `packages/core/test/mirror.test.ts`).
 2. Implement the `Kernel` interface in `src/kernel.ts` and export it from
    `src/index.ts` (see the contract in `packages/core/src/kernel.ts`). The
    kernel's `id` must match the org `#+BEGIN_SRC <lang>` word; declare
@@ -36,9 +37,10 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
    `packages/core/src/languages.ts` (`asm-intel`, `asm-riscv`, `asm-mips`,
    `c`, `python`, `plain`; missing/unknown → plain text).
 3. Vendor any wasm engines under `packages/kernel-<name>/vendor/` and record
-   licenses in `THIRD-PARTY.md`. Copy the vendor assets into
-   `apps/site/public/vendor-<name>/` so they ship as static files (there is
-   currently no sync script — the copy is manual; `vendor/` for kernel-asm64,
+   licenses in `THIRD-PARTY.md`. Add the canonical → served pair to `PAIRS`
+   in `scripts/sync-vendors.mjs`; it copies the assets into
+   `apps/site/public/vendor-<name>/` automatically on `pnpm dev`/`pnpm build`
+   (the copies are git-ignored build inputs — `vendor/` for kernel-asm64,
    `vendor-c/`, `vendor-python/`, `vendor-typst/` are the existing examples).
 4. Add `"@literate/kernel-<name>": "workspace:*"` to `apps/site/package.json`
    dependencies.
