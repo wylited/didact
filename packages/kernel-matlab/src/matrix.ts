@@ -138,7 +138,11 @@ export function gaussSolve(A: Mat, B: Mat, line: number): Mat {
   for (let j = 0; j < k; j++) {
     for (let i = 0; i < n; i++) w[(n + j) * n + i] = B.get(i + 1, j + 1);
   }
-  const scale = Math.max(...A.data.map(Math.abs), 1);
+  let scale = 1;
+  for (let i = 0; i < A.data.length; i++) {
+    const a = Math.abs(A.data[i]!);
+    if (a > scale) scale = a;
+  }
   for (let c = 0; c < n; c++) {
     // partial pivot: largest |w| in column c, rows c..n-1
     let p = c;
@@ -175,7 +179,11 @@ export function gaussSolve(A: Mat, B: Mat, line: number): Mat {
 export function det(A: Mat): number {
   const n = A.rows;
   const w = [...A.data];
-  const scale = Math.max(...A.data.map(Math.abs), 1);
+  let scale = 1;
+  for (let i = 0; i < A.data.length; i++) {
+    const a = Math.abs(A.data[i]!);
+    if (a > scale) scale = a;
+  }
   let sign = 1;
   for (let c = 0; c < n; c++) {
     let p = c;

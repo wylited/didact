@@ -147,6 +147,11 @@ x = E ^ -1;`);
 disp([1 2] == [1 3])
 disp([1 2] < 2)`)).toBe('1  2  3\n1  0\n1  0');
   });
+
+  it('.\\ divides elementwise with the operands flipped: y divided by x', async () => {
+    expect(await runOut(`disp([2 4] .\\ [1 2])`)).toBe('0.5  0.5');
+  });
+
 });
 
 describe('solving systems (the \\ story)', () => {
@@ -668,6 +673,52 @@ disp([(1 - 2)])`)).toBe(' 1  -2\n-1');
     expect(await runOut(`x = 5; % set x
 % a whole line
 disp(x) % show it`)).toBe('5');
+  });
+});
+
+describe('review fixes: stack depth, big inputs, honest refusals', () => {
+  it('infinite recursion dies with the clean line-mapped "call stack too deep", not a raw JS RangeError', async () => {
+    const { r } = await run(`function y = r(x)
+  y = r(x);
+end
+disp(r(1));`);
+    expect(r.error).toBe('line 2: call stack too deep (over 512 nested calls) — recursion needs a base case');
+  });
+
+  it('legit recursion still works at the lower depth: fact(10) and fib(15)', async () => {
+    expect(await runOut(`function f = fact(n)
+  if n <= 1
+    f = 1;
+  else
+    f = n * fact(n - 1);
+  end
+end
+function f = fib(n)
+  if n < 2
+    f = n;
+  else
+    f = fib(n - 1) + fib(n - 2);
+  end
+end
+disp(fact(10))
+disp(fib(15))`)).toBe('3628800\n610');
+  });
+
+  it('max folds instead of spreading: max(1:1000000) completes', async () => {
+    expect(await runOut(`disp(max(1:1000000))`)).toBe('1000000');
+  });
+
+  it('det folds its scale instead of spreading: det(ones(50)) is 0 by elimination', async () => {
+    expect(await runOut(`A = ones(50);
+disp(det(A))`)).toBe('0');
+  });
+
+  it('[r, c] = size(A) is refused honestly, not "undefined function size"', async () => {
+    const { r } = await run(`A = [1 2 3; 4 5 6];
+[r, c] = size(A);`);
+    expect(r.error).toBe(
+      'line 2: not in the teaching subset: two outputs from builtins — use s = size(A), then s(1) and s(2)',
+    );
   });
 });
 

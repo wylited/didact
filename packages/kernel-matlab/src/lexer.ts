@@ -34,7 +34,7 @@ const KEYWORD: Record<string, true> = {
 // refused by the parser with named errors (cells, function handles,
 // structs are outside the subset).
 const PUNCTS = [
-  '<=', '>=', '==', '~=', '&&', '||', '.*', './', '.^', ".'",
+  '<=', '>=', '==', '~=', '&&', '||', '.*', './', '.^', '.\\', ".'",
   '+', '-', '*', '/', '\\', '^', '.', ',', ';', ':', "'", '~',
   '(', ')', '[', ']', '{', '}', '=', '<', '>', '@',
 ];

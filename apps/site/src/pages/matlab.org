@@ -13,8 +13,9 @@ elementwise meanings, indexing with =end=, =if=/=for=/=while=, functions
 at the top of the block, and a fixed set of builtins (=zeros=, =sum=,
 =sort=, =\det= …). There is no =rand= anywhere — identical source runs
 identically, forever — and anything outside the subset (cells ={}=,
-structs, function handles =@=, =try/catch=, strings as data) is refused
-*before anything runs*, with the offending line named.
+structs, function handles =@=, =try/catch=) is refused with the offending
+line named — nearly all of it at parse time, before anything runs;
+strings-as-data at run time, the moment the statement executes.
 
 Three honest display differences from the real program: this console
 separates columns with two spaces (MATLAB pads to terminal width); it
@@ -210,7 +211,7 @@ fprintf('vectorized total: %d\n', sum(sum(A)));
 The loop follows MATLAB truth exactly: =for c = A= walks the matrix's
 COLUMNS — =c= is =[1;4]=, then =[2;5]=, then =[3;6]= — and each =sum(c)=
 adds one column to =s=. Both routes print 21, but the status line tells
-the real story: this block takes 10 steps, and the two-statement
+the real story: this block takes 11 steps, and the two-statement
 =disp(sum(sum(A)))= version takes 2 — every statement, loop iteration
 and call is one evaluation unit, and =sum(sum(A))= does the walking
 inside one builtin. (One orientation note: =sum(A)= collapses the

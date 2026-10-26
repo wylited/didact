@@ -41,7 +41,7 @@ export type Expr =
   | { type: 'Call'; name: string; args: Expr[]; line: number };
 
 export type BinOp =
-  | '+' | '-' | '*' | '/' | '\\' | '.*' | './' | '.^' | '^'
+  | '+' | '-' | '*' | '/' | '\\' | '.*' | './' | '.^' | '.\\' | '^'
   | '<' | '<=' | '>' | '>=' | '==' | '~=';
 
 export interface FunctionDecl {
@@ -427,7 +427,7 @@ class Parser {
   private parseMul(): Expr {
     let left = this.parseUnary();
     while (this.isPunct('*') || this.isPunct('/') || this.isPunct('\\')
-      || this.isPunct('.*') || this.isPunct('./') || this.isPunct('.^') || this.isPunct('^')) {
+      || this.isPunct('.*') || this.isPunct('./') || this.isPunct('.^') || this.isPunct('.\\') || this.isPunct('^')) {
       const op = this.next();
       const right = this.parseUnary();
       left = { type: 'Binary', op: op.value as BinOp, left, right, line: op.line };

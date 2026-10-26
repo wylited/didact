@@ -21,7 +21,7 @@ import {
 } from './matrix';
 
 export const RUN_BUDGET = 1_000_000;
-export const MAX_DEPTH = 4096;
+export const MAX_DEPTH = 512;
 
 // ─── values ────────────────────────────────────────────────────────────────
 
@@ -540,6 +540,12 @@ export class Interpreter {
   *callUser(e: Extract<Expr, { type: 'Call' }>, line: number): Generator<YieldInfo, Mat[]> {
     const decl = this.funcs.get(e.name);
     if (decl === undefined) {
+      if (isBuiltinName(e.name)) {
+        throw new RuntimeErr(
+          `not in the teaching subset: two outputs from builtins — use s = ${e.name}(A), then s(1) and s(2)`,
+          line,
+        );
+      }
       throw new RuntimeErr(`undefined function '${e.name}'`, line);
     }
     const args: Mat[] = [];
@@ -674,6 +680,7 @@ function binop(op: string, a: Mat, b: Mat, line: number): Mat {
   if (op === '-') return elementwise(a, b, line, (x, y) => x - y, op);
   if (op === '.*') return elementwise(a, b, line, (x, y) => x * y, op);
   if (op === './') return elementwise(a, b, line, (x, y) => x / y, op);
+  if (op === '.\\') return elementwise(a, b, line, (x, y) => y / x, op);
   if (op === '.^') return elementwise(a, b, line, (x, y) => x ** y, op);
   if (op === '<') return elementwise(a, b, line, (x, y) => (x < y ? 1 : 0), op);
   if (op === '<=') return elementwise(a, b, line, (x, y) => (x <= y ? 1 : 0), op);
@@ -841,6 +848,18 @@ function applyElem(m: Mat, f: (x: number) => number): Mat {
   return new Mat(m.rows, m.cols, m.data.map(f));
 }
 
+/** Fold versions of max/min — spreading a million elements onto Math.max
+ *  overflows the JS call stack, so reduce one element at a time. */
+const foldMax = (xs: number[]): number => {
+  let best = xs[0]!;
+  for (let i = 1; i < xs.length; i++) if (xs[i]! > best) best = xs[i]!;
+  return best;
+};
+const foldMin = (xs: number[]): number => {
+  let best = xs[0]!;
+  for (let i = 1; i < xs.length; i++) if (xs[i]! < best) best = xs[i]!;
+  return best;
+};
 const BUILTINS: Record<string, Builtin> = {
   zeros: (_i, args, line) => {
     const [r, c] = dims2(args, line, 'zeros dimensions');
@@ -897,9 +916,9 @@ const BUILTINS: Record<string, Builtin> = {
       if (isStr(args[1]!) || argMat(args, 1, 'max', line).numel() !== 0) {
         throw new RuntimeErr('max(A, [], dim) — the second argument must be []', line);
       }
-      return reduceDim(argMat(args, 0, 'max', line), num1(args[2], 'the max dim', line), line, (xs) => Math.max(...xs), 'max');
+      return reduceDim(argMat(args, 0, 'max', line), num1(args[2], 'the max dim', line), line, foldMax, 'max');
     }
-    return reduceDim(argMat(args, 0, 'max', line), null, line, (xs) => Math.max(...xs), 'max');
+    return reduceDim(argMat(args, 0, 'max', line), null, line, foldMax, 'max');
   },
   min: (_i, args, line) => {
     if (args.length === 2 && !isStr(args[1]!)) {
@@ -909,9 +928,9 @@ const BUILTINS: Record<string, Builtin> = {
       if (isStr(args[1]!) || argMat(args, 1, 'min', line).numel() !== 0) {
         throw new RuntimeErr('min(A, [], dim) — the second argument must be []', line);
       }
-      return reduceDim(argMat(args, 0, 'min', line), num1(args[2], 'the min dim', line), line, (xs) => Math.min(...xs), 'min');
+      return reduceDim(argMat(args, 0, 'min', line), num1(args[2], 'the min dim', line), line, foldMin, 'min');
     }
-    return reduceDim(argMat(args, 0, 'min', line), null, line, (xs) => Math.min(...xs), 'min');
+    return reduceDim(argMat(args, 0, 'min', line), null, line, foldMin, 'min');
   },
   abs: (_i, args, line) => applyElem(argMat(args, 0, 'abs', line), Math.abs),
   floor: (_i, args, line) => applyElem(argMat(args, 0, 'floor', line), Math.floor),
