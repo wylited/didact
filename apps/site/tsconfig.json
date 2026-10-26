@@ -22,6 +22,12 @@
       "@didact/kernel-python": ["../../packages/kernel-python/src"],
       "@didact/kernel-javascript": ["../../packages/kernel-javascript/src"],
       "@didact/kernel-lisp": ["../../packages/kernel-lisp/src"],
+      "@didact/kernel-lua": ["../../packages/kernel-lua/src"],
+      "@didact/kernel-matlab": ["../../packages/kernel-matlab/src"],
+      "@didact/kernel-prolog": ["../../packages/kernel-prolog/src"],
+      "@didact/kernel-regex": ["../../packages/kernel-regex/src"],
+      "@didact/kernel-sql": ["../../packages/kernel-sql/src"],
+      "@didact/kernel-wasm": ["../../packages/kernel-wasm/src"],
       "@didact/kernel-typst": ["../../packages/kernel-typst/src"]
     }
   },

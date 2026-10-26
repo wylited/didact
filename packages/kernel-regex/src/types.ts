@@ -2,6 +2,7 @@
 // byte-identical to it (enforced by packages/core/test/mirror.test.ts).
 // The app wires the real contract through @didact/core; this local copy
 // exists only so the package typechecks standalone.
+
 /** One rendered under-the-hood section. */
 export type Panel =
   | { kind: 'fields'; id: string; title: string; tip?: string;
@@ -75,6 +76,7 @@ export interface Kernel {
     | 'cpp'
     | 'javascript'
     | 'lua'
+    | 'octave'
     | 'python'
     | 'scheme'
     | 'sql'

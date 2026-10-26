@@ -199,18 +199,36 @@ importers:
       '@didact/kernel-lisp':
         specifier: workspace:*
         version: link:../../packages/kernel-lisp
+      '@didact/kernel-lua':
+        specifier: workspace:*
+        version: link:../../packages/kernel-lua
+      '@didact/kernel-matlab':
+        specifier: workspace:*
+        version: link:../../packages/kernel-matlab
       '@didact/kernel-mips':
         specifier: workspace:*
         version: link:../../packages/kernel-mips
+      '@didact/kernel-prolog':
+        specifier: workspace:*
+        version: link:../../packages/kernel-prolog
       '@didact/kernel-python':
         specifier: workspace:*
         version: link:../../packages/kernel-python
+      '@didact/kernel-regex':
+        specifier: workspace:*
+        version: link:../../packages/kernel-regex
       '@didact/kernel-riscv':
         specifier: workspace:*
         version: link:../../packages/kernel-riscv
+      '@didact/kernel-sql':
+        specifier: workspace:*
+        version: link:../../packages/kernel-sql
       '@didact/kernel-typst':
         specifier: workspace:*
         version: link:../../packages/kernel-typst
+      '@didact/kernel-wasm':
+        specifier: workspace:*
+        version: link:../../packages/kernel-wasm
     devDependencies:
       typescript:
         specifier: 5.9.3
@@ -283,7 +301,13 @@ importers:
 
   packages/kernel-lisp: {}
 
+  packages/kernel-lua: {}
+
+  packages/kernel-matlab: {}
+
   packages/kernel-mips: {}
+
+  packages/kernel-prolog: {}
 
   packages/kernel-python:
     dependencies:
@@ -291,7 +315,11 @@ importers:
         specifier: 314.0.7
         version: 314.0.7
 
+  packages/kernel-regex: {}
+
   packages/kernel-riscv: {}
+
+  packages/kernel-sql: {}
 
   packages/kernel-typst:
     dependencies:
@@ -301,6 +329,8 @@ importers:
       typst-wasm:
         specifier: 1.0.0
         version: 1.0.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(typescript@5.9.3)
+
+  packages/kernel-wasm: {}
 
 packages:
 

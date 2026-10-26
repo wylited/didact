@@ -1,0 +1,160 @@
+#+TITLE: Lua, Small Enough to Fit in Your Head
+#+SUBTITLE: One data structure, one assignment rule, and two habits to unlearn — a Lua 5.4 subset you can single-step
+
+* Tables: the one data structure
+
+Lua has exactly one compound data structure: the /table/. It is an
+associative array that can hold any value under any key, and it does
+double duty as an array: store values under the integer keys 1, 2, 3…
+and you have a list. The array part and the hash part live in the same
+table — ={10, 20, 30, name = "xs"}= has both at once.
+
+Run the block and watch the *Tables* panel: every table the program
+allocates gets a stable slot, array rows first (=t[1] = …=), then hash
+rows. Rows the latest step added or changed are marked with Δ. Nothing
+is ever freed — there is no garbage collector in this kernel — so the
+panel is an honest, cumulative history of the heap. =#= returns the
+array border: how many consecutive integer keys start at 1.
+
+#+NAME: tables-101
+#+BEGIN_SRC lua
+local t = {10, 20, 30, name = "xs"}
+t[4] = 40
+t.lang = "lua"
+print(#t, t[1], t.name, t.lang)
+#+END_SRC
+
+#+RESULTS:
+: 4	10	xs	lua
+
+Because tables are just tables, /pairs()/ walks both parts: the array
+rows in order, then the remaining hash keys. =ipairs()= stops at the
+first missing integer — =#t= and =ipairs= agree on where the array
+ends.
+
+#+NAME: tables-pairs
+#+BEGIN_SRC lua
+local t = {10, 20, name = "xs"}
+for i, v in ipairs(t) do print(i, v) end
+for k, v in pairs(t) do print(k, v) end
+#+END_SRC
+
+#+RESULTS:
+: 1	10
+: 2	20
+: 1	10
+: 2	20
+: name	xs
+
+* Multiple returns, one rule
+
+A Lua function can return several values — but they only /expand/ in
+the last position of a list. In =local x, y = f()= the call is last on
+the right, so it expands. In =local z = f()= there is nowhere to
+expand: the extra values are silently dropped. Parentheses are the
+explicit truncate: =(f())= is always exactly one value. That is the
+whole rule, and it is what makes the classic swap one line:
+= a, b = b, a = evaluates both right-hand sides before either
+assignment lands.
+
+#+NAME: multiple-returns
+#+BEGIN_SRC lua
+local function minmax(t)
+  local lo, hi = t[1], t[1]
+  for i = 2, #t do
+    if t[i] < lo then lo = t[i] end
+    if t[i] > hi then hi = t[i] end
+  end
+  return lo, hi
+end
+local xs = {3, 1, 4, 1, 5}
+local lo, hi = minmax(xs)
+local only = minmax(xs)
+print(lo, hi, only, (minmax(xs)))
+a, b = 1, 2
+a, b = b, a
+print(a, b)
+#+END_SRC
+
+#+RESULTS:
+: 1	5	1	1
+: 2	1
+
+* Truthiness and 1: the two habits to unlearn
+
+Coming from C or Python, two Lua defaults bite everyone. First, /only
+=nil= and =false= are falsy/ — the number 0 and the empty string are
+/truthy/. Second, /indices start at 1=, and =#t= counts from the first
+slot. The block below prints exactly what Lua thinks.
+
+#+NAME: truth-and-one
+#+BEGIN_SRC lua
+if 0 then print("0 is truthy") end
+if "" then print("the empty string is truthy") end
+if nil or false then print("never") else print("only nil and false are falsy") end
+local t = {"a", "b", "c"}
+print(t[1], t[0], #t)
+#+END_SRC
+
+#+RESULTS:
+: 0 is truthy
+: the empty string is truthy
+: only nil and false are falsy
+: a	nil	3
+
+* Integers and floats are different numbers
+
+Lua 5.4 has two numeric types, and they print differently: =1= is an
+integer, =1.0= is a float. Division =/= always produces a float;
+floor division =//= stays integer when both operands are — and floors
+toward minus infinity, so =-7 // 2= is =-4=, not =-3=. The modulo
+follows the /divisor's/ sign, because Lua defines =a % b= as
+= a - floor(a / b) * b =: =5 % -3= is =-1=. They still compare equal
+numerically: =1 == 1.0= is =true=.
+
+#+NAME: ints-and-floats
+#+BEGIN_SRC lua
+print(1, 1.0, 7 / 2)
+print(7 // 2, 7.0 // 2, -7 // 2)
+print(5 % 3, 5 % -3, -5 % 3)
+print(1 == 1.0)
+#+END_SRC
+
+#+RESULTS:
+: 1	1.0	3.5
+: 3	3.0	-4
+: 2	-1	1
+: true
+
+* Metatables: __index is inheritance
+
+A table's /metatable/ can carry an =__index= entry. When a read misses,
+Lua consults =__index=: if it is a table, the lookup continues there —
+which chains, so a two-level =__index= chain gives you a grandparent
+lookup. If it is a function, Lua calls it with the table and the
+missing key. That single hook is inheritance in Lua: define methods on
+a prototype, set it as =__index=, and instances find them. The colon
+sugar keeps it tidy: =obj:greet()= passes =obj= itself as the hidden
+first argument =self=, and =function Proto:greet()= declares that
+parameter for you.
+
+#+NAME: metatables
+#+BEGIN_SRC lua
+local Animal = {}
+function Animal:greet() return self.sound .. "!" end
+local Dog = {}
+Animal.__index = Animal
+setmetatable(Dog, {__index = Animal})
+local Dog2 = {}
+Dog.__index = Dog
+setmetatable(Dog2, {__index = Dog})
+local rex = {sound = "woof"}
+setmetatable(rex, {__index = Dog2})   -- two levels up to Animal
+local fallback = setmetatable({}, {__index = function(t, k) return k .. "?" end})
+print(rex:greet())
+print(fallback.anything)
+#+END_SRC
+
+#+RESULTS:
+: woof!
+: anything?

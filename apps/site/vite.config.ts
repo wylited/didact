@@ -45,6 +45,30 @@ export default defineConfig({
         '../../packages/kernel-lisp/src',
         import.meta.url,
       ).pathname,
+      '@didact/kernel-lua': new URL(
+        '../../packages/kernel-lua/src',
+        import.meta.url,
+      ).pathname,
+      '@didact/kernel-matlab': new URL(
+        '../../packages/kernel-matlab/src',
+        import.meta.url,
+      ).pathname,
+      '@didact/kernel-prolog': new URL(
+        '../../packages/kernel-prolog/src',
+        import.meta.url,
+      ).pathname,
+      '@didact/kernel-regex': new URL(
+        '../../packages/kernel-regex/src',
+        import.meta.url,
+      ).pathname,
+      '@didact/kernel-sql': new URL(
+        '../../packages/kernel-sql/src',
+        import.meta.url,
+      ).pathname,
+      '@didact/kernel-wasm': new URL(
+        '../../packages/kernel-wasm/src',
+        import.meta.url,
+      ).pathname,
       '@didact/kernel-typst': new URL(
         '../../packages/kernel-typst/src',
         import.meta.url,

@@ -1,0 +1,217 @@
+#+TITLE: SQL: You Describe, It Decides
+#+SUBTITLE: A query engine small enough to single-step — every row it scans, every pair it probes, every group it folds, in the panels
+
+* You describe; the engine decides how
+
+SQL is the famous /declarative/ language: you say =WHERE age >= 30=, not
+"loop over the rows and test each one". But underneath every declarative
+promise sits an imperative machine that /does/ loop — and this page runs one
+you can watch. It is a hand-written tokenizer, statement parser and
+row-at-a-time interpreter in pure TypeScript: no database, no wasm, just
+code you could read in an afternoon.
+
+The deal it offers: statements are =CREATE TABLE=, =INSERT= and =SELECT=,
+each closed by a semicolon. Tables are typed (=INTEGER= and =TEXT= are the
+whole type system), =INSERT= checks every value against its column's type,
+and keywords are case-insensitive while =text values= keep their case.
+Single-step the block below and the *Plan* panel shows the pipeline the
+engine chose for your =SELECT= — =Scan=, =Filter=, =Project= — with three
+live counters each: rows *seen*, rows *passed*, rows *emitted*. Each press
+of the step button is exactly **one row operation**: one scanned row, or
+one filter test, or one projected output row.
+
+#+NAME: select-where
+#+BEGIN_SRC sql
+CREATE TABLE users (id INTEGER, name TEXT, city TEXT, age INTEGER);
+INSERT INTO users VALUES (1, 'alice', 'HK', 34), (2, 'Bob', 'HK', 27), (3, 'carol', 'SF', 41), (4, 'dave', 'SF', 19), (5, 'eve', 'NY', NULL);
+SELECT name, age FROM users WHERE age >= 30;
+#+END_SRC
+
+#+RESULTS:
+: INSERT 0 5
+: 
+:  name  | age 
+: -------+-----
+:  alice | 34  
+:  carol | 41  
+
+The counters tell the story: =Scan users= ends at =5/5/5= (it reads every
+row), =Filter age >= 30= ends at =5/2/2= (five tested, two passed), and
+=Project= at =2/2/2=. The result prints as a psql-style table — columns
+padded to their widest value, a header, a rule of dashes. The
+acknowledgement =INSERT 0 5= is psql's too: the =0= is a legacy table-id
+slot, the =5= is the number of rows inserted. And notice who is missing:
+/eve/, whose age is =NULL=, failed =age >= 30= — unknown, not true — long
+before section five makes a lesson of it.
+
+* A JOIN is a loop over row pairs
+
+Real engines have hash joins and merge joins and statistics. This engine
+has the truth: a /nested loop/. For every row that arrives from the left
+side, it probes /every/ row of the right table and evaluates the =ON=
+condition on the pair — one pair, one step, one tick of the =seen= counter.
+Step through the block below with the Plan open: =Scan users= runs first
+(3 rows), then =NestedLoop join orders= — and its =seen= counter climbs
+to =9=, because 3 × 3 = 9 probes. Two pairs make =users.id =
+orders.user_id= true, so the join ends at =9/2/2=.
+
+Order 12 — =user_id= 9 — matches nobody, and that is the whole story of
+inner joins: rows without a partner simply do not appear. In this dialect
+you qualify same-named columns as =users.id= and =orders.user_id= (one
+=JOIN= per =SELECT= is the v1 limit), and an unqualified =id= would be
+rejected as /ambiguous/, with both spellings suggested.
+
+#+NAME: nested-loop-join
+#+BEGIN_SRC sql
+CREATE TABLE users (id INTEGER, name TEXT);
+INSERT INTO users VALUES (1, 'alice'), (2, 'Bob'), (3, 'carol');
+CREATE TABLE orders (id INTEGER, user_id INTEGER, total INTEGER);
+INSERT INTO orders VALUES (10, 1, 100), (11, 3, 60), (12, 9, 999);
+SELECT users.name, orders.total FROM users JOIN orders ON users.id = orders.user_id;
+#+END_SRC
+
+#+RESULTS:
+: INSERT 0 3
+: 
+: INSERT 0 3
+: 
+:  name  | total 
+: -------+-------
+:  alice | 100   
+:  carol | 60    
+
+Now the famous caveat makes sense: a cross join of two 200-row tables is
+40 000 probes — visible, countable work — and this engine /stops/ after
+100 000 row operations in a run, with a clean error naming the line,
+rather than grind your browser to a halt. Big joins need smarter plans;
+that is what "the engine decides" is really about.
+
+* GROUP BY folds rows into groups
+
+=GROUP BY city= partitions the rows, and the =GroupBy= operator does it in
+the open: one step /folds/ one row into its group, updating every
+aggregate's running state as it goes. =COUNT(*)= counts rows;
+=COUNT(col)=, =SUM=, =AVG=, =MIN= and =MAX= skip =NULL=s — watch the
+*Current row* panel flip through the source rows as the counters climb.
+When the folding ends, each group is /finalized/ in its own step: =HAVING=
+runs first (on the group, not on rows — that is why it may use
+aggregates), then the select list is computed. =AVG= of an =INTEGER=
+column always prints with a decimal, because the mean of integers usually
+is not one.
+
+#+NAME: group-by
+#+BEGIN_SRC sql
+CREATE TABLE users (id INTEGER, name TEXT, city TEXT, age INTEGER);
+INSERT INTO users VALUES (1, 'alice', 'HK', 34), (2, 'Bob', 'HK', 27), (3, 'carol', 'SF', 41), (4, 'dave', 'SF', 19);
+SELECT city, COUNT(*), AVG(age) FROM users GROUP BY city;
+SELECT city, COUNT(*) FROM users GROUP BY city HAVING COUNT(*) > 1 AND AVG(age) > 30;
+#+END_SRC
+
+#+RESULTS:
+: INSERT 0 4
+: 
+:  city | COUNT(*) | AVG(age) 
+: ------+----------+----------
+:  HK   | 2        | 30.5     
+:  SF   | 2        | 30.0     
+: 
+:  city | COUNT(*) 
+: ------+----------
+:  HK   | 2        
+
+One rule guards the whole idea: a group collapses many rows into one, so
+a /bare/ column in the select list must be a grouping column — otherwise
+/which/ =alice= would =name= show? The engine refuses, before touching a
+row, naming the column and its line:
+
+#+NAME: grouping-rule
+#+BEGIN_SRC sql
+CREATE TABLE users (id INTEGER, name TEXT, city TEXT, age INTEGER);
+INSERT INTO users VALUES (1, 'alice', 'HK', 34), (2, 'Bob', 'SF', 27);
+SELECT name, COUNT(*) FROM users GROUP BY city;
+#+END_SRC
+
+#+RESULTS:
+: INSERT 0 2
+
+The run stops with =line 3: column 'name' must appear in GROUP BY or
+inside an aggregate= — everything before it (the =INSERT=) already
+happened; statements run in order. Put =name= inside an aggregate
+(=MIN(name)=) or add it to =GROUP BY= and the query runs.
+
+* ORDER BY and LIMIT: work you can count
+
+Sorting is another operator with visible work: a merge sort whose every
+/comparison/ is one step, stable (equal keys keep input order), =NULL=s
+sorting last because they are unknown rather than small. =ORDER BY= names
+a column /of the result/ — the select list — and =TEXT= columns sort
+lexicographically (capitals first, byte order) while =INTEGER= columns
+sort numerically: =12 > 7 > 3=, not dictionary order. =LIMIT n= then lets
+the first =n= rows through and stops reading. Below, =points DESC=
+puts both 12s on top and the tie-break =player= keeps =Bob= before
+=carol=; the sort's counters end at the number of comparisons it made.
+
+#+NAME: order-limit
+#+BEGIN_SRC sql
+CREATE TABLE scores (player TEXT, points INTEGER);
+INSERT INTO scores VALUES ('alice', 7), ('Bob', 12), ('carol', 12), ('dave', 3);
+SELECT player, points FROM scores ORDER BY points DESC, player LIMIT 3;
+#+END_SRC
+
+#+RESULTS:
+: INSERT 0 4
+: 
+:  player | points 
+: --------+--------
+:  Bob    | 12     
+:  carol  | 12     
+:  alice  | 7      
+
+* NULL is not a value
+
+=NULL= is not zero and not =''= — it is the marker for /unknown/, and it
+poisons every comparison it touches: =NULL >= 30= is not false, it is
+*unknown*, and =WHERE= keeps a row only when its condition is true. So
+Bob, whose age is =NULL=, is invisible to =age > 25= — and equally
+invisible to =NOT age > 25=, because =NOT unknown= is still unknown. The
+only tests that can /see/ a =NULL= are the two-valued =IS NULL= and
+=IS NOT NULL=. Aggregates handle
+the same truth their own way: they simply skip =NULL=s (=COUNT(*)= counts
+rows, =COUNT(age)= counts known ages).
+
+#+NAME: null-and-like
+#+BEGIN_SRC sql
+CREATE TABLE users (name TEXT, city TEXT, age INTEGER);
+INSERT INTO users VALUES ('alice', 'HK', 34), ('Bob', 'HK', NULL), ('carol', 'SF', 28);
+SELECT name FROM users WHERE age IS NULL;
+SELECT name FROM users WHERE age > 25;
+SELECT name FROM users WHERE name LIKE '%o%';
+#+END_SRC
+
+#+RESULTS:
+: INSERT 0 3
+: 
+:  name 
+: ------
+:  Bob  
+: 
+:  name  
+: -------
+:  alice 
+:  carol 
+: 
+:  name  
+: -------
+:  Bob   
+:  carol 
+
+The last query adds =LIKE=, the pattern operator: =%= matches any run of
+characters (including none), =_= matches exactly one, and there is /no/
+escape syntax in this dialect — a plain =%= in a pattern is always a
+wildcard, never a literal percent sign. Matching is case-sensitive, like
+everything about values here: ='Alice'= would not have found =alice=.
+
+That is the whole engine: a plan of row-at-a-time operators, three-valued
+logic, aggregates folded in the open, and a budget that refuses to hang.
+You describe the result; it decides — and now you have watched every
+decision it makes.

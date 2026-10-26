@@ -16,6 +16,12 @@ one `tsc --noEmit` + `vite build` covers everything. No per-package build step.
 - `packages/kernel-lisp` — `@didact/kernel-lisp`: Scheme-flavored Lisp interpreter kernel with cons-heap panels (pure TypeScript).
 - `packages/kernel-python` — `@didact/kernel-python`: Python kernel on vendored Pyodide.
 - `packages/kernel-typst` — `@didact/kernel-typst`: Typst kernel on typst wasm + fonts.
+- `packages/kernel-wasm` — `@didact/kernel-wasm`: WebAssembly WAT-subset stack-machine interpreter kernel (pure TypeScript).
+- `packages/kernel-sql` — `@didact/kernel-sql`: SQL teaching engine with per-row plan panels (pure TypeScript).
+- `packages/kernel-matlab` — `@didact/kernel-matlab`: MATLAB-flavored matrix interpreter with column-major memory panels (pure TypeScript).
+- `packages/kernel-lua` — `@didact/kernel-lua`: Lua teaching-subset interpreter kernel (pure TypeScript).
+- `packages/kernel-regex` — `@didact/kernel-regex`: Thompson-NFA regex engine with state-set panels (pure TypeScript).
+- `packages/kernel-prolog` — `@didact/kernel-prolog`: SLD-resolution Prolog engine with choice-point panels (pure TypeScript).
 - `apps/site` — `@didact/site`: the website; `src/pages/*.org` + kernel registration only.
 
 ## Kernel contract

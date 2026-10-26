@@ -1,0 +1,222 @@
+#+TITLE: MATLAB: Everything Is a Matrix, Step by Step
+#+SUBTITLE: A small column-major interpreter you can single-step through — literals, linear indexing, elimination solving, workspaces and vectorization, on a machine small enough to hold in your head
+
+* The machine you are driving
+
+This page runs a hand-written, MATLAB-*flavored* teaching interpreter —
+not The MathWorks' MATLAB. It keeps the idea that made MATLAB MATLAB:
+/there is exactly one data structure, the matrix/, and it is stored
+COLUMN-MAJOR in one flat array, exactly the way the real program lays it
+out. Everything else is pared to a subset small enough to read in an
+afternoon: literals and ranges, =+ - * / \ .= with their matrix and
+elementwise meanings, indexing with =end=, =if=/=for=/=while=, functions
+at the top of the block, and a fixed set of builtins (=zeros=, =sum=,
+=sort=, =\det= …). There is no =rand= anywhere — identical source runs
+identically, forever — and anything outside the subset (cells ={}=,
+structs, function handles =@=, =try/catch=, strings as data) is refused
+*before anything runs*, with the offending line named.
+
+Three honest display differences from the real program: this console
+separates columns with two spaces (MATLAB pads to terminal width); it
+prints numbers with up to four decimals and trailing zeros trimmed, so
+=0.5= prints as =0.5= (MATLAB's default =format short= would show
+=0.5000=); and inside =[ ]= every space- or comma-separated item is ONE
+value — MATLAB reads =[1-2]= as one element and =[1 -2]= as two because
+it tracks the spaces, while here =-= always starts a new item, so write
+=[(1 - 2)]= when you mean subtraction.
+
+* Literals, ranges, and column-major memory
+
+A literal lists rows across =;= (or a newline) and columns across spaces
+(or commas):
+
+#+BEGIN_SRC matlab
+A = [1 2; 3 4]
+disp(A(:)')
+disp(A(2))
+disp(A(3))
+#+END_SRC
+
+#+RESULTS:
+: A =
+:
+: 1  2
+: 3  4
+: 1  3  2  4
+: 3
+: 2
+
+The answer to "what is =A(3)=?" is the whole storage story. MATLAB keeps
+=[1 2; 3 4]= as one flat array ordered /1, 3, 2, 4/ — down the first
+column, then down the second. Linear indices follow that order:
+=A(2)= is 3 (bottom of the first column) and =A(3)= is 2 (top of the
+second). Click Step once, then look at the /Matrices/ panel: one row per
+element, in storage order, address =0x0= through =0x3=. Each address is
+=(col-1)·rows + row - 1=, 0-based — for this 2×2, =A(2,1)= lands at
+address =0x1= and =A(1,2)= at =0x2=. The 16-hex-digit column is the
+element's IEEE 754 double pattern: the eight bytes that actually sit in
+memory. Ranges build row vectors, and the half-steps print without
+padding zeros:
+
+#+BEGIN_SRC matlab
+v = 1:0.5:3
+disp(v)
+w = 5:-2:1;
+disp(w)
+#+END_SRC
+
+#+RESULTS:
+: v =
+:
+:   1  1.5    2  2.5    3
+:   1  1.5    2  2.5    3
+: 5  3  1
+
+The /Workspace/ panel lists every base-workspace variable with its shape
+and a preview (=A= shows as =2x2 [1 2; 3 4]=), marking what the last
+statement changed. The /Matrices/ panel follows the most recent write,
+and the rows touched by that write are highlighted — write =M(2,2)=42=
+into a =zeros(2,3)= and only one address lights up.
+
+* Matrix times matrix, or times elementwise
+
+=*= is the linear-algebra product: row of the left, column of the right.
+=.*= multiplies element by element. The two agree only by coincidence:
+
+#+BEGIN_SRC matlab
+A = [1 2; 3 4];
+B = [5 6; 7 8];
+disp(A * B)
+disp(A .* B)
+#+END_SRC
+
+#+RESULTS:
+: 19  22
+: 43  50
+:  5  12
+: 21  32
+
+The same split runs through the operator set: =/= and =\= solve systems,
+=./= and =.\= divide elementwise (with a 1×1 broadcasting either way),
+=^= is matrix power for square matrices with non-negative integer
+exponents, and =.^= is elementwise power. ='=\ (quote) transposes — real
+matrices only, so conjugates never enter the story.
+
+* Solving with \\ : the elimination, shown
+
+=A\b= solves =Ax=b= by Gaussian elimination with partial pivoting — the
+same elimination idea MATLAB's =\\= dispatches to for square systems
+(LAPACK's LU). Below, the system interpolates a quadratic =p(x) = a +
+bx + cx²= through the points =(1,6)=, =(2,14)=, =(3,36)=; MATLAB's way
+of saying "fit it" is one backslash:
+
+#+BEGIN_SRC matlab
+M = [1 1 1; 1 2 4; 1 3 9];
+b = [6; 14; 36];
+c = M \ b;
+disp(c')
+#+END_SRC
+
+#+RESULTS:
+:  12  -13    7
+
+The answer =[12, -13, 7]= is =12 - 13x + 7x²=: =p(1)=6=, =p(2)=14=,
+=p(3)=36=. When no solution exists the interpreter stops with the line
+that asked: =M \ b= on a singular =M= reports =matrix is singular to
+working precision — cannot solve A\b= at *its* line number. =det= and
+=inv= run the same elimination (=inv= refuses singular input the same
+way).
+
+* Indexing and slicing, with end
+
+#+BEGIN_SRC matlab
+A = [1 2 3; 4 5 6];
+disp(A(1:2, 2:end))
+disp(A(:, 2))
+disp(A(1, :))
+A(1, :) = [10 20 30];
+A(:, 2) = [];
+disp(A)
+#+END_SRC
+
+#+RESULTS:
+: 2  3
+: 5  6
+: 2
+: 5
+: 1  2  3
+: 10  30
+:  4   6
+
+=S(1:2, 2:end)= takes rows 1–2 and columns 2 to the end; =end= is the
+size of its dimension. =A(:, 2)= is a column, =A(1, :)= a row. Writes
+follow the same shapes: =A(1,:) = [10 20 30]= overwrites a row, and
+=A(:,2) = []= /deletes/ the column — the matrix shrinks from 2×3 to
+2×2, and the Matrices panel shows the surviving elements slide into new
+addresses. Index out of bounds and the write is refused with the line
+(matrices do not grow implicitly here — preallocate with =zeros=).
+A list indexes in storage order too: =A([1 3])= gathers a column made of
+the first and third stored elements.
+
+* Functions own their workspace
+
+#+BEGIN_SRC matlab
+function t = twice(x)
+  y = x * 2;
+  t = y;
+end
+v = [1 2 3];
+w = twice(v);
+fprintf('v is still %d %d %d\n', v(1), v(2), v(3));
+fprintf('w is      %d %d %d\n', w(1), w(2), w(3));
+#+END_SRC
+
+#+RESULTS:
+: v is still 1 2 3
+: w is      2 4 6
+
+Scripts share one /base/ workspace; every function call gets its own.
+The block above calls =twice=, which assigns =y= — and =y= never appears
+next to =v= in the Workspace panel, because it lives in =twice='s frame.
+Set a breakpoint on line 3 and the /Call stack/ panel shows both frames,
+each function's own workspace named (=twice · own workspace: x, y=)
+while the Workspace panel still lists only the script's =v=. Function
+arguments are copies (assignment in MATLAB copies values), and a
+function that cannot see your variables also cannot corrupt them. A
+function may return two values — =function [q, r] = divmod(a, b)= — and
+=[q, r] = divmod(17, 5)= fills both (=q=3=, =r=2=).
+
+=fprintf= takes literal strings only: %d, %.Nf and %% conversions, \n
+for newline. Strings are display text in this subset — you can hand them
+to =disp=, =fprintf= and =error('…')= and nothing else; assigning one is
+refused with the line.
+
+* Vectorize: same answer, fewer steps
+
+#+BEGIN_SRC matlab
+A = [1 2 3; 4 5 6];
+s = 0;
+for c = A
+  s = s + sum(c);
+end
+fprintf('loop total:      %d\n', s);
+fprintf('vectorized total: %d\n', sum(sum(A)));
+#+END_SRC
+
+#+RESULTS:
+: loop total:      21
+: vectorized total: 21
+
+The loop follows MATLAB truth exactly: =for c = A= walks the matrix's
+COLUMNS — =c= is =[1;4]=, then =[2;5]=, then =[3;6]= — and each =sum(c)=
+adds one column to =s=. Both routes print 21, but the status line tells
+the real story: this block takes 10 steps, and the two-statement
+=disp(sum(sum(A)))= version takes 2 — every statement, loop iteration
+and call is one evaluation unit, and =sum(sum(A))= does the walking
+inside one builtin. (One orientation note: =sum(A)= collapses the
+columns into a row; =sum(A,2)= collapses the rows into a column.)
+
+That is the whole tour: one data structure in column-major order, two
+meanings for every operator, one backslash that eliminates, and a
+workspace per frame. Break something — every error names its line, and
+nothing runs past a refusal.

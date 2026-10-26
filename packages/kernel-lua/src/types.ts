@@ -76,8 +76,10 @@ export interface Kernel {
     | 'cpp'
     | 'javascript'
     | 'lua'
+    | 'octave'
     | 'python'
     | 'scheme'
+    | 'sql'
     | 'plain';
   createSession(): Session;
 }

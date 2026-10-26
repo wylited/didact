@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "Didact site: composes @didact/core with nine kernels (x86-64, RISC-V, MIPS, C, C++, Python, JavaScript, Lisp, Typst)",
+  "description": "Didact site: composes @didact/core with fifteen kernels (x86-64, RISC-V, MIPS, C, C++, WebAssembly, Python, SQL, MATLAB, Lua, JavaScript, regex, Lisp, Prolog, Typst)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -19,6 +19,12 @@
     "@didact/kernel-python": "workspace:*",
     "@didact/kernel-javascript": "workspace:*",
     "@didact/kernel-lisp": "workspace:*",
+    "@didact/kernel-lua": "workspace:*",
+    "@didact/kernel-matlab": "workspace:*",
+    "@didact/kernel-prolog": "workspace:*",
+    "@didact/kernel-regex": "workspace:*",
+    "@didact/kernel-sql": "workspace:*",
+    "@didact/kernel-wasm": "workspace:*",
     "@didact/kernel-typst": "workspace:*"
   },
   "devDependencies": {

@@ -4,8 +4,9 @@ A client-side literate-programming site framework. Drop `.org` files in and
 get a site where prose interleaves with executable, steppable code blocks;
 each block drives an under-the-hood machine panel — registers, disassembly,
 memory, console; a disassembly row shows its source line's `;` comment on
-hover. Nine kernels ship out of the box: x86-64, RV32IM, MIPS32, C, C++,
-Python, JavaScript, Lisp, and Typst. No server, no runtime network beyond
+hover. Fifteen kernels ship out of the box: x86-64, RV32IM, MIPS32, C,
+C++, WebAssembly, Python, SQL, MATLAB, Lua, JavaScript, regex, Lisp,
+Prolog, and Typst. No server, no runtime network beyond
 same-origin vendor assets: parsing, assembly, execution, and stepping are
 all client-side.
 
@@ -32,8 +33,14 @@ Open the printed URL. (If pnpm blocks esbuild's install script, run
 | `c` | C · clang wasm | `c` | `packages/kernel-c` | `public/vendor-c/` (~105 MB, clang → wasm32-wasi) |
 | `cpp` | C++ · clang wasm | `cpp` | `packages/kernel-cpp` | shares `public/vendor-c/` with `c` (same clang engine) |
 | `python` | Python · Pyodide | `python` | `packages/kernel-python` | `public/vendor-python/` (~13 MB, CPython 3.14 wasm) |
+| `wasm` | WebAssembly · WAT interpreter | `scheme` | `packages/kernel-wasm` | none (pure TypeScript interpreter) |
+| `sql` | SQL · query engine | `sql` | `packages/kernel-sql` | none (pure TypeScript engine) |
+| `matlab` | MATLAB · interpreter | `octave` | `packages/kernel-matlab` | none (pure TypeScript interpreter) |
+| `lua` | Lua · interpreter | `lua` | `packages/kernel-lua` | none (pure TypeScript interpreter) |
 | `javascript` | JavaScript · interpreter | `javascript` | `packages/kernel-javascript` | none (pure TypeScript interpreter) |
+| `regex` | Regex · NFA engine | `plain` | `packages/kernel-regex` | none (pure TypeScript Thompson NFA) |
 | `lisp` | Lisp · interpreter | `scheme` | `packages/kernel-lisp` | none (pure TypeScript interpreter) |
+| `prolog` | Prolog · interpreter | `plain` | `packages/kernel-prolog` | none (pure TypeScript SLD engine) |
 | `typst` | Typst · wasm | `plain` | `packages/kernel-typst` | `public/vendor-typst/` (~25 MB, compiler wasm + fonts) |
 
 Engine payloads are npm dependencies pinned by `pnpm-lock.yaml`;

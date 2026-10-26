@@ -11,9 +11,15 @@ packages/kernel-riscv      @didact/kernel-riscv      RV32IM interpreter (pure Ty
 packages/kernel-mips       @didact/kernel-mips       MIPS32 interpreter (pure TypeScript)
 packages/kernel-c          @didact/kernel-c          C via vendored clang wasm (wasm32-wasi)
 packages/kernel-cpp        @didact/kernel-cpp        C++ via the same clang engine (libc++, -fno-exceptions)
-packages/kernel-javascript @didact/kernel-javascript JavaScript teaching-subset interpreter (pure TypeScript)
-packages/kernel-lisp       @didact/kernel-lisp       Scheme-flavored Lisp interpreter, cons-heap panels (pure TypeScript)
+packages/kernel-wasm       @didact/kernel-wasm       WebAssembly WAT-subset stack machine (pure TypeScript)
 packages/kernel-python     @didact/kernel-python     Python via vendored Pyodide
+packages/kernel-sql        @didact/kernel-sql        SQL engine with per-row plan panels (pure TypeScript)
+packages/kernel-matlab     @didact/kernel-matlab     MATLAB-flavored matrix interpreter, column-major panels (pure TypeScript)
+packages/kernel-lua        @didact/kernel-lua        Lua teaching-subset interpreter (pure TypeScript)
+packages/kernel-javascript @didact/kernel-javascript JavaScript teaching-subset interpreter (pure TypeScript)
+packages/kernel-regex      @didact/kernel-regex      Thompson-NFA regex engine, state-set panels (pure TypeScript)
+packages/kernel-lisp       @didact/kernel-lisp       Scheme-flavored Lisp interpreter, cons-heap panels (pure TypeScript)
+packages/kernel-prolog     @didact/kernel-prolog     SLD-resolution Prolog, choice-point panels (pure TypeScript)
 packages/kernel-typst      @didact/kernel-typst      Typst via vendored compiler wasm + fonts
 apps/site                  @didact/site             the website (src/pages/*.org + kernel registration)
 ```
@@ -76,9 +82,11 @@ today so pyodide-style kernels need no contract change later.
 - Thin composition: glob `src/pages/*.org` raw, order them by the
   `PAGE_ORDER` array in `src/main.ts` (stems of the page files; the nav
   title comes from each file's `#+TITLE:` line), register
-  `[asm64Kernel, riscvKernel, mipsKernel, cKernel, cppKernel,
-  pythonKernel, jsKernel, lispKernel, typstKernel]`, mount with `pages`.
+  `[asm64Kernel, riscvKernel, mipsKernel, cKernel, cppKernel, wasmKernel,
+  pythonKernel, sqlKernel, matlabKernel, luaKernel, jsKernel,
+  regexKernel, lispKernel, prologKernel, typstKernel]`, mount with `pages`.
 - `src/pages/*.org`: one lesson per kernel (`x86-64-assembly`, `riscv`,
-  `mips`, `c`, `cpp`, `python`, `javascript`, `lisp`, `typst`), with
-  per-block controls, breakpoints, panel attach/detach, pages.
+  `mips`, `c`, `cpp`, `wasm`, `python`, `sql`, `matlab`, `lua`,
+  `javascript`, `regex`, `lisp`, `prolog`, `typst`), with per-block
+  controls, breakpoints, panel attach/detach, pages.
 - index.html (noscript in body), favicon optional, title plain text.

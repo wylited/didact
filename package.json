@@ -10,7 +10,7 @@
     "preview": "pnpm --dir apps/site preview",
     "typecheck": "pnpm --dir apps/site exec tsc --noEmit",
     "test": "vitest run && pnpm test:smoke",
-    "test:smoke": "bun packages/kernel-riscv/test/smoke.ts && bun packages/kernel-mips/test/smoke.ts && bun packages/kernel-python/test/smoke.ts && bun packages/kernel-c/test/smoke.ts && bun packages/kernel-javascript/test/smoke.ts && bun packages/kernel-lisp/test/smoke.ts && bun packages/kernel-cpp/test/smoke.ts",
+    "test:smoke": "bun packages/kernel-riscv/test/smoke.ts && bun packages/kernel-mips/test/smoke.ts && bun packages/kernel-python/test/smoke.ts && bun packages/kernel-c/test/smoke.ts && bun packages/kernel-javascript/test/smoke.ts && bun packages/kernel-lisp/test/smoke.ts && bun packages/kernel-cpp/test/smoke.ts && bun packages/kernel-wasm/test/smoke.ts && bun packages/kernel-lua/test/smoke.ts && bun packages/kernel-prolog/test/smoke.ts && bun packages/kernel-regex/test/smoke.ts && bun packages/kernel-matlab/test/smoke.ts && bun packages/kernel-sql/test/smoke.ts",
     "lint": "eslint ."
   },
   "devDependencies": {
