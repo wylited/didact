@@ -81,11 +81,14 @@ adding kernels a matter of implementing one package against
     (slugs kebab-cased: lowercased, non-alphanumeric runs collapsed
     to single '-'). Every nav and contents link is a real fragment
     href; on mount the site reads `location.hash` and shows that page
-    (unknown or missing page slug → the first page), and `hashchange`
+    (unknown or missing page slug → the first page, and the URL is
+    normalized to name the page actually shown), and `hashchange`
     (nav click, contents click, back/forward) either switches the
     rendered document — disposing the old page's blocks and detaching
-    the panel — or scrolls within the current page. Section scrolls
-    are smooth within a page, instant after a page swap.
+    the panel — or scrolls within the current page. A section hash
+    scrolls to its heading — smooth within a page, instant after a
+    page swap; a page-level hash (or an unknown section) means the
+    top of the page.
 11. **Left-rail contents.** The h2/h3 headings (org depth 1/2) of the
     rendered page build the navigation rail's Contents section: one
     small gray link per heading (h3 indented), each a real deep link
@@ -96,8 +99,8 @@ adding kernels a matter of implementing one package against
     active entry — near-black with a 2px left rule — starting from
     the first entry and reset on page switch; it never writes the
     hash. A page without h2/h3 headings leaves the section empty.
-12. **Motion.** Width modulation (rails) and content cross-fades
-    transition over 300ms / ~160ms respectively; all of it is disabled
+12. **Motion.** The panel rail's width modulation transitions over
+    300ms; the panel content fades in ~160ms; all of it is disabled
     under `prefers-reduced-motion: reduce` (no transitions, no
     animations).
 
@@ -120,8 +123,11 @@ adding kernels a matter of implementing one package against
   above, Pages below, hairline between), document center (content
   capped at ~74ch, centered) — and a third zone, the panel rail,
   sliding from 0 to `clamp(420px, 42vw, 720px)` when attached.
-  Hairline separators, rails sticky and internally scrolling; zones
-  stack vertically < 900px. Page-level chrome is limited to the
+  Hairline separators, rails sticky and internally scrolling (each
+  rail section scrolls on its own when the viewport is short); zones
+  stack vertically < 900px, where Contents hides, Pages wrap
+  horizontally, and the panel (full-width, under the document)
+  appears only while attached. Page-level chrome is limited to the
   rail's small-caps headers and the plain document title header.
 
 ## Org-mode compatibility (binding, unchanged from v0.1)

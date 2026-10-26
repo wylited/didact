@@ -75,7 +75,7 @@ describe('mountSite: navigation', () => {
     expect(handle.activeIndex).toBe(1);
   });
 
-  it("falls back to page 0 on an unknown hash without crashing, and back-nav via hash returns to page 2", () => {
+  it("falls back to page 0 on an unknown hash, normalizing the URL to name the page actually shown", () => {
     const { handle, root } = mount();
     handles.push(handle);
     root.querySelectorAll<HTMLAnchorElement>("[data-test='nav-item']")[1]!.click();
@@ -86,9 +86,37 @@ describe('mountSite: navigation', () => {
     const page = root.querySelector("[data-test='page']")!;
     expect(handle.activeIndex).toBe(0);
     expect(page.textContent).toContain('Intro to page one.');
+    // the URL no longer claims a page that does not exist
+    expect(location.hash).toBe('#/first-lesson');
     location.hash = '#/second-lesson-registers';
     window.dispatchEvent(new Event('hashchange'));
     expect(handle.activeIndex).toBe(1);
+  });
+
+  it('a page-level hash after a section hash scrolls back to the top of the page', () => {
+    const { handle, root } = mount(TOC_PAGES);
+    handles.push(handle);
+    const toTop: number[] = [];
+    const originalScroll = window.scrollTo;
+    const originalInto = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = (): void => undefined;
+    window.scrollTo = ((opts?: ScrollToOptions) => {
+      toTop.push(opts?.top ?? -1);
+    }) as typeof window.scrollTo;
+    try {
+      // deep-link to Beta, then click the page's own nav link
+      root.querySelectorAll<HTMLAnchorElement>("[data-test='toc-item']")[2]!.click();
+      window.dispatchEvent(new Event('hashchange'));
+      root.querySelectorAll<HTMLAnchorElement>("[data-test='nav-item']")[0]!.click();
+      window.dispatchEvent(new Event('hashchange'));
+    } finally {
+      window.scrollTo = originalScroll;
+      Element.prototype.scrollIntoView = originalInto;
+    }
+    // the page did not switch, but the viewport returned to the top
+    expect(handle.activeIndex).toBe(0);
+    expect(toTop).toEqual([0]);
+    expect(root.querySelector('.lw-toc-active')!.textContent).toBe('Alpha');
   });
 });
 

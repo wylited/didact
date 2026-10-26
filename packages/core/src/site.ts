@@ -149,12 +149,18 @@ export function mountSite(opts: MountOptions): SiteHandle {
 
   /** Active entry = the heading nearest the viewport top: the last one
    *  whose top edge crossed the threshold line (the section currently
-   *  being read); above the first heading → the first entry. */
+   *  being read); above the first heading → the first entry. At the
+   *  bottom of the page the last entry wins — a short final section
+   *  can never cross the line on its own. */
   function spyUpdate(): void {
     let best = 0;
     for (let i = 0; i < tocEntries.length; i++) {
       if (tocEntries[i]!.heading.getBoundingClientRect().top <= 96) best = i;
       else break;
+    }
+    const doc = document.documentElement;
+    if (window.scrollY + window.innerHeight >= doc.scrollHeight - 2) {
+      best = tocEntries.length - 1;
     }
     setActiveToc(best);
   }
@@ -260,9 +266,16 @@ export function mountSite(opts: MountOptions): SiteHandle {
    *  click, back/forward): switch the page if it changed, then scroll
    *  to the named section — smoothly within a page, instantly after a
    *  page swap (section slugs only resolve against the rendered
-   *  page, so the lookup happens after any switch). */
+   *  page, so the lookup happens after any switch). An unknown page
+   *  slug resolves to the first page and the URL is normalized to
+   *  name it; a page-level hash (no section) means the top of the
+   *  page — also clearing any scroll left over from the last page. */
   function routeAndScroll(initial: boolean): void {
+    const rawSlug = location.hash.replace(/^#\/?/, '').split('/')[0] ?? '';
     const page = pageFromHash();
+    if (slugs.indexOf(rawSlug) === -1) {
+      history.replaceState(null, '', `#/${slugs[page]}`);
+    }
     const changed = page !== active;
     if (changed || initial) show(page);
     const section = sectionFromHash();
@@ -270,6 +283,10 @@ export function mountSite(opts: MountOptions): SiteHandle {
       tocEntries[section]!.heading.scrollIntoView(
         { behavior: changed || initial ? 'auto' : 'smooth' });
       setActiveToc(section);
+    } else {
+      window.scrollTo(
+        { top: 0, behavior: changed || initial ? 'auto' : 'smooth' });
+      setActiveToc(0); // the top of the page: first section active
     }
   }
 
