@@ -9,6 +9,7 @@ import { javascript } from '@codemirror/lang-javascript';
 import { StreamLanguage } from '@codemirror/language';
 import { c } from '@codemirror/legacy-modes/mode/clike';
 import { lua } from '@codemirror/legacy-modes/mode/lua';
+import { octave } from '@codemirror/legacy-modes/mode/octave';
 import { python } from '@codemirror/legacy-modes/mode/python';
 import { scheme } from '@codemirror/legacy-modes/mode/scheme';
 import { sql } from '@codemirror/legacy-modes/mode/sql';
@@ -24,6 +25,7 @@ const LANGUAGES: Record<NonNullable<Kernel['editorSyntax']>, Extension | null> =
   cpp: cpp(),
   javascript: javascript(),
   lua: StreamLanguage.define(lua),
+  octave: StreamLanguage.define(octave),
   python: StreamLanguage.define(python),
   scheme: StreamLanguage.define(scheme),
   sql: StreamLanguage.define(sql({})),
