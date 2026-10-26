@@ -14,9 +14,9 @@ its status line under the editor reports *loaded*, *running*, *finished*
 or the exact source line of an error. Registers that change between steps
 light up in blue.
 
-Anything you don't recognize — a register, a flag, a mnemonic in the
-listing, a panel section header — /hover it/: a tooltip explains what it
-does and, for registers, its role in the Linux calling convention.
+Anything you don't recognize — a mnemonic in the disassembly listing, a
+source line — /hover its row/: a tooltip shows the comment written on that
+source line. Registers in the panel simply display their current values.
 
 * Registers and the syscall convention
 
@@ -81,7 +81,8 @@ msg_len  equ $ - msg
 Try stepping to the =syscall= line: notice that =rip= (the instruction
 pointer, shown as the highlighted row in the disassembly) moves *two* bytes
 for the =syscall= instruction, and =rax= becomes =14= — the count returned by
-the kernel. Hover =rip= in the panel if you're not sure what it is.
+the kernel. Hover the highlighted row itself to see the =;= comment on that
+source line.
 
 * Loops, flags and digits
 

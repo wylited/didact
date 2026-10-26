@@ -7,7 +7,7 @@ A RISC-V RV32IM processor has 32 registers, =x0= through =x31=, and almost
 no surprises. /RISC/ stands for *Reduced Instruction Set Computer*: every
 instruction is exactly four bytes, reads at most two registers, and writes
 at most one — a machine small enough to hold in your head. The /M/ in
-RV32IM adds /m/ultiplication and /d/ivision to the base integer set.
+RV32IM adds multiplication and division to the base integer set.
 Register =x0= is hard-wired to zero (writes to it are discarded), which
 hands you constants, comparisons and moves for free. The registers also
 have /ABI names/, the calling conventions real programs use:

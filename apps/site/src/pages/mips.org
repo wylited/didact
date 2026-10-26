@@ -2,7 +2,7 @@
 #+SUBTITLE: A real assembler and a fetch–decode–execute interpreter, written in TypeScript — running in your browser
 
 This page teaches MIPS32 the SPIM/MARS way: =add $t0, $t1, $t2=, =lw= with
-=offset($reg)=, =li=/=la=/=move= pseudo-ops, labels, =.data= and =.text=
+=offset($reg)=, =li=, =la= and =move= pseudo-ops, labels, =.data= and =.text=
 sections. Every block below is assembled and executed by a small, honest
 interpreter: it *fetches* the encoded 32-bit word at =pc=, decodes the
 opcode/register/shift/funct fields, and executes — the same words the
@@ -10,7 +10,7 @@ opcode/register/shift/funct fields, and executes — the same words the
 
 One simplification up front, the same one SPIM and MARS make in their
 default teaching mode: *there are no branch delay slots*. A taken branch
-moves =pc= to its target immediately, and =jal=/=jalr= link =pc+4= — the
+moves =pc= to its target immediately, and =jal= and =jalr= link =pc+4= — the
 instruction right after the call. (Bare hardware also executes the word
 /after/ a branch before the jump takes effect; teaching simulators hide
 that, and so does this kernel.)
@@ -40,8 +40,8 @@ can watch in the factorial program below.
 MIPS is famous for what it /doesn't/ have: *no condition flags*. There is
 no ZF or CF to inspect after an operation. Comparisons write their answer
 into a register — =slt $t0, $s0, $s1= sets =$t0= to 1 or 0 — and branches
-test registers directly: =beq=/=bne= compare two registers,
-=blez=/=bgtz=/=bltz=/=bgez= test one against zero. The convenience forms
+test registers directly: =beq= and =bne= compare two registers,
+=blez=, =bgtz=, =bltz= and =bgez= test one against zero. The convenience forms
 =blt=, =bgt=, =ble=, =bge= are *pseudo-instructions*: =ble $t1, 10, loop=
 assembles to three machine words — =addiu $at, $zero, 10=,
 =slt $at, $at, $t1= (is 10 < i?), then =beq $at, $zero, loop= (branch
