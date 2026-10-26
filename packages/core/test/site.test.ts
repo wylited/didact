@@ -111,13 +111,13 @@ describe('mountSite: block execution wiring', () => {
   });
 });
 
-describe('mountSite: dual-width right rail', () => {
-  it('TOC mode by default; running a block attaches the wide panel mode, detach returns to TOC', async () => {
+describe('mountSite: contents rail and panel zone', () => {
+  it('running a block attaches the wide panel mode, detach collapses it again', async () => {
     const { handle, root } = mount();
     handles.push(handle);
-    // TOC mode: no panel-attached class, TOC hook present
+    // at rest: no panel, the contents (toc) live in the LEFT nav rail
     expect(root.classList.contains('lw-panel-attached')).toBe(false);
-    expect(root.querySelector("[data-test='toc']")).not.toBeNull();
+    expect(root.querySelector('.lw-rail-left [data-test=\'toc\']')).not.toBeNull();
 
     location.hash = '#/second-lesson-registers';
     window.dispatchEvent(new Event('hashchange'));
@@ -130,17 +130,18 @@ describe('mountSite: dual-width right rail', () => {
 
     root.querySelector<HTMLButtonElement>("[data-test='uth-detach']")!.click();
     expect(root.classList.contains('lw-panel-attached')).toBe(false);
-    expect(root.querySelector("[data-test='toc']")).not.toBeNull();
+    // the contents never left the left rail
+    expect(root.querySelector('.lw-rail-left [data-test=\'toc\']')).not.toBeNull();
   });
 
-  it('lists one toc item per h2/h3 in document order, none on a heading-less page', () => {
+  it('lists one contents entry per h2/h3 in document order, none on a heading-less page', () => {
     const { handle, root } = mount(TOC_PAGES);
     handles.push(handle);
     const items = [...root.querySelectorAll("[data-test='toc-item']")];
     expect(items.map((a) => a.textContent)).toEqual(['Alpha', 'Sub', 'Beta']);
-    // each heading got a per-page id in document order
-    expect(root.querySelector('#lw-h-1')!.textContent).toBe('Alpha');
-    expect(root.querySelector('#lw-h-3')!.textContent).toBe('Beta');
+    // each heading got a slugged, readable anchor id
+    expect(root.querySelector('#lw-h-alpha')!.textContent).toBe('Alpha');
+    expect(root.querySelector('#lw-h-beta')!.textContent).toBe('Beta');
     // exactly one entry is active at rest: the first
     const active = root.querySelectorAll('.lw-toc-active');
     expect(active).toHaveLength(1);
@@ -150,37 +151,84 @@ describe('mountSite: dual-width right rail', () => {
     expect(root.querySelectorAll("[data-test='toc-item']")).toHaveLength(0);
   });
 
-  it("clicking a toc item scrolls its heading into view without touching the page hash", () => {
+  it('contents links are real section deep links: the hash routes, then the page scrolls', () => {
     const { handle, root } = mount(TOC_PAGES);
     handles.push(handle);
     const scrolled: Element[] = [];
+    const behaviors: string[] = [];
     const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element): void {
+    Element.prototype.scrollIntoView = function (this: Element, opts?: ScrollIntoViewOptions): void {
       scrolled.push(this);
+      behaviors.push(String(opts?.behavior));
     };
     try {
       root.querySelectorAll<HTMLAnchorElement>("[data-test='toc-item']")[2]!.click(); // Beta
+      window.dispatchEvent(new Event('hashchange'));
     } finally {
       Element.prototype.scrollIntoView = original;
     }
+    // the URL now names the section — copyable, back-button-able
+    expect(location.hash).toBe('#/guide/beta');
     expect(scrolled).toHaveLength(1);
-    expect(scrolled[0]!.id).toBe('lw-h-3');
-    // in-page links never route: the fragment still names no heading
-    expect(location.hash).not.toContain('lw-h-');
-    // the clicked entry becomes active immediately
-    const active = root.querySelectorAll('.lw-toc-active');
-    expect(active).toHaveLength(1);
-    expect(active[0]!.textContent).toBe('Beta');
+    expect(scrolled[0]!.id).toBe('lw-h-beta');
+    // same-page section nav scrolls smoothly
+    expect(behaviors[0]).toBe('smooth');
+    // the clicked entry is active
+    expect(root.querySelector('.lw-toc-active')!.textContent).toBe('Beta');
   });
 
-  it('rebuilds the toc and resets the active entry on page switch', () => {
+  it('a section deep link on load lands on the page and jumps straight to the section', () => {
+    location.hash = '#/guide/beta';
+    const scrolled: Element[] = [];
+    const behaviors: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element, opts?: ScrollIntoViewOptions): void {
+      scrolled.push(this);
+      behaviors.push(String(opts?.behavior));
+    };
+    try {
+      const { handle, root } = mount(TOC_PAGES);
+      handles.push(handle);
+      expect(handle.activeIndex).toBe(0);
+      expect(scrolled).toHaveLength(1);
+      expect(scrolled[0]!.id).toBe('lw-h-beta');
+      // a fresh load jumps, it does not animate
+      expect(behaviors[0]).toBe('auto');
+      expect(root.querySelector('.lw-toc-active')!.textContent).toBe('Beta');
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it('section slugs are kebab-cased, deduplicated, and ASCII-less headings fall back', () => {
+    const { handle, root } = mount([
+      {
+        title: 'Slugs',
+        orgSource:
+          '#+TITLE: Slugs\n\n* Registers & Flags\n\n* Registers & Flags\n\n* 中文标题\n\n* Third\n',
+      },
+    ]);
+    handles.push(handle);
+    const items = [...root.querySelectorAll<HTMLAnchorElement>("[data-test='toc-item']")];
+    expect(items.map((a) => a.getAttribute('href'))).toEqual([
+      '#/slugs/registers-flags',
+      '#/slugs/registers-flags-2',
+      '#/slugs/section-3',
+      '#/slugs/third',
+    ]);
+    expect(root.querySelector('#lw-h-registers-flags-2')!).not.toBeNull();
+    expect(root.querySelector('#lw-h-section-3')!).not.toBeNull();
+  });
+
+  it('rebuilds the contents and resets the active entry on page switch', () => {
     const { handle, root } = mount(TOC_PAGES);
     handles.push(handle);
-    // move the active entry off the first heading
+    // move the active entry off the first heading via its deep link
     const original = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = (): void => undefined;
     try {
       root.querySelectorAll<HTMLAnchorElement>("[data-test='toc-item']")[2]!.click();
+      window.dispatchEvent(new Event('hashchange'));
     } finally {
       Element.prototype.scrollIntoView = original;
     }
@@ -189,42 +237,16 @@ describe('mountSite: dual-width right rail', () => {
     const nav = root.querySelectorAll<HTMLAnchorElement>("[data-test='nav-item']");
     nav[1]!.click();
     window.dispatchEvent(new Event('hashchange'));
-    expect(root.querySelector('#lw-h-1')).toBeNull(); // old ids went with the old page
+    expect(root.querySelector('#lw-h-alpha')).toBeNull(); // old anchors went with the old page
     nav[0]!.click();
     window.dispatchEvent(new Event('hashchange'));
     const items = [...root.querySelectorAll("[data-test='toc-item']")];
     expect(items.map((a) => a.textContent)).toEqual(['Alpha', 'Sub', 'Beta']);
-    expect(root.querySelector('#lw-h-1')!.textContent).toBe('Alpha');
+    expect(root.querySelector('#lw-h-alpha')!.textContent).toBe('Alpha');
     const active = root.querySelectorAll('.lw-toc-active');
     expect(active).toHaveLength(1);
     expect(active[0]!.textContent).toBe('Alpha');
     expect(handle.activeIndex).toBe(0);
-  });
-
-});
-
-describe('mountSite: collapsible left page rail', () => {
-  it('toggle collapses the rail (links hidden, aria-expanded flips) and expands back', () => {
-    const { handle, root } = mount();
-    handles.push(handle);
-    const toggle = root.querySelector<HTMLButtonElement>("[data-test='nav-toggle']")!;
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-
-    toggle.click();
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(root.classList.contains('lw-left-collapsed')).toBe(true);
-    const pages = root.querySelector('.lw-rail-pages')!;
-    expect(pages.hidden).toBe(true);
-    // the toggle itself stays reachable in the 32px strip
-    expect(toggle.isConnected).toBe(true);
-    expect(toggle.hidden).toBe(false);
-    toggle.focus();
-    expect(document.activeElement).toBe(toggle);
-
-    toggle.click();
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(root.classList.contains('lw-left-collapsed')).toBe(false);
-    expect(root.querySelector('.lw-rail-pages')!.hidden).toBe(false);
   });
 
 });

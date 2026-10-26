@@ -42,17 +42,17 @@
   padding: 2rem 2.25rem 4rem;
 }
 
-/* while the panel owns the right rail, the doc column keeps a readable
-   measure instead of stretching ragged against 42vw */
-.lw-site.lw-panel-attached .lw-doc-pane > .lw-doc {
+/* the doc column always keeps a readable measure — wide open at rest,
+   capped against the 42vw panel when attached */
+.lw-doc-pane > .lw-doc {
   max-width: 74ch;
   margin-inline: auto;
 }
 
-/* ---- left page rail: collapsible */
+/* ---- left navigation rail: contents (this page) above, pages below */
 
 .lw-rail-left {
-  width: 192px;
+  width: 232px;
   border-right: 1px solid var(--lw-hairline);
   position: sticky;
   top: 0;
@@ -60,10 +60,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: width 300ms cubic-bezier(.2, .7, .3, 1);
 }
-
-.lw-site.lw-left-collapsed .lw-rail-left { width: 32px; }
 
 .lw-rail-head {
   display: flex;
@@ -81,71 +78,24 @@
 
 .lw-rail-title { padding-left: 0.25rem; }
 
-.lw-rail-toggle {
-  font: inherit;
-  font-variant: normal;
-  letter-spacing: normal;
-  background: var(--lw-paper);
-  border: 1px solid var(--lw-hairline);
-  padding: 0.05rem 0.3rem;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-.lw-rail-toggle:hover { border-color: var(--lw-ink); }
+.lw-contents { overflow-y: auto; flex-shrink: 1; }
 
 .lw-rail-pages {
+  border-top: 1px solid var(--lw-hairline);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.lw-rail-pages-list {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
   padding: 0.75rem 0.75rem 1.5rem;
-  overflow-y: auto;
 }
-
-.lw-site.lw-left-collapsed .lw-rail-toggle-label { visibility: hidden; }
 
 .lw-nav-link { color: var(--lw-gray); text-decoration: none; }
 .lw-nav-link:hover { color: var(--lw-ink); }
 .lw-nav-link.lw-nav-active { color: var(--lw-ink); text-decoration: underline; }
-
-/* ---- right rail: TOC mode (264px) ↔ panel mode (wide) */
-
-.lw-rail-right {
-  width: 264px;
-  border-left: 1px solid var(--lw-hairline);
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  transition: width 300ms cubic-bezier(.2, .7, .3, 1);
-}
-
-.lw-site.lw-panel-attached .lw-rail-right {
-  width: clamp(420px, 42vw, 720px);
-}
-
-.lw-rail-body { position: relative; flex: 1; min-height: 0; }
-
-/* the TOC overlays the panel slot; attached, it fades/slides out while
-   the panel fades in (both scroll independently) */
-.lw-toc {
-  position: absolute;
-  inset: 0;
-  overflow-y: auto;
-  transition: opacity 160ms ease, transform 160ms ease,
-              visibility 0s linear 160ms;
-}
-
-.lw-site.lw-panel-attached .lw-toc {
-  opacity: 0;
-  transform: translateX(8px);
-  visibility: hidden;
-  pointer-events: none;
-  transition: opacity 160ms ease, transform 160ms ease, visibility 0s;
-}
 
 .lw-toc-list {
   display: flex;
@@ -171,6 +121,26 @@
   padding-left: 0.5rem;
 }
 
+
+/* ---- right rail: the under-the-hood panel; zero-width (and
+   hairline-invisible) until one attaches, then it slides wide */
+
+.lw-rail-right {
+  width: 0;
+  border-left: 1px solid transparent;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+  transition: width 300ms cubic-bezier(.2, .7, .3, 1),
+              border-color 300ms cubic-bezier(.2, .7, .3, 1);
+}
+
+.lw-site.lw-panel-attached .lw-rail-right {
+  width: clamp(420px, 42vw, 720px);
+  border-left-color: var(--lw-hairline);
+}
+
 .lw-panel-pane {
   position: absolute;
   inset: 0;
@@ -189,10 +159,10 @@
   to { opacity: 1; transform: none; }
 }
 
-/* ---- reduced motion: width modulation and cross-fade become instant */
+/* ---- reduced motion: width modulation and fades become instant */
 
 @media (prefers-reduced-motion: reduce) {
-  .lw-rail-left, .lw-rail-right, .lw-toc, .lw-panel {
+  .lw-rail-right, .lw-panel {
     transition: none !important;
     animation: none !important;
   }
@@ -210,11 +180,10 @@
   }
   .lw-rail-left { border-right: none; border-bottom: 1px solid var(--lw-hairline); }
   .lw-rail-right { border-left: none; border-top: 1px solid var(--lw-hairline); }
-  .lw-rail-pages, .lw-toc-list { flex-direction: row; flex-wrap: wrap; }
-  .lw-rail-body { position: static; }
-  .lw-toc, .lw-panel-pane { position: static; overflow: visible; }
-  .lw-site.lw-panel-attached .lw-toc { display: none; }
-  .lw-site.lw-panel-attached .lw-doc-pane > .lw-doc { max-width: none; }
+  .lw-rail-right:has(.lw-panel) { width: auto; }
+  .lw-rail-pages-list, .lw-toc-list { flex-direction: row; flex-wrap: wrap; }
+  .lw-panel-pane { position: static; overflow: visible; }
+  .lw-doc-pane > .lw-doc { max-width: none; }
 }
 
 /* ---- document */
