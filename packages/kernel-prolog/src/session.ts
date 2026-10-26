@@ -34,6 +34,7 @@ export class PrologSession implements Session {
   private queryIdx = 0;
   private steps = 0;
   /** Set when a query exhausts ('no'); run() after exhaustion stays 'no'. */
+  private finalExit: 'no' | null = null;
   /** Previous rendered value per variable — drives `changed` flags. */
   private prevBindings = new Map<string, string>();
   private readonly console: string[] = [];
