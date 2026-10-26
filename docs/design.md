@@ -46,16 +46,20 @@ adding kernels a matter of implementing one package against
    behavior.
 5. **Block Reset** restores that block's machine to its just-assembled
    state and clears its output; code and breakpoints are kept.
-6. **Under-the-hood panel** lives in the right rail, attached to at
-   most ONE block at a time — the last block that ran/stepped. The
-   panel **starts detached**: the rail hosts the active page's table of
-   contents instead, and the first run/step of any block attaches the
-   panel, which takes over the rail (the TOC hides while the site root
-   carries `lw-panel-attached`). Its header shows the attached block
-   (`#name` or `Block N`) and kernel label, plus a **detach** button.
-   Detaching — or switching pages — unmounts the panel and restores the
-   TOC; the layout never collapses and the document keeps its column
-   width throughout. Any later run/step of any block re-attaches.
+6. **Under-the-hood panel** owns the right rail once attached — at most
+   ONE block at a time, the last that ran/stepped. The panel **starts
+   detached**: at load the right rail shows the section TOC at 264px;
+   the first run/step of any block attaches the panel, the rail widens
+   to `clamp(420px, 42vw, 720px)` (300ms width transition, TOC → panel
+   ~160ms cross-fade; all motion disabled under
+   `prefers-reduced-motion: reduce`), and the doc column's content is
+   capped at ~74ch centered. Its header shows the attached block
+   (`#name` or `Block N`) and kernel label, plus a **detach** button;
+   while attached, field sections (registers, flags, scopes…) re-flow
+   into a wrapping grid (`repeat(auto-fill, minmax(170px, 1fr))`),
+   while listings and hexdumps stay single-column. Detaching — or
+   switching pages — removes the panel element from the DOM and returns
+   the rail to TOC mode; any later run/step re-attaches.
 7. **Output.** Program output renders in the block's results slot
    (`#+RESULTS:` convention) and in the panel's console when attached.
    Trusted kernel-generated markup (`html` panels, e.g. rendered SVG)
@@ -69,19 +73,24 @@ adding kernels a matter of implementing one package against
    can't be read as a change.
 9. Machine state UI renders zeroed / idle states before first execution
    (visible once the panel is attached).
-10. **Pages.** One mount renders several org documents. A left page-nav
-    rail lists the page titles as plain text links under a small-caps
-    "Pages" label (hairline right border): active page underlined and
-    near-black, others gray. Pages are hash-routed: each page's
-    fragment is `#/<slug>` (slug = kebab-cased page title: lowercased,
+10. **Pages.** One mount renders several org documents in a three-zone
+    layout: a collapsible left page rail and a dual-width right rail
+    (rule 6) around the document column. The left rail's header carries
+    a chevron + "Pages" toggle (`aria-expanded`); collapsed, the rail
+    animates down to a 32px strip keeping only the toggle, expanded it
+    is 192px — collapse state is per-session, never persisted. Page
+    titles appear as links in the left rail (active underlined and
+    near-black, others gray); section headings in the right-rail TOC
+    (rule 11). Pages are hash-routed: each page's fragment is
+    `#/<slug>` (slug = kebab-cased page title: lowercased,
     non-alphanumeric runs collapsed to single '-'). On mount the site
     reads `location.hash` and shows that page (unknown or missing hash →
     the first page); nav links are fragment hrefs, and `hashchange`
     (nav click, back/forward) switches the rendered document: the old
     page's blocks are disposed and the panel detaches until the next
     run/step.
-11. **Right-rail TOC.** The h2/h3 headings (org depth 1/2) of the
-    rendered page build the right rail's table of contents while no
+11. **Right-rail section TOC.** The h2/h3 headings (org depth 1/2) of
+    the rendered page build the right rail's table of contents while no
     panel is attached: one small gray link per heading (h3 indented),
     ids `lw-h-<n>` in document order per page, and a scroll-spy keeping
     exactly one active entry — near-black with a 2px left rule —
@@ -89,6 +98,10 @@ adding kernels a matter of implementing one package against
     smooth-scroll on click and never touch location.hash (fragments
     name pages); a page without h2/h3 headings leaves the rail empty
     until a panel attaches.
+12. **Motion.** Width modulation (rails) and content cross-fades
+    transition over 300ms / ~160ms respectively; all of it is disabled
+    under `prefers-reduced-motion: reduce` (no transitions, no
+    animations).
 
 ## Visual language — "textbook, light"
 
@@ -105,14 +118,13 @@ adding kernels a matter of implementing one package against
   section labels. Changed registers marked with a left rule + tint, not
   color-coded text. Status/error states: error text may use dark red
   `#8b1a1a`; success states stay black-on-white (no green).
-- Layout: three columns — page-nav rail left (~200px), document center,
-  right rail (~320px) hosting the page TOC or, while attached, the
-  under-the-hood panel; hairline column separators, rails sticky and
-  internally scrolling. The document keeps its width whether or not a
-  panel is attached. < 900px the page nav becomes a horizontal wrap
-  list above the document and the rail drops below it (TOC hidden on
-  narrow screens; an attached panel still shows). Page-level chrome is
-  limited to the two rails and the plain document title header.
+- Layout: three zones on one grid — collapsible page rail left (192px,
+  32px strip when collapsed), document center, dual-width right rail
+  (section TOC 264px; panel `clamp(420px, 42vw, 720px)`), separated by
+  hairline rules, sticky and internally scrolling; zones stack
+  vertically < 900px. While the panel is attached the doc column's
+  content is capped at ~74ch centered. Page-level chrome is limited to
+  the rails' small-caps headers and the plain document title header.
 
 ## Org-mode compatibility (binding, unchanged from v0.1)
 
@@ -152,10 +164,11 @@ Per block: `block-run`, `block-step`, `block-reset`, `block-status`,
 `gutter-N`, breakpoint markers `breakpoint-N`. Panel: `uth` (root),
 `uth-title`, `uth-detach`; panel sections `uth-sections`; register cells
 `reg-<name>`; disassembly current row `current-instr`; console `output`;
-trusted markup sections `html-panel`. Site: `nav`, `nav-item` (one per
-page link), `page` (rendered document root), `toc` (right-rail table of
-contents), `toc-item` (one per h2/h3 heading link; the active entry
-carries `lw-toc-active`). Vite `base: './'`.
+trusted markup sections `html-panel`. Site: `nav` (left rail), `nav-item`
+(one per page link), `nav-toggle` (left-rail collapse), `page` (rendered
+document root), `toc` (right-rail table of contents), `toc-item` (one per
+h2/h3 heading link; the active entry carries `lw-toc-active`). Vite
+`base: './'`.
 
 ## Non-goals
 

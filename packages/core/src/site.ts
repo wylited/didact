@@ -1,14 +1,16 @@
-// site.ts — mountSite: parse → render → block runtimes + panel host +
-// tooltip engine, in the textbook-light three-rail layout: page links in
-// a left rail, the document center, and a right rail hosting the active
-// page's table of contents. The first run/step of any block attaches the
-// under-the-hood panel, which takes over the right rail (the TOC hides);
-// detaching or switching pages restores the TOC. The rail itself always
-// exists — only its content swaps. Multi-page with hash routing: each
-// page's fragment is `#/<slug>` (kebab-cased title); mount reads
-// location.hash, nav links target fragments, and hashchange switches the
-// rendered document, disposing the old page's blocks. In-page TOC links
-// never touch location.hash (that would route pages); they smooth-scroll.
+// site.ts — mountSite: parse → render → block runtimes + panel host, in
+// the textbook-light three-zone layout: a collapsible left page rail
+// (192px ↔ 32px), the document column, and a dual-width right rail that
+// shows the active page's section TOC (h2/h3, 264px) until the
+// under-the-hood panel attaches (clamp(420px, 42vw, 720px)). Width
+// modulation and the TOC/panel cross-fade are pure CSS (theme.css); the
+// panel element still enters/leaves the DOM on attach/detach. Multi-page
+// with hash routing: each page's fragment is `#/<slug>` (kebab-cased
+// title); mount reads location.hash, nav links target fragments, and
+// hashchange switches the rendered document, disposing the old page's
+// blocks and detaching the panel until the next run/step. TOC links
+// never touch location.hash (that would route pages); they
+// smooth-scroll.
 
 import { BlockRuntime } from './block';
 import type { Kernel } from './kernel';
@@ -34,19 +36,13 @@ export interface MountOptions {
 export interface SiteHandle {
   /** Block runtimes on the active page, in document order. */
   readonly blocks: readonly BlockRuntime[];
-  /** The under-the-hood panel host (right rail). */
+  /** The under-the-hood panel host (right pane). */
   readonly panel: PanelHost;
   /** 0-based index of the rendered page. */
   readonly activeIndex: number;
   /** Render page `index` (disposes the current page's blocks first). */
   show(index: number): void;
   dispose(): void;
-}
-
-/** One right-rail TOC entry: its heading in the document and its link. */
-interface TocEntry {
-  heading: HTMLElement;
-  link: HTMLAnchorElement;
 }
 
 export function mountSite(opts: MountOptions): SiteHandle {
@@ -57,29 +53,80 @@ export function mountSite(opts: MountOptions): SiteHandle {
   root.classList.add('lw-site');
   if (opts.fonts === false) root.classList.add('lw-no-fonts');
 
-  // left rail: the page list, vertical fragment links
-  const pageNav = document.createElement('nav');
-  pageNav.className = 'lw-page-nav';
-  pageNav.dataset.test = 'nav';
-  const label = document.createElement('span');
-  label.className = 'lw-page-nav-label';
-  label.textContent = 'Pages';
-  pageNav.appendChild(label);
+  // left page rail: small-caps header with the collapse toggle + links.
+  // Collapsed = 0-width content: the rail shrinks to a 32px strip that
+  // keeps only the (always focusable) toggle. Per-session state only.
+  const rail = document.createElement('nav');
+  rail.className = 'lw-rail lw-rail-left';
+  rail.dataset.test = 'nav';
 
-  // center: the rendered document
+  const railHead = document.createElement('div');
+  railHead.className = 'lw-rail-head';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'lw-rail-toggle';
+  toggle.dataset.test = 'nav-toggle';
+  toggle.setAttribute('aria-expanded', 'true');
+  const chevron = document.createElement('span');
+  chevron.className = 'lw-rail-chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+  chevron.textContent = '‹';
+  const toggleLabel = document.createElement('span');
+  toggleLabel.className = 'lw-rail-toggle-label';
+  toggleLabel.textContent = 'Pages';
+  toggle.append(chevron, toggleLabel);
+  railHead.appendChild(toggle);
+
+  const pagesEl = document.createElement('div');
+  pagesEl.className = 'lw-rail-pages';
+  rail.append(railHead, pagesEl);
+
+  const layout = document.createElement('div');
+  layout.className = 'lw-layout';
+
   const docPane = document.createElement('div');
   docPane.className = 'lw-doc-pane';
 
-  // right rail: the active page's TOC, or the panel while one is attached
-  const rail = document.createElement('div');
-  rail.className = 'lw-rail';
+  // right rail: TOC overlays the panel slot; attaching the panel widens
+  // the rail (root class lw-panel-attached) and cross-fades TOC → panel
+  const railRight = document.createElement('aside');
+  railRight.className = 'lw-rail lw-rail-right';
+  const railBody = document.createElement('div');
+  railBody.className = 'lw-rail-body';
+  const toc = document.createElement('nav');
+  toc.className = 'lw-toc';
+  toc.dataset.test = 'toc';
+  const tocHead = document.createElement('div');
+  tocHead.className = 'lw-rail-head';
+  const tocLabel = document.createElement('span');
+  tocLabel.className = 'lw-rail-title';
+  tocLabel.textContent = 'Contents';
+  tocHead.appendChild(tocLabel);
+  const tocList = document.createElement('div');
+  tocList.className = 'lw-toc-list';
+  toc.append(tocHead, tocList);
 
-  root.append(pageNav, docPane, rail);
+  const panelPane = document.createElement('div');
+  panelPane.className = 'lw-panel-pane';
+  railBody.append(toc, panelPane);
+  railRight.appendChild(railBody);
 
-  // panel visibility swaps the rail's content: lw-panel-attached on the
-  // site root hides the TOC; detach/page-switch drops the class and the
-  // TOC returns. The layout never collapses.
-  const panel = new PanelHost(rail, (visible) => {
+  layout.append(rail, docPane, railRight);
+  root.appendChild(layout);
+
+  let leftCollapsed = false;
+  const setLeftCollapsed = (collapsed: boolean): void => {
+    leftCollapsed = collapsed;
+    root.classList.toggle('lw-left-collapsed', collapsed);
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    chevron.textContent = collapsed ? '›' : '‹';
+    pagesEl.hidden = collapsed;
+  };
+  toggle.addEventListener('click', () => setLeftCollapsed(!leftCollapsed));
+
+  // attaching/detaching only modulates the root class: the right rail
+  // widens to the panel measure and the TOC cross-fades out (theme.css)
+  const panel = new PanelHost(panelPane, (visible) => {
     root.classList.toggle('lw-panel-attached', visible);
   });
 
@@ -94,22 +141,25 @@ export function mountSite(opts: MountOptions): SiteHandle {
     // switch (so the URL always names the visible page)
     a.href = `#/${slugs[i]}`;
     a.textContent = page.title;
-    pageNav.appendChild(a);
+    pagesEl.appendChild(a);
     return a;
   });
 
-  // ---- right-rail table of contents ----
+  // ---- right-rail table of contents (the page's own sections) ----
 
-  let toc: HTMLElement | null = null;
+  interface TocEntry {
+    heading: HTMLElement;
+    link: HTMLAnchorElement;
+  }
   let tocEntries: TocEntry[] = [];
   let tocActive = -1;
   let spy: IntersectionObserver | null = null;
 
   function setActiveToc(index: number): void {
     if (index === tocActive) return;
-    if (tocActive !== -1) tocEntries[tocActive].link.classList.remove('lw-toc-active');
+    if (tocActive !== -1) tocEntries[tocActive]!.link.classList.remove('lw-toc-active');
     tocActive = index;
-    tocEntries[index].link.classList.add('lw-toc-active');
+    if (tocEntries[index]) tocEntries[index]!.link.classList.add('lw-toc-active');
   }
 
   /** Active entry = the heading nearest the viewport top: the last one
@@ -118,29 +168,29 @@ export function mountSite(opts: MountOptions): SiteHandle {
   function spyUpdate(): void {
     let best = 0;
     for (let i = 0; i < tocEntries.length; i++) {
-      if (tocEntries[i].heading.getBoundingClientRect().top <= 96) best = i;
+      if (tocEntries[i]!.heading.getBoundingClientRect().top <= 96) best = i;
       else break;
     }
     setActiveToc(best);
   }
 
-  /** Tear down the TOC and its spy: on every page switch. */
+  /** Clear the TOC and its spy: on every page switch and dispose. */
   function disposeToc(): void {
     spy?.disconnect();
     spy = null;
-    toc?.remove();
-    toc = null;
+    tocList.replaceChildren();
     tocEntries = [];
     tocActive = -1;
   }
 
   /** Build the TOC from a freshly rendered page: one link per h2/h3
-   *  (org depth-1/2) heading. A page without any gets no TOC — the rail
-   *  stays empty until a panel attaches. */
+   *  (org depth-1/2) heading. A page without any leaves the rail
+   *  empty until a panel attaches. In-page links never touch
+   *  location.hash (fragments name pages); they smooth-scroll. */
   function buildToc(doc: HTMLElement): void {
+    disposeToc();
     const headings = Array.from(
       doc.querySelectorAll<HTMLElement>('h2.lw-heading, h3.lw-heading'));
-    if (headings.length === 0) return;
     tocEntries = headings.map((heading, i) => {
       heading.id = `lw-h-${i + 1}`; // per page, document order
       const link = document.createElement('a');
@@ -154,19 +204,13 @@ export function mountSite(opts: MountOptions): SiteHandle {
         setActiveToc(i);
         heading.scrollIntoView({ behavior: 'smooth' });
       });
+      tocList.appendChild(link);
       return { heading, link };
     });
-    toc = document.createElement('nav');
-    toc.className = 'lw-toc';
-    toc.dataset.test = 'toc';
-    const tocLabel = document.createElement('span');
-    tocLabel.className = 'lw-toc-label';
-    tocLabel.textContent = 'Contents';
-    toc.appendChild(tocLabel);
-    for (const { link } of tocEntries) toc.appendChild(link);
-    rail.appendChild(toc);
     setActiveToc(0);
-    if (typeof IntersectionObserver === 'undefined') return; // tests/old DOMs
+    if (tocEntries.length === 0 || typeof IntersectionObserver === 'undefined') {
+      return; // tests/old DOMs: the click-path still works
+    }
     // cheap spy: recompute only when a heading crosses the viewport,
     // never per scroll frame
     spy = new IntersectionObserver(() => spyUpdate());
@@ -178,11 +222,10 @@ export function mountSite(opts: MountOptions): SiteHandle {
     for (const block of blocks) block.dispose();
     blocks = [];
     docPane.replaceChildren();
-    disposeToc();
     if (active !== -1) panel.detach(); // page switch: panel detaches
     active = index;
 
-    const doc = parseOrg(pages[index].orgSource);
+    const doc = parseOrg(pages[index]!.orgSource);
     const rendered = renderDocument(doc, (lang) => byLang.has(lang));
     rendered.root.dataset.test = 'page';
     docPane.appendChild(rendered.root);
@@ -209,7 +252,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
   // later hash changes (nav clicks, back/forward) switch pages
   const onHashChange = (): void => show(indexFromHash(slugs));
   window.addEventListener('hashchange', onHashChange);
-  show(indexFromHash(slugs));
+  show(indexFromHash(slugs)); // TOC mode: panel attaches on first run/step
   const disposeTooltips = installTooltips(root);
 
   return {
@@ -228,7 +271,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
       blocks = [];
       disposeToc();
       root.replaceChildren();
-      root.classList.remove('lw-site', 'lw-no-fonts', 'lw-panel-attached');
+      root.classList.remove('lw-site', 'lw-no-fonts', 'lw-panel-attached', 'lw-left-collapsed');
     },
   };
 }
@@ -238,7 +281,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
  *  fall back to `page-N` so every page stays reachable. */
 function pageSlug(title: string, index: number, taken: Set<string>): string {
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  if (slug.length === 0 || taken.has(slug)) return `page-${index}`;
+  if (slug === '' || taken.has(slug)) return `page-${index}`;
   taken.add(slug);
   return slug;
 }
@@ -246,7 +289,7 @@ function pageSlug(title: string, index: number, taken: Set<string>): string {
 /** Slugs for a whole page list (order-stable, collision-free). */
 function pageSlugs(pages: PageSpec[]): string[] {
   const taken = new Set<string>();
-  return pages.map((page, i) => pageSlug(page.title, i, taken));
+  return pages.map((p, i) => pageSlug(p.title, i, taken));
 }
 
 /** Page index named by `location.hash` (`#/<slug>`); unknown or missing

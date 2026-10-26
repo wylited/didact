@@ -1,7 +1,10 @@
 // @vitest-environment happy-dom
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mountSite } from '../src/site';
-import type { PageSpec, SiteHandle } from '../src/site';
+import type { SiteHandle } from '../src/site';
 import { fakeKernel, type FakeSession } from './fake-kernel';
 
 const PAGES = [
@@ -13,7 +16,6 @@ const PAGES = [
   },
 ];
 
-/** TOC fixture: page 1 carries org depth-1/2 headings (h2/h3), page 2 none. */
 const TOC_PAGES: PageSpec[] = [
   {
     title: 'Guide',
@@ -109,7 +111,28 @@ describe('mountSite: block execution wiring', () => {
   });
 });
 
-describe('mountSite: right-rail table of contents', () => {
+describe('mountSite: dual-width right rail', () => {
+  it('TOC mode by default; running a block attaches the wide panel mode, detach returns to TOC', async () => {
+    const { handle, root } = mount();
+    handles.push(handle);
+    // TOC mode: no panel-attached class, TOC hook present
+    expect(root.classList.contains('lw-panel-attached')).toBe(false);
+    expect(root.querySelector("[data-test='toc']")).not.toBeNull();
+
+    location.hash = '#/second-lesson-registers';
+    window.dispatchEvent(new Event('hashchange'));
+    root.querySelector<HTMLButtonElement>("[data-test='block-run']")!.click();
+    await flushAsync();
+
+    // panel attached: root carries lw-panel-attached (right rail goes wide)
+    expect(root.classList.contains('lw-panel-attached')).toBe(true);
+    expect(root.querySelector("[data-test='uth']")).not.toBeNull();
+
+    root.querySelector<HTMLButtonElement>("[data-test='uth-detach']")!.click();
+    expect(root.classList.contains('lw-panel-attached')).toBe(false);
+    expect(root.querySelector("[data-test='toc']")).not.toBeNull();
+  });
+
   it('lists one toc item per h2/h3 in document order, none on a heading-less page', () => {
     const { handle, root } = mount(TOC_PAGES);
     handles.push(handle);
@@ -124,7 +147,6 @@ describe('mountSite: right-rail table of contents', () => {
     expect(active[0]!.textContent).toBe('Alpha');
     root.querySelectorAll<HTMLAnchorElement>("[data-test='nav-item']")[1]!.click();
     window.dispatchEvent(new Event('hashchange'));
-    expect(root.querySelector("[data-test='toc']")).toBeNull();
     expect(root.querySelectorAll("[data-test='toc-item']")).toHaveLength(0);
   });
 
@@ -149,32 +171,6 @@ describe('mountSite: right-rail table of contents', () => {
     const active = root.querySelectorAll('.lw-toc-active');
     expect(active).toHaveLength(1);
     expect(active[0]!.textContent).toBe('Beta');
-  });
-
-  it('swaps the rail to the panel on attach and back to the toc on detach', async () => {
-    const { handle, root } = mount([
-      {
-        title: 'Lesson',
-        orgSource:
-          '#+TITLE: Lesson\n\n* Part one\n\n#+BEGIN_SRC mips\naddi $t0, $zero, 1\n#+END_SRC\n',
-      },
-    ]);
-    handles.push(handle);
-    const rail = root.querySelector('.lw-rail')!;
-    expect(rail.querySelector("[data-test='toc']")).not.toBeNull();
-    expect(root.querySelector("[data-test='uth']")).toBeNull();
-    expect(root.classList.contains('lw-panel-attached')).toBe(false);
-    root.querySelector<HTMLButtonElement>("[data-test='block-run']")!.click();
-    await flushAsync();
-    const panel = root.querySelector("[data-test='uth']")!;
-    expect(rail.contains(panel)).toBe(true);
-    // panel mode: the site root carries the class that hides the toc
-    expect(root.classList.contains('lw-panel-attached')).toBe(true);
-    root.querySelector<HTMLButtonElement>("[data-test='uth-detach']")!.click();
-    expect(root.querySelector("[data-test='uth']")).toBeNull();
-    expect(root.classList.contains('lw-panel-attached')).toBe(false);
-    // the toc waited in the rail and is its content again
-    expect(rail.querySelector("[data-test='toc']")).not.toBeNull();
   });
 
   it('rebuilds the toc and resets the active entry on page switch', () => {
@@ -204,4 +200,43 @@ describe('mountSite: right-rail table of contents', () => {
     expect(active[0]!.textContent).toBe('Alpha');
     expect(handle.activeIndex).toBe(0);
   });
+
+});
+
+describe('mountSite: collapsible left page rail', () => {
+  it('toggle collapses the rail (links hidden, aria-expanded flips) and expands back', () => {
+    const { handle, root } = mount();
+    handles.push(handle);
+    const toggle = root.querySelector<HTMLButtonElement>("[data-test='nav-toggle']")!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(root.classList.contains('lw-left-collapsed')).toBe(true);
+    const pages = root.querySelector('.lw-rail-pages')!;
+    expect(pages.hidden).toBe(true);
+    // the toggle itself stays reachable in the 32px strip
+    expect(toggle.isConnected).toBe(true);
+    expect(toggle.hidden).toBe(false);
+    toggle.focus();
+    expect(document.activeElement).toBe(toggle);
+
+    toggle.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(root.classList.contains('lw-left-collapsed')).toBe(false);
+    expect(root.querySelector('.lw-rail-pages')!.hidden).toBe(false);
+  });
+
+});
+describe('mountSite: reduced motion', () => {
+  // happy-dom cannot emulate prefers-reduced-motion media evaluation, so
+  // the contract is pinned against the stylesheet text: the media query
+  // must disable the rail/panel transitions and the panel animation.
+  it('theme.css nullifies transitions and animations under prefers-reduced-motion', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const css = readFileSync(join(here, '../src/theme.css'), 'utf8');
+    const mq = /@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*transition: none !important;[^}]*animation: none !important;/;
+    expect(mq.test(css)).toBe(true);
+  });
+
 });

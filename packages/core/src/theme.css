@@ -1,6 +1,6 @@
 /* theme.css — "textbook, light" visual language (docs/design.md §Visual
    language). White background, near-black prose, hairline rules, zero
-   radius, no accent color, small-caps section labels, three-rail layout. */
+   radius, no accent color, small-caps section labels, two-pane layout. */
 
 :root {
   --lw-ink: #1a1a1a;
@@ -20,121 +20,201 @@
   box-sizing: border-box;
 }
 
-/* ---- layout: page-nav rail left ~200px, document center, right rail
-   ~320px (page TOC, or the machine panel while one is attached); rails
-   sticky + internally scrolling, hairline column separators; stacks
-   <900px with the page list above the document and the rail below it */
+/* ---- layout: three zones — collapsible page rail left (192px ↔ 32px
+   strip), document center, dual-width right rail (TOC 264px ↔ panel
+   clamp(420px, 42vw, 720px)). The grid's outer tracks are `auto`, so the
+   rails' animated element widths drive the grid: width 300ms
+   cubic-bezier(.2,.7,.3,1), contents cross-fade ~160ms. */
 
-.lw-site {
+.lw-site { background: var(--lw-paper); color: var(--lw-ink); }
+
+.lw-layout {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr) 320px;
-  max-width: 82rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: stretch;
+  max-width: 88rem;
   margin: 0 auto;
-  background: var(--lw-paper);
-  color: var(--lw-ink);
+  min-height: 100vh;
 }
 
-.lw-doc-pane { min-width: 0; padding: 2rem 2.5rem 4rem; }
-
-.lw-page-nav {
-  position: sticky;
-  top: 0;
-  max-height: 100vh;
-  overflow-y: auto;
-  border-right: 1px solid var(--lw-hairline);
-  padding: 1.75rem 1rem 2rem 1.5rem;
-  font-family: var(--lw-serif);
-}
-
-.lw-rail {
-  position: sticky;
-  top: 0;
-  max-height: 100vh;
-  overflow-y: auto;
+.lw-doc-pane {
   min-width: 0;
-  border-left: 1px solid var(--lw-hairline);
+  padding: 2rem 2.25rem 4rem;
 }
 
-/* while a panel is attached it owns the rail; the TOC waits hidden */
-.lw-site.lw-panel-attached .lw-toc { display: none; }
-.lw-rail > .lw-panel { margin: 1.5rem; }
-
-@media (max-width: 899px) {
-  .lw-site { display: block; }
-  .lw-page-nav {
-    position: static;
-    max-height: none;
-    overflow: visible;
-    border-right: none;
-    border-bottom: 1px solid var(--lw-hairline);
-    display: flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: 0.5rem 1.25rem;
-    padding: 0.75rem 1.5rem;
-  }
-  .lw-doc-pane { padding: 1.5rem 1.5rem 3rem; }
-  .lw-rail {
-    position: static;
-    max-height: none;
-    border-left: none;
-    border-top: 1px solid var(--lw-hairline);
-    padding: 1.5rem 1.5rem 3rem;
-  }
-  /* the TOC is a desktop affordance; an attached panel still shows */
-  .lw-toc { display: none; }
+/* while the panel owns the right rail, the doc column keeps a readable
+   measure instead of stretching ragged against 42vw */
+.lw-site.lw-panel-attached .lw-doc-pane > .lw-doc {
+  max-width: 74ch;
+  margin-inline: auto;
 }
 
-/* ---- page nav: vertical list of page links under a small-caps label */
+/* ---- left page rail: collapsible */
 
-.lw-page-nav-label {
-  display: block;
+.lw-rail-left {
+  width: 192px;
+  border-right: 1px solid var(--lw-hairline);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 300ms cubic-bezier(.2, .7, .3, 1);
+}
+
+.lw-site.lw-left-collapsed .lw-rail-left { width: 32px; }
+
+.lw-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.9rem 0.75rem 0.6rem;
+  border-bottom: 1px solid var(--lw-hairline);
+  font-family: var(--lw-serif);
+  font-size: 0.82rem;
   font-variant: small-caps;
   letter-spacing: 0.06em;
   font-weight: 700;
-  margin-bottom: 0.75rem;
+  white-space: nowrap;
 }
 
-.lw-nav-link {
-  display: block;
-  color: var(--lw-gray);
-  text-decoration: none;
-  padding: 0.18rem 0;
-  line-height: 1.35;
+.lw-rail-title { padding-left: 0.25rem; }
+
+.lw-rail-toggle {
+  font: inherit;
+  font-variant: normal;
+  letter-spacing: normal;
+  background: var(--lw-paper);
+  border: 1px solid var(--lw-hairline);
+  padding: 0.05rem 0.3rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
+.lw-rail-toggle:hover { border-color: var(--lw-ink); }
+
+.lw-rail-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.75rem 0.75rem 1.5rem;
+  overflow-y: auto;
+}
+
+.lw-site.lw-left-collapsed .lw-rail-toggle-label { visibility: hidden; }
+
+.lw-nav-link { color: var(--lw-gray); text-decoration: none; }
 .lw-nav-link:hover { color: var(--lw-ink); }
 .lw-nav-link.lw-nav-active { color: var(--lw-ink); text-decoration: underline; }
 
-/* ---- right-rail TOC: small, muted; active near-black + 2px left rule
-   (the panel's current-entry language, applied vertically) */
+/* ---- right rail: TOC mode (264px) ↔ panel mode (wide) */
 
-.lw-toc {
-  padding: 1.75rem 1rem 2rem 0.9rem;
-  font-family: var(--lw-serif);
-  font-size: 0.85rem;
-  line-height: 1.35;
+.lw-rail-right {
+  width: 264px;
+  border-left: 1px solid var(--lw-hairline);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 300ms cubic-bezier(.2, .7, .3, 1);
 }
 
-.lw-toc-label {
-  display: block;
-  font-variant: small-caps;
-  letter-spacing: 0.06em;
-  font-weight: 700;
-  margin-bottom: 0.6rem;
+.lw-site.lw-panel-attached .lw-rail-right {
+  width: clamp(420px, 42vw, 720px);
+}
+
+.lw-rail-body { position: relative; flex: 1; min-height: 0; }
+
+/* the TOC overlays the panel slot; attached, it fades/slides out while
+   the panel fades in (both scroll independently) */
+.lw-toc {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  transition: opacity 160ms ease, transform 160ms ease,
+              visibility 0s linear 160ms;
+}
+
+.lw-site.lw-panel-attached .lw-toc {
+  opacity: 0;
+  transform: translateX(8px);
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease, visibility 0s;
+}
+
+.lw-toc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.75rem 0.75rem 1.5rem;
 }
 
 .lw-toc-item {
-  display: block;
   color: var(--lw-gray);
   text-decoration: none;
-  padding: 0.22rem 0.5rem 0.22rem 0.75rem;
-  border-left: 2px solid transparent; /* reserves the active rule's width */
+  line-height: 1.35;
+  font-size: 0.95rem;
 }
-.lw-toc-item:hover { color: var(--lw-ink); }
-.lw-toc-item.lw-toc-sub { padding-left: 1.75rem; }
-.lw-toc-item.lw-toc-active {
+
+.lw-toc-item:hover { color: var(--lw-ink); text-decoration: underline; }
+
+.lw-toc-sub { padding-left: 0.9rem; font-size: 0.88rem; }
+
+.lw-toc-active {
   color: var(--lw-ink);
-  border-left-color: var(--lw-ink);
+  border-left: 2px solid var(--lw-ink);
+  padding-left: 0.5rem;
+}
+
+.lw-panel-pane {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  font-family: var(--lw-mono);
+}
+
+.lw-panel-pane .lw-panel {
+  border: none;
+  min-height: 100%;
+  animation: lw-panel-in 160ms ease-out;
+}
+
+@keyframes lw-panel-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- reduced motion: width modulation and cross-fade become instant */
+
+@media (prefers-reduced-motion: reduce) {
+  .lw-rail-left, .lw-rail-right, .lw-toc, .lw-panel {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---- narrow screens (<900px): zones stack, rails go full-width */
+
+@media (max-width: 899px) {
+  .lw-layout { grid-template-columns: minmax(0, 1fr); }
+  .lw-rail-left, .lw-rail-right {
+    position: static;
+    height: auto;
+    width: auto;
+    transition: none;
+  }
+  .lw-rail-left { border-right: none; border-bottom: 1px solid var(--lw-hairline); }
+  .lw-rail-right { border-left: none; border-top: 1px solid var(--lw-hairline); }
+  .lw-rail-pages, .lw-toc-list { flex-direction: row; flex-wrap: wrap; }
+  .lw-rail-body { position: static; }
+  .lw-toc, .lw-panel-pane { position: static; overflow: visible; }
+  .lw-site.lw-panel-attached .lw-toc { display: none; }
+  .lw-site.lw-panel-attached .lw-doc-pane > .lw-doc { max-width: none; }
 }
 
 /* ---- document */
@@ -347,6 +427,13 @@ code.lw-inline {
 .lw-section { border-bottom: 1px solid var(--lw-hairline); padding: 0.6rem 0.75rem; }
 .lw-section:last-child { border-bottom: none; }
 
+/* panel mode: field sections re-flow into a wrapping grid; listings and
+   hexdumps stay single-column (their rows are wide) */
+.lw-site.lw-panel-attached .lw-section { padding: 0.8rem 1rem; }
+.lw-site.lw-panel-attached .lw-fields {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
 .lw-sec-label {
   font-size: 0.72rem;
   font-weight: 700;
@@ -418,13 +505,12 @@ code.lw-inline {
 /* Trusted kernel markup (SVG etc.): panel sections and results slots. */
 
 .lw-html { margin: 0; }
-.lw-html svg { max-width: 100%; height: auto; }
-/* Typst pages sit in a shrink-to-fit inline-flex wrapper; a page wider
-   than the slot is switched to width:100% by the kernel, but a percentage
-   width cannot resolve against shrink-to-fit sizing (the SVG falls back
-   to its 300px default). Widen the wrapper so such SVGs fill the slot;
-   intrinsically small SVGs keep their fixed width (never upscaled). */
+/* Typst wraps each page in a shrink-to-fit inline-flex div and rewrites
+ * wide pages to width="100%" — a percentage width cannot resolve against
+ * shrink-to-fit sizing, so the SVG would fall back to its intrinsic
+ * ~300px. Stretch the wrapper to the slot instead. */
 .lw-html > div:has(> svg) { width: 100%; max-width: 100%; }
+.lw-html svg { max-width: 100%; height: auto; }
 .lw-results > * + * { margin-top: 0.4rem; }
 
 /* ---- tooltip */
