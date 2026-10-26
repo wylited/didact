@@ -112,6 +112,10 @@ follows the /divisor's/ sign, because Lua defines =a % b= as
 = a - floor(a / b) * b =: =5 % -3= is =-1=. They still compare equal
 numerically: =1 == 1.0= is =true=.
 
+One honesty note: real Lua integers are 64-bit, but this kernel stores
+them in JavaScript numbers, so an integer literal beyond =2^53= is
+refused at load time with a clean error instead of silently rounding.
+
 #+NAME: ints-and-floats
 #+BEGIN_SRC lua
 print(1, 1.0, 7 / 2)

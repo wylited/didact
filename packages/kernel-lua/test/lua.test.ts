@@ -299,3 +299,72 @@ function tablesRows(panels: Panel[]): { text: string; bytes: string }[] {
     ? t.rows.map((r) => ({ text: r.text, bytes: r.bytes }))
     : [];
 }
+
+describe('review regression fixes', () => {
+  it('parses keyword not as unary', async () => {
+    expect(await out(`print(not true, not 0, not nil)
+if not nil then print('runs') end`)).toBe('false\tfalse\ttrue\nruns');
+  });
+
+  it('a redeclared local does not alias through closures', async () => {
+    expect(await out(`local x = 1
+local f = function() return x end
+local x = 2
+print(f(), x)`)).toBe('1\t2');
+  });
+
+  it('local f = function() ... end does not see its own binding', async () => {
+    expect(await out(`f = 42
+local f = function() return f end
+print(f())`)).toBe('42');
+  });
+
+  it('nil positional fields still occupy their slot', async () => {
+    expect(await out(`local t = {1, nil, 2}
+print(#t, t[2], t[3])
+for i, v in ipairs(t) do print(i, v) end`)).toBe('3\tnil\t2\n1\t1');
+  });
+
+  it('a call in the last positional field expands', async () => {
+    expect(await out(`local function two() return 1, 2 end
+local t = {two()}
+print(#t, t[1], t[2])`)).toBe('2\t1\t2');
+  });
+
+  it('integer //0 and %0 are errors; floats keep inf', async () => {
+    expect((await run(`print(1 // 0)`)).error).toBe('line 1: attempt to divide by zero');
+    expect((await run(`print(1 % 0)`)).error).toBe("line 1: attempt to perform 'n%0'");
+    expect(await out('print(1.0 // 0, 1.0 % 0)')).toBe('inf\tnan');
+  });
+
+  it('tonumber reads hex and string arithmetic stays integral', async () => {
+    expect(await out(`print(tonumber('0x10'), '10' + 5, '7' % 3)`)).toBe('16\t15\t1');
+  });
+
+  it('floats print like Lua %.14g', async () => {
+    expect(await out(`print(1 / 3, 1e20, 2 ^ 53, 1 / 0, -1 / 0, 0 / 0, -0.0)`))
+      .toBe('0.33333333333333\t1e+20\t9.007199254741e+15\tinf\t-inf\tnan\t-0.0');
+  });
+
+  it('refuses integer literals beyond 2^53 at load time with the line', async () => {
+    const s = luaKernel.createSession();
+    const r = await s.load(`local ok = 1\nlocal x = 9007199254740993`);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.line).toBe(2);
+      expect(r.message).toBe(
+        'integer literals beyond 2^53 are not in the teaching subset — ' +
+        'Lua integers are 64-bit, this interpreter is not');
+    }
+    s.dispose();
+  });
+
+  it('guards recursive __index metamethods with a line-mapped error', async () => {
+    const r = await run(`local t = {}
+setmetatable(t, {__index = function(tt, k) return tt[k] end})
+local v = t.x`);
+    expect(r.finished).toBe(false);
+    expect(r.error).toBe(
+      "line 2: '__index' metamethod recursion exceeds 200 frames; possible loop");
+  });
+});

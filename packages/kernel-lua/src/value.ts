@@ -59,10 +59,13 @@ export class Table {
     else this.entries.set(key, { key: normalizeKey(k), value: v });
   }
 
+  /** Highest positional slot a constructor ever filled; nil holes keep it. */
+  borderHint = 0;
+
   /** 1-based border: how many consecutive integer keys from 1 exist. */
   length(): number {
     let n = 0;
-    while (this.entries.has(`i${n + 1}`)) n++;
+    while (n + 1 <= this.borderHint || this.entries.has(`i${n + 1}`)) n++;
     return n;
   }
 }
@@ -148,7 +151,7 @@ export type ExpNode =
   | { kind: 'or'; l: ExpNode; r: ExpNode };
 
 export type StatNode =
-  | { kind: 'local'; names: string[]; exps: ExpNode[]; line: number }
+  | { kind: 'local'; names: string[]; exps: ExpNode[]; line: number; fn?: true }
   | { kind: 'assign';
       targets: ({ kind: 'name'; name: string; line: number }
               | { kind: 'index'; obj: ExpNode; key: ExpNode; line: number })[];
@@ -178,8 +181,28 @@ export function toStr(v: LuaValue): string {
 }
 
 export function formatFloat(v: number): string {
-  if (Number.isInteger(v) && Math.abs(v) < 1e15) return `${v}.0`;
-  return String(v);
+  if (Number.isNaN(v)) return 'nan';
+  if (v === Infinity) return 'inf';
+  if (v === -Infinity) return '-inf';
+  if (Object.is(v, -0)) return '-0.0';
+  // Lua prints floats with %.14g: 14 significant digits, trailing zeros
+  // stripped, scientific form for exponent < -4 or >= 14, two-digit
+  // exponent, and a ".0" suffix when the result would look like an int.
+  const a = Math.abs(v);
+  const s = v === 0 || (a >= 1e-4 && a < 1e14)
+    ? v.toPrecision(14)
+    : v.toExponential(13);
+  const ei = s.indexOf('e');
+  let mant = ei >= 0 ? s.slice(0, ei) : s;
+  const exp = ei >= 0 ? s.slice(ei + 1) : '';
+  if (mant.includes('.')) mant = mant.replace(/0+$/, '').replace(/\.$/, '');
+  let out = mant;
+  if (exp !== '') {
+    const sign = exp.startsWith('-') ? '-' : '+';
+    out += `e${sign}${exp.replace(/^[+-]/, '').padStart(2, '0')}`;
+  }
+  if (!out.includes('.') && !out.includes('e')) out += '.0';
+  return out;
 }
 
 function hex(n: number): string {

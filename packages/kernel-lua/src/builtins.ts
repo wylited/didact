@@ -25,6 +25,10 @@ export function makeBuiltins(): Record<string, Builtin> {
       if (isNum(v)) return [v];
       if (typeof v === 'string') {
         const t = v.trim();
+        if (/^-?0[xX][0-9a-fA-F]+$/.test(t)) {
+          const n = parseInt(t, 16);
+          return [Number.isSafeInteger(n) ? new LuaInt(n) : new LuaFloat(n)];
+        }
         if (/^-?\d+$/.test(t)) return [new LuaInt(Number(t))];
         if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t)) return [new LuaFloat(Number(t))];
       }

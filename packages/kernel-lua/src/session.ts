@@ -235,8 +235,10 @@ export class LuaSession implements Session {
       const len = t.length();
       for (let i = 1; i <= len; i++) {
         const key = `i${i}`;
-        const e = t.entries.get(key)!;
-        this.pushRow(rows, t, key, e.value, `[${i}] = ${toStr(e.value)}`);
+        const e = t.entries.get(key);
+        // a constructor nil hole ({1, nil, 2}) still shows its slot
+        this.pushRow(rows, t, key, e?.value ?? null,
+          `[${i}] = ${e === undefined ? 'nil' : toStr(e.value)}`);
       }
       for (const [key, e] of t.entries) {
         if (/^i\d+$/.test(key) && Number(key.slice(1)) <= len) continue;

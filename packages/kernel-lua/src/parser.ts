@@ -148,7 +148,7 @@ function lineOfExp(e: ExpNode): number {
       next();
       const fn = name();
       const def = parseFuncbody(fn.value);
-      return { kind: 'local', names: [fn.value], exps: [def], line: kw.line };
+      return { kind: 'local', names: [fn.value], exps: [def], line: kw.line, fn: true };
     }
     const names = [name().value];
     while (atOp(',')) { next(); names.push(name().value); }
@@ -337,7 +337,8 @@ function lineOfExp(e: ExpNode): number {
   function parseExp(limit = 0): ExpNode {
     let left: ExpNode;
     const t = peek();
-    if ((t.type === 'op' && (t.value === '-' || t.value === 'not' || t.value === '#'))) {
+    if ((t.type === 'op' && (t.value === '-' || t.value === '#')) ||
+        (t.type === 'keyword' && t.value === 'not')) {
       next();
       const e = parseExp(8); // unary binds between * and ^, below neither
       left = t.value === 'not'
@@ -364,7 +365,13 @@ function lineOfExp(e: ExpNode): number {
   function parseSimpleExp(): ExpNode {
     const t = next();
     if (t.type === 'number') {
-      return { kind: 'num', value: t.numKind === 'int' ? new LuaInt(Number(t.value)) : new LuaFloat(Number(t.value)) };
+      const n = Number(t.value);
+      if (t.numKind === 'int' && !Number.isSafeInteger(n)) {
+        throw new ParseError(
+          'integer literals beyond 2^53 are not in the teaching subset — ' +
+          'Lua integers are 64-bit, this interpreter is not', t.line);
+      }
+      return { kind: 'num', value: t.numKind === 'int' ? new LuaInt(n) : new LuaFloat(n) };
     }
     if (t.type === 'string') return { kind: 'str', value: t.value };
     if (t.type === 'keyword') {

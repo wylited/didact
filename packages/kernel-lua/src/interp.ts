@@ -24,7 +24,9 @@ export interface YieldInfo { line: number }
 type BlockResult =
   | { kind: 'normal' }
   | { kind: 'break' }
-  | { kind: 'return'; values: LuaValue[] };
+  | { kind: 'return'; values: LuaValue[] }
+  /** `local` opens a fresh scope; execBlock continues in it. */
+  | { kind: 'scope'; env: Env };
 
 export interface Frame {
   closure: Closure | null;   // null for the top-level chunk
@@ -40,6 +42,7 @@ export class Interpreter {
   readonly tables: Table[] = [];
   readonly frames: Frame[] = [];
   out = '';
+  private metaDepth = 0;
   steps = 0;
   private ops = 0;
   private builtins: Record<string, Builtin>;
@@ -88,8 +91,18 @@ export class Interpreter {
   }
 
   private *execBlock(body: StatNode[], env: Env): Generator<YieldInfo, BlockResult> {
+    let cur = env;
     for (const st of body) {
-      const r = yield* this.execStat(st, env);
+      const r = yield* this.execStat(st, cur);
+      if (r.kind === 'scope') {
+        // each `local` binds in a fresh scope so closures capture the
+        // scope that existed when they were created, never a redeclared
+        // local; the frame's env pointer follows when this is its block
+        const top = this.frames[this.frames.length - 1]!;
+        if (top.env === cur) top.env = r.env;
+        cur = r.env;
+        continue;
+      }
       if (r.kind !== 'normal') return r;
     }
     return { kind: 'normal' };
@@ -111,9 +124,16 @@ export class Interpreter {
 
     switch (st.kind) {
       case 'local': {
-        const vals = yield* this.evalList(st.exps, env);
-        st.names.forEach((n, i) => { env.vars.set(n, vals[i] ?? null); });
-        return { kind: 'normal' };
+        // initializers run in the previous scope (a function literal does
+        // not see the local it is being bound to), then the names land in
+        // a fresh child scope — redeclaring never aliases a closure.
+        // `local function f` is the exception Lua defines: f is already
+        // bound (to nil) when the function literal is evaluated.
+        const fresh = new Env(env);
+        const initEnv = st.fn === true ? (fresh.vars.set(st.names[0]!, null), fresh) : env;
+        const vals = yield* this.evalList(st.exps, initEnv);
+        st.names.forEach((n, i) => { fresh.vars.set(n, vals[i] ?? null); });
+        return { kind: 'scope', env: fresh };
       }
       case 'assign': {
         const vals = yield* this.evalList(st.exps, env);
@@ -349,16 +369,33 @@ export class Interpreter {
     const t = new Table();
     this.tables.push(t);
     let idx = 1;
-    for (const f of e.fields) {
+    // slots a positional field consumed even when the value was nil —
+    // {1, nil, 2} reserves slot 2, so #t is 3 and t[3] is 2
+    const reserved = new Set<number>();
+    const takeSlot = (): number => {
+      while (t.rawGet(new LuaInt(idx)) !== null || reserved.has(idx)) idx++;
+      reserved.add(idx);
+      t.borderHint = Math.max(t.borderHint, idx);
+      return idx;
+    };
+    for (let fi = 0; fi < e.fields.length; fi++) {
+      const f = e.fields[fi]!;
       if (f.name !== null) {
         t.rawSet(f.name, yield* this.eval(f.value, env));
       } else if (f.key !== null) {
         const k = yield* this.eval(f.key, env);
         t.rawSet(k, yield* this.eval(f.value, env));
+      } else if (fi === e.fields.length - 1 &&
+                 (f.value.kind === 'call' || f.value.kind === 'method')) {
+        // a call in the LAST positional field expands into consecutive slots
+        for (const v of yield* this.evalMulti(f.value, env)) {
+          const slot = takeSlot();
+          if (v !== null) t.rawSet(new LuaInt(slot), v);
+        }
       } else {
-        // positional: the next free 1-based slot ([k]=/name= skip slots)
-        while (t.rawGet(new LuaInt(idx)) !== null) idx++;
-        t.rawSet(new LuaInt(idx), yield* this.eval(f.value, env));
+        const v = yield* this.eval(f.value, env);
+        const slot = takeSlot();
+        if (v !== null) t.rawSet(new LuaInt(slot), v);
       }
     }
     return t;
@@ -482,10 +519,17 @@ export class Interpreter {
       }
     }
     // Closure metamethods run synchronously via a private driver; their
-    // statements do not yield into the user's step stream.
+    // statements do not yield into the user's step stream. A recursive
+    // metamethod (__index returning t[k]) would blow the JS stack with an
+    // unline-mapped error, so nesting is capped like call depth.
+    if (this.metaDepth >= 200) {
+      throw new RuntimeErr(
+        "'__index' metamethod recursion exceeds 200 frames; possible loop", line);
+    }
     const env = new Env(fn.env);
     fn.params.forEach((p, i) => { env.vars.set(p, args[i] ?? null); });
     this.frames.push({ closure: fn, env, line });
+    this.metaDepth++;
     const gen = this.execBlock(fn.body, env);
     try {
       let r = gen.next();
@@ -494,15 +538,20 @@ export class Interpreter {
       return b.kind === 'return' ? b.values : [];
     } finally {
       this.frames.pop();
+      this.metaDepth--;
     }
   }
 
   // ─── operators ───────────────────────────────────────────────────────────
 
   private arith(op: string, a: LuaValue, b: LuaValue, line: number): LuaValue {
-    const bothInt = a instanceof LuaInt && b instanceof LuaInt;
-    const x = numOf(a);
-    const y = numOf(b);
+    // integers stay integers; a string that coerces to an integer counts
+    // ('10' + 5 → 15), but a float NEVER demotes (7.0 // 2 → 3.0)
+    const ai = intOf(a);
+    const bi = intOf(b);
+    const bothInt = ai !== null && bi !== null;
+    const x = bothInt ? ai! : numOf(a);
+    const y = bothInt ? bi! : numOf(b);
     switch (op) {
       case '+': case '-': case '*': {
         const r = op === '+' ? x + y : op === '-' ? x - y : x * y;
@@ -512,11 +561,13 @@ export class Interpreter {
       case '/':
         return new LuaFloat(x / y);
       case '//': {
+        if (bothInt && y === 0) throw new RuntimeErr('attempt to divide by zero', line);
         const r = Math.floor(x / y);
         if (bothInt && Number.isSafeInteger(r)) return new LuaInt(r);
         return new LuaFloat(r);
       }
       case '%': {
+        if (bothInt && y === 0) throw new RuntimeErr("attempt to perform 'n%0'", line);
         // Lua: a % b == a - floor(a/b)*b — the DIVISOR's sign wins.
         const r = x - Math.floor(x / y) * y;
         if (bothInt && Number.isSafeInteger(r)) return new LuaInt(r);
@@ -568,4 +619,23 @@ export class Interpreter {
   print(args: LuaValue[]): void {
     this.out += args.map((v) => toStr(v)).join('\t') + '\n';
   }
+}
+
+/** The integer an arithmetic operand carries, or null if float/none.
+ *  LuaInt and integer-coercible strings count; LuaFloat never does —
+ *  7.0 // 2 is 3.0 in Lua, not 3. */
+function intOf(v: LuaValue): number | null {
+  if (v instanceof LuaInt) return v.v;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (/^-?0[xX][0-9a-fA-F]+$/.test(t)) {
+      const n = parseInt(t, 16);
+      return Number.isSafeInteger(n) ? n : null;
+    }
+    if (/^-?\d+$/.test(t)) {
+      const n = Number(t);
+      return Number.isSafeInteger(n) ? n : null;
+    }
+  }
+  return null;
 }
