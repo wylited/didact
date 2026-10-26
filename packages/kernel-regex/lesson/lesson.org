@@ -1,0 +1,272 @@
+#+TITLE: Regular Expressions, Actually Regular
+#+SUBTITLE: Parse the pattern, compile it to a Thompson NFA, run every path at once — no backtracking, ever
+
+* The plan: a pattern, some inputs, one machine
+
+A block is a pattern and a list of test inputs. The first non-comment
+line is the pattern, written between slashes — =/a(b|c)+d/= — with no
+flags in v1. Every later non-empty line is one input the pattern runs
+against; lines starting with =#= are comments, and a =#= input cannot be
+written. Input lines decode six escapes — =\n=, =\t=, =\r=, =\f=, =\v=
+and =\\= — so you can test characters you cannot type in a block; any
+other backslash stays a literal backslash.
+
+Under the hood the pattern text is parsed into a tree, compiled into a
+Thompson NFA — one =char= state per literal, =split= states for the
+branches — and simulated by moving a whole *set* of states through the
+input, one character per step. The *The machine* panel shows the
+compiled NFA with its arrows; the *NFA states* panel shows which states
+are live right now, and highlights the ones that arrived with the
+latest character.
+
+Literals match themselves. =.= matches any one character *except
+newline*. Classes list or range their members: =[abc]=, =[a-z]=,
+=[^0-9]= (=^= negates only as the first character; =-= is a range
+except at the very start or end; =]= always ends a class, and there are
+no escapes inside classes in v1). Anchors: =^= holds only at position 0
+of the input string, =$= only at its very end — there is no multiline
+mode, even for inputs containing =\n=.
+
+#+NAME: regex-classes
+#+BEGIN_SRC regex
+# leftmost start, longest span — watch the Input panel
+/[abc]+/
+zzabcaz
+zzz
+#+END_SRC
+
+#+RESULTS:
+: match [2,6)
+: no match
+
+The search is unanchored: the engine tries each start offset in order —
+0, 1, 2, … — until some offset produces a match, and you can watch the
+caret restart in the *Input* panel. At each offset it keeps the match
+that ends *furthest*: leftmost-longest, the POSIX flavor. PCRE-style
+engines (JavaScript's, Python's) return what a leftmost,
+first-branch-wins, greedy search finds; the difference shows up in the
+next section.
+
+#+NAME: regex-anchors
+#+BEGIN_SRC regex
+/^b.*d$/
+bcd
+bcdex
+xbcd
+#+END_SRC
+
+#+RESULTS:
+: match [0,3)
+: no match
+: no match
+
+=bcdex= fails even though =.*= could stop early: =$= needs the literal
+=d= to be the last character. And =.= refuses the newline in the first
+input below, while =\n= as a literal accepts it.
+
+#+NAME: regex-dot
+#+BEGIN_SRC regex
+/a.b/
+a\nb
+axb
+#+END_SRC
+
+#+RESULTS:
+: no match
+: match [0,3)
+
+* Alternation and quantifiers: leftmost-longest, not greedy
+
+In JavaScript, =/a|ab/.exec("ab")= returns ="a"= — the first branch
+matched, and a backtracker stops there. This engine keeps both branches
+alive in one state set and reports the match ending furthest, so
+=/a|ab/= and =/ab|a/= agree: the longest span from the leftmost
+position wins. That is POSIX behavior, not PCRE behavior, and it is a
+design choice, not an accident.
+
+#+NAME: regex-alt
+#+BEGIN_SRC regex
+/ab|a/
+ab
+a
+xab
+#+END_SRC
+
+#+RESULTS:
+: match [0,2)
+: match [0,1)
+: match [1,3)
+
+Quantifiers: =*= zero or more, =+= one or more, =?= zero or one, and
+the counted ={n}=, ={n,}=, ={n,m}=. Counted quantifiers are expanded
+literally into copies when the NFA is built — =a{2,3}= becomes
+=a a a?=, and the *The machine* panel shows the copies as separate
+states. A bare ={= or =}= that is not a well-formed quantifier is
+refused with a line-mapped error naming it; write =\{= for a literal
+brace.
+
+#+NAME: regex-quant
+#+BEGIN_SRC regex
+/a{2,3}/
+aaaa
+aa
+a
+#+END_SRC
+
+#+RESULTS:
+: match [0,3)
+: match [0,2)
+: no match
+
+The classic optional letter:
+
+#+NAME: regex-optional
+#+BEGIN_SRC regex
+/colou?r/
+color
+colour
+colr
+#+END_SRC
+
+#+RESULTS:
+: match [0,5)
+: match [0,6)
+: no match
+
+* Groups: what got captured where
+
+=(…)= is a capturing group, numbered by opening parenthesis; =(?:…)=
+groups without capturing. Spans are half-open =[start,end)= positions
+in the input, and a group that never ran on the winning path reports
+=none=. When different paths reach the same NFA state with different
+spans — =(ab)+= after its second loop — the engine keeps the span
+written more recently: a closed span beats an open one, a longer closed
+span beats a shorter one, ties prefer the earlier start. That is the
+same last-iteration answer a greedy backtracker gives, found without
+backtracking.
+
+#+NAME: regex-groups
+#+BEGIN_SRC regex
+/(a(b))c/
+xabc
+#+END_SRC
+
+#+RESULTS:
+: match [1,4) groups: 1=[1,3) 2=[2,3)
+
+#+NAME: regex-iterate
+#+BEGIN_SRC regex
+/(ab)+/
+abab
+ab
+#+END_SRC
+
+#+RESULTS:
+: match [0,4) groups: 1=[2,4)
+: match [0,2) groups: 1=[0,2)
+
+Step through =regex-groups= one character at a time with the *Captures*
+panel open: =group 1 open at 1= appears the moment the engine enters
+the group, =group 2 open at 2= inside it, and each span closes exactly
+when the matching =close= marker state fires. Group open/close are
+zero-width states — they record positions and consume nothing — and
+they are rows in the *NFA states* panel, not invisible bookkeeping.
+
+* What \d, \w and \s really mean
+
+Flavors disagree, so this engine pins them down exactly:
+
+- =\d= is exactly =[0-9]= — no other digits;
+- =\w= is exactly =[A-Za-z0-9_]= — underscore in, everything else out;
+- =\s= is exactly =[ \t\r\n\f\v]= — six characters, nothing else.
+  (JavaScript's =\s= also matches further Unicode spaces; this one does
+  not.)
+
+Uppercase =\D=, =\W=, =\S= are the complements. They do not work inside
+classes in v1 — =[\d]= is refused — because classes take no escapes at
+all.
+
+#+NAME: regex-words
+#+BEGIN_SRC regex
+/\w+ \d+/
+room 404
+room 4o4
+#+END_SRC
+
+#+RESULTS:
+: match [0,8)
+: match [0,6)
+
+#+NAME: regex-space
+#+BEGIN_SRC regex
+/\s[a-z]+/
+hi there
+hi\tthere
+#+END_SRC
+
+#+RESULTS:
+: match [2,8)
+: match [2,8)
+
+* What refuses to parse — and why
+
+The engine refuses, with a 1-based line-mapped error naming the
+feature, everything outside its subset:
+
+- =\1= and =\k<name>= backreferences. An NFA's only memory is /which
+  state it is in/; states are finite, so no state can remember an
+  arbitrarily long earlier match. =(a|ab)\1= would have to compare
+  against a remembered string — storage that grows with the input,
+  which is exactly what finite automata lack. The language of doubled
+  words — =ww= for any string =w= — is provably not regular (pump the
+  middle and the halves stop matching), so no NFA, however clever, can
+  implement a backreference. A backtracking engine can, by remembering;
+  that memory is what this kernel refuses to fake.
+- =(?=…)=, =(?!…)= lookahead and =(?<=…)=, =(?<!…)= lookbehind: regular
+  in principle (they do not extend the regular languages), but they
+  need a sub-match simulation woven into the main pass, and v1 keeps
+  the engine strictly one pass, left to right.
+- lazy =*?=, =+?=, =??=, ={n,m}?=: there is nothing to be lazy about —
+  matching is leftmost-longest, not try-shortest-first.
+- named groups =(?<name>…)= and =(?P<name>…)=: plain numbered =(…)= only.
+- unicode classes =\p{L}=: write the characters out, or use =\d \w \s=.
+- word boundaries =\b=, =\B=: combine =^=, =$= and classes instead.
+
+Structural mistakes get their own line-mapped errors: a dangling =*=,
+an unclosed =<= or =<[, a bad ={n,m}= (including ={2,1}= and ={,3}=),
+an empty =[]=, a reversed =[z-a]=, and a stray =)= or =}=.
+
+* Why (a*)* cannot explode here
+
+The classic backtracking disaster is =/(a*)*/= against a string of
+=a='s ending in a =b=: a backtracker walks one path at a time and
+restarts at each star, and the number of ways to split the =a='s
+between the two stars grows exponentially with the string. A simulator
+does not even notice: every path is explored *in parallel* in one state
+set, so each character costs exactly one step and one set update, and
+the set can never hold more states than the machine has.
+
+#+NAME: regex-linear
+#+BEGIN_SRC regex
+/(a*)*/
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab
+#+END_SRC
+
+#+RESULTS:
+: match [0,1000) groups: 1=[0,1000)
+
+That input is 1001 characters — a thousand =a='s and the final =b= —
+and the run takes exactly 1001 steps: one per =a=, then one more where
+the =b= kills every live state at once. The verdict reports the
+furthest end ever reached, =[0,1000)=, and group 1, the inner =(a*)=,
+merges to the same span. Total work is bounded twice over: a run gets
+100 000 character steps (and 5 000 000 state visits) before stopping
+with a clean, line-numbered error, and the machine itself is capped at
+4096 states — so =a{5000}= is refused at load with the pattern's line
+number instead of being compiled into a monster. Worst case overall is
+still polynomial: one linear scan per start offset, never exponential.
+
+Step through any block here one character at a time — =step()= is one
+input character plus the epsilon-closure that follows it, and the
+highlighted rows in *NFA states* are the states that just arrived.
+Breakpoints pause before an input line is processed.
