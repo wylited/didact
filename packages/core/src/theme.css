@@ -201,6 +201,7 @@
   .lw-rail-right { display: none; }
   .lw-site.lw-panel-attached .lw-rail-right {
     display: block;
+    width: auto; /* beats the clamp() minimum, which overflows phones */
     border-top: 1px solid var(--lw-hairline);
   }
   .lw-rail-pages-list { flex-direction: row; flex-wrap: wrap; }
