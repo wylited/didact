@@ -9,7 +9,7 @@ not The MathWorks' MATLAB. It keeps the idea that made MATLAB MATLAB:
 COLUMN-MAJOR in one flat array, exactly the way the real program lays it
 out. Everything else is pared to a subset small enough to read in an
 afternoon: literals and ranges, =+ - * / \ .= with their matrix and
-elementwise meanings, indexing with =end=, =if=/=for=/=while=, functions
+elementwise meanings, indexing with =end=, =if=, =for= and =while=, functions
 at the top of the block, and a fixed set of builtins (=zeros=, =sum=,
 =sort=, =\det= …). There is no =rand= anywhere — identical source runs
 identically, forever — and anything outside the subset (cells ={}=,

@@ -142,7 +142,7 @@ globals, calls, structured labels, linear memory, the wrapping i32
 arithmetic and the trap rules — divide by zero, =unreachable=, and
 out-of-bounds accesses, each stopping the run with its source line — are
 the real semantics. What is deliberately outside the subset: =i64=,
-=f32=/=f64=, and the bulk of exotic opcodes, all refused at load with a
+=f32= and =f64=, and the bulk of exotic opcodes, all refused at load with a
 line-mapped message before a single instruction runs.
 
 What is not simplified is the instruction stream itself. Every opcode

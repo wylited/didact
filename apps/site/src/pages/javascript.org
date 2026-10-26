@@ -4,8 +4,8 @@
 * The subset you are driving
 
 This page runs a hand-written JavaScript interpreter, not your browser's.
-It speaks a deliberately small dialect: =var=/=let=/=const=, functions and
-arrow functions, =if=/=while=/=for(;;)=, and a few builtins (=Math=,
+It speaks a deliberately small dialect: =var=, =let= and =const=, functions
+and arrow functions, =if=, =while= and =for(;;)=, and a few builtins (=Math=,
 =console=, array and string methods). There are no classes, no =this=, no
 async/await — those are separate lessons. Anything outside the subset is
 rejected *before anything runs*, with the offending line named.
@@ -98,7 +98,7 @@ whole scope and pre-creates the declarations: every =var= becomes
 =undefined= immediately, and function declarations become fully callable
 functions. The *initialisations* stay where you wrote them. The window
 between the top of the scope and the declaration line is the temporal
-dead zone for =let=/=const= — touching it throws, with the line of the
+dead zone for =let= and =const= — touching it throws, with the line of the
 /read/, which is why the first log below never prints.
 
 #+BEGIN_SRC javascript
