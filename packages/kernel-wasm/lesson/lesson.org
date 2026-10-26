@@ -1,0 +1,154 @@
+#+TITLE: WebAssembly: the stack machine under everything
+#+SUBTITLE: The i32 core of the wasm spec on an interpreter you can single-step, one instruction at a time
+
+* The operand stack does the arithmetic
+
+WebAssembly has no registers. A wasm function is a sequence of instructions
+over one /operand stack/: =i32.const= pushes, =i32.add= pops two and pushes
+one, and the folded text you write is just a readable skin over that flat
+sequence. =(i32.add (i32.const 20) (i32.const 22))= flattens to /operands
+first, operator after/ — =20=, =22=, then =i32.add= — and each flattened
+instruction remembers the source line of the =(= that opened it, so
+breakpoints and errors speak in your lines, not the machine's.
+
+Run the block and step it: watch the *Instructions* panel show the flat
+form (the bytes column carries the real binary opcodes — =i32.const= is
+=0x41=, =i32.add= is =0x6a=), and the *Operand stack* panel grow and
+shrink. Every value is exactly 32 bits, and arithmetic wraps silently at
+that width: 65536 · 65536 is 2³², which does not fit, so the answer is the
+low 32 bits — zero. Signed division =i32.div_s= truncates toward zero, so
+-7 / 2 is -3, not -4.
+
+#+NAME: stack-arith
+#+BEGIN_SRC wasm
+(module
+  (import "didact" "print" (func $print (param i32)))
+  (func (export "main")
+    (call $print (i32.add (i32.const 20) (i32.const 22)))
+    (call $print (i32.mul (i32.const 65536) (i32.const 65536)))
+    (call $print (i32.div_s (i32.const -7) (i32.const 2)))))
+#+END_SRC
+
+#+RESULTS:
+: 42
+: 0
+: -3
+
+* Locals, and a call that calls itself
+
+Data that should survive longer than one expression lives in /locals/,
+addressed by =$name= or index: parameters first, then =(local …)=
+declarations. Each call builds a fresh frame — locals start at 0,
+parameters are set by the caller. =(local.get $n)= pushes
+a local's value; =(local.set $n …)= pops one into it. A /call/ takes its
+arguments off the caller's stack, builds a new frame with its own locals
+and its own operand-stack region, and the function's =end= returns the
+=result= value to whoever called it — the callee's locals never leak into
+the caller, even when the names collide.
+
+=$fact= below is the classic recursive factorial: if =$n ≤ 1= return 1,
+else return =$n · fact($n − 1)=. Step into the first =call= and watch the
+*Call stack* panel stack one =$fact= frame per recursion level, each with
+its own =$n= (flagged =changed= when the caller sets it), then unwind as
+each =end= hands its result to the waiting =i32.mul=.
+
+#+NAME: factorial
+#+BEGIN_SRC wasm
+(module
+  (import "didact" "print" (func $print (param i32)))
+  (func $fact (param $n i32) (result i32)
+    (if (result i32) (i32.le_s (local.get $n) (i32.const 1))
+      (then (i32.const 1))
+      (else (i32.mul (local.get $n) (call $fact (i32.sub (local.get $n) (i32.const 1)))))))
+  (func (export "main")
+    (call $print (call $fact (i32.const 10)))))
+#+END_SRC
+
+#+RESULTS:
+: 3628800
+
+* Labels are structured, not goto
+
+There is no jump-to-address in wasm. Control flow is /nested blocks/: a
+=(block $l …)= and a =(loop $l …)= each push a label onto a control stack,
+and =(br $l …)= branches to one — but the two mean opposite things.
+/br to a loop jumps to its start/ and repeats it; /br to a block jumps to
+its end/ and skips the rest of its body. Numeric depths count
+innermost-first: =br 0= is the nearest enclosing label, =br 1= the one
+around it. =(br_if …)= does the same only when its condition operand is
+nonzero — that is the entire loop machinery of the language.
+
+The counted loop below sums 1..5 with a =$sum= and a counter =$i=: each
+pass adds, increments, and =(br $again)= repeats the loop; when =$i=
+passes 5, =(br_if $done=) fires, which exits the surrounding block and
+falls through to the print. Swap the two labels — point the =br= at
+=$done= — and you would exit after one pass instead of repeating.
+
+#+NAME: counted-loop
+#+BEGIN_SRC wasm
+(module
+  (import "didact" "print" (func $print (param i32)))
+  (func (export "main")
+    (local $i i32)
+    (local $sum i32)
+    (block $done
+      (loop $again
+        (br_if $done (i32.gt_s (local.get $i) (i32.const 5)))
+        (local.set $sum (i32.add (local.get $sum) (local.get $i)))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $again)))
+    (call $print (local.get $sum))))
+#+END_SRC
+
+#+RESULTS:
+: 15
+
+* Memory is bytes — nothing else
+
+Beside the stack and the locals there is exactly one more place for data:
+/linear memory/, declared in pages of 65 536 bytes and addressed by a
+single integer. It holds bytes, and only bytes: =(i32.store8 …)= writes
+the low byte of its value operand, =(i32.load8_u …)= reads one back
+/unsigned/ (0…255) while =i32.load8_s= sign-extends it; wider =i32.store=
+/=i32.load= move four bytes /little-endian/ — lowest byte first, visible
+in the *Memory* panel's hexdump the moment you store.
+
+Below, one byte =0x2A= goes to address 0 and comes back twice: through
+=$print_char=, which emits it as a character, and through =$print=, which
+prints the same bits as a decimal number. Nothing was converted — 42 and
+=*= are the same byte, and the printing function is what chooses a
+reading.
+
+#+NAME: memory-bytes
+#+BEGIN_SRC wasm
+(module
+  (import "didact" "print" (func $print (param i32)))
+  (import "didact" "print_char" (func $print_char (param i32)))
+  (memory 1)
+  (func (export "main")
+    (i32.store8 (i32.const 0) (i32.const 0x2A))
+    (call $print_char (i32.load8_u (i32.const 0)))
+    (call $print (i32.load8_u (i32.const 0)))))
+#+END_SRC
+
+#+RESULTS:
+: *42
+
+* What this kernel is, and is not
+
+Honesty first: this is an interpreter for the /32-bit integer core/ of the
+WebAssembly specification, not the whole thing. The stack, locals,
+globals, calls, structured labels, linear memory, the wrapping i32
+arithmetic and the trap rules — divide by zero, =unreachable=, and
+out-of-bounds accesses, each stopping the run with its source line — are
+the real semantics. What is deliberately outside the subset: =i64=,
+=f32=/=f64=, and the bulk of exotic opcodes, all refused at load with a
+line-mapped message before a single instruction runs.
+
+What is not simplified is the instruction stream itself. Every opcode
+byte in the Instructions panel is the real binary encoding from the spec
+— and a =.wasm= file is exactly this kind of instruction sequence with a
+small module wrapper around it. The compiled binary that the C lesson
+executes is the very format this panel shows you: compile C for the wasm
+target, and the machine code you get is the flat stack-machine code you
+have been stepping through here.
