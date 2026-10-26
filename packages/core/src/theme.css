@@ -419,6 +419,12 @@ code.lw-inline {
 
 .lw-html { margin: 0; }
 .lw-html svg { max-width: 100%; height: auto; }
+/* Typst pages sit in a shrink-to-fit inline-flex wrapper; a page wider
+   than the slot is switched to width:100% by the kernel, but a percentage
+   width cannot resolve against shrink-to-fit sizing (the SVG falls back
+   to its 300px default). Widen the wrapper so such SVGs fill the slot;
+   intrinsically small SVGs keep their fixed width (never upscaled). */
+.lw-html > div:has(> svg) { width: 100%; max-width: 100%; }
 .lw-results > * + * { margin-top: 0.4rem; }
 
 /* ---- tooltip */

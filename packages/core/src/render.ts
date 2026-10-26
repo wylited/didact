@@ -100,7 +100,7 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
           const tr = document.createElement('tr');
           for (const cell of node.head) {
             const th = document.createElement('th');
-            th.textContent = cell;
+            renderInline(cell, th);
             tr.appendChild(th);
           }
           thead.appendChild(tr);
@@ -111,7 +111,7 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
           const tr = document.createElement('tr');
           for (const cell of row) {
             const td = document.createElement('td');
-            td.textContent = cell;
+            renderInline(cell, td);
             tr.appendChild(td);
           }
           tbody.appendChild(tr);

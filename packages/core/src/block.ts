@@ -329,7 +329,7 @@ export class BlockRuntime {
       // continues; otherwise Run restarts from the current editor text.
       const resume = this.midFlight && this.loadedDoc === this.source;
       if (!resume) {
-        this.status('assembling…');
+        this.status('working…');
         const load = await this.session.load(this.source);
         if (!load.ok) {
           this.loadedDoc = null;
@@ -363,7 +363,7 @@ export class BlockRuntime {
     this.setError(null);
     try {
       if (this.loadedDoc !== this.source) {
-        this.status('assembling…');
+        this.status('working…');
         const load = await this.session.load(this.source);
         if (!load.ok) {
           this.loadedDoc = null;

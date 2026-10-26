@@ -112,6 +112,23 @@ describe('BlockRuntime: run and reset', () => {
   });
  });
 
+describe('BlockRuntime: loading status', () => {
+  it('shows the kernel-neutral "working…" while a load is in flight, then the run status', async () => {
+    const { handle, root, session } = mount();
+    handles.push(handle);
+    const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+    session.load = async () => { await gate; return { ok: true, summary: 'loaded · fake' }; };
+
+    root.querySelector<HTMLButtonElement>("[data-test='block-run']")!.click();
+    await flushAsync();
+    expect(root.querySelector("[data-test='block-status']")!.textContent).toBe('working…');
+
+    release();
+    await flushAsync();
+    expect(root.querySelector("[data-test='block-status']")!.textContent).toContain('finished');
+  });
+});
+
 describe('BlockRuntime: gutter breakpoints', () => {
   it('labels one gutter element per source line and toggles a breakpoint marker on mousedown', () => {
     const { handle, root } = mount();
