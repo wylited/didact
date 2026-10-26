@@ -33,7 +33,7 @@ Open the printed URL. (If pnpm blocks esbuild's install script, run
 | `c` | C · clang wasm | `c` | `packages/kernel-c` | `public/vendor-c/` (~105 MB, clang → wasm32-wasi) |
 | `cpp` | C++ · clang wasm | `cpp` | `packages/kernel-cpp` | shares `public/vendor-c/` with `c` (same clang engine) |
 | `python` | Python · Pyodide | `python` | `packages/kernel-python` | `public/vendor-python/` (~13 MB, CPython 3.14 wasm) |
-| `wasm` | WebAssembly · WAT interpreter | `scheme` | `packages/kernel-wasm` | none (pure TypeScript interpreter) |
+| `wasm` | WebAssembly · interpreter | `scheme` | `packages/kernel-wasm` | none (pure TypeScript interpreter) |
 | `sql` | SQL · query engine | `sql` | `packages/kernel-sql` | none (pure TypeScript engine) |
 | `matlab` | MATLAB · interpreter | `octave` | `packages/kernel-matlab` | none (pure TypeScript interpreter) |
 | `lua` | Lua · interpreter | `lua` | `packages/kernel-lua` | none (pure TypeScript interpreter) |
