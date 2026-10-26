@@ -132,7 +132,7 @@ export class Machine {
         break;
       case 'i32.add': bin((a, b) => a + b); break;
       case 'i32.sub': bin((a, b) => a - b); break;
-      case 'i32.mul': bin((a, b) => a * b); break;
+      case 'i32.mul': bin((a, b) => Math.imul(a, b)); break;
       case 'i32.div_s': {
         const b = pop();
         const a = pop();
@@ -290,6 +290,7 @@ export class Machine {
           break;
         }
         const args = this.valueStack.splice(this.valueStack.length - callee.paramCount, callee.paramCount);
+        if (this.frames.length >= 10000) throw new Trap('call stack exhausted');
         const next = frame.func.code[frame.pc];
         this.frames.push(this.makeFrame(callee, args, next?.line ?? ins.line));
         break;

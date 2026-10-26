@@ -57,6 +57,13 @@ describe('values wrap at 32 bits', () => {
     (call $print (i32.shl (i32.const 1) (i32.const 33)))`));
     expect(text).toBe('0\n2\n');
   });
+
+  it('mul keeps the exact low 32 bits beyond 2^53 where float64 rounds', async () => {
+    const { text } = await run(mod(`(call $print (i32.mul (i32.const 2147483647) (i32.const 2147483647)))
+    (call $print (i32.mul (i32.const 123456789) (i32.const 987654321)))`));
+    // a real engine gives 1 and -67153019; a float64 product rounds the second to -67153024
+    expect(text).toBe('1\n-67153019\n');
+  });
 });
 
 describe('division and shifts', () => {
@@ -446,9 +453,28 @@ describe('traps and the instruction budget', () => {
     expect(text).toBe('100000\n');
     expect(result.finished).toBe(true);
   });
+
+  it('runaway recursion traps with call stack exhausted, not the budget', async () => {
+    const { result } = await run('(module (func $f (call $f)) (func (export "main") (call $f)))');
+    expect(result.finished).toBe(false);
+    expect(result.error).toBe('call stack exhausted (line 1)');
+    expect(result.steps).toBeLessThan(BUDGET);
+  });
 });
 
 describe('the session contract', () => {
+
+  it('a failed load discards the previous program', async () => {
+    const s = wasmKernel.createSession();
+    await s.load(mod('(call $print (i32.const 7))'));
+    expect((await s.run()).finished).toBe(true);
+    const bad = await s.load('(module (func (export "main") (bogus)))');
+    expect(bad.ok).toBe(false);
+    const again = await s.run();
+    expect(again).toEqual({ finished: false, steps: 0, error: 'nothing is loaded' });
+    expect(s.state()).toEqual([]);
+  });
+
   it('step() runs exactly one instruction at a time', async () => {
     const s = wasmKernel.createSession();
     await s.load(mod('(call $print (i32.add (i32.const 20) (i32.const 22)))'));

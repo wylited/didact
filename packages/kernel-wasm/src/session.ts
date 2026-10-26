@@ -29,6 +29,8 @@ export class WasmSession implements Session {
     try {
       this.module = compile(src);
     } catch (e) {
+      this.module = null;
+      this.machine = null;
       if (e instanceof WatError) return { ok: false, line: e.line, message: e.message };
       return { ok: false, message: e instanceof Error ? e.message : String(e) };
     }
