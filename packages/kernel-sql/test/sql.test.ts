@@ -296,6 +296,20 @@ SELECT name FROM users WHERE COUNT(*) > 1;`);
     expect(r.error).toBe('line 3: COUNT(…) is not allowed in WHERE — aggregates belong in the select list or HAVING');
   });
 
+  it('SELECT * with GROUP BY is a clean line-mapped error, not a render crash', async () => {
+    const { r } = await run(`${USERS}
+SELECT * FROM users GROUP BY city;`);
+    expect(r.finished).toBe(false);
+    expect(r.error).toBe("line 3: '*' cannot be used with GROUP BY or aggregates — name the grouping columns instead");
+  });
+
+  it('SELECT * with HAVING aggregates is the same clean error', async () => {
+    const { r } = await run(`${USERS}
+SELECT * FROM users HAVING COUNT(*) > 1;`);
+    expect(r.finished).toBe(false);
+    expect(r.error).toBe("line 3: '*' cannot be used with GROUP BY or aggregates — name the grouping columns instead");
+  });
+
   it('aggregate over TEXT is an error naming the line', async () => {
     const { r } = await run(`${USERS}
 SELECT SUM(name) FROM users;`);

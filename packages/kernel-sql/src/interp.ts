@@ -748,6 +748,9 @@ function analyzeSelect(stmt: Extract<Stmt, { t: 'select' }>, db: Database): Sele
   const groupIdxs = stmt.groupBy === undefined ? [] : stmt.groupBy.map((g) => resolveCol(g, schema));
   const grouped = stmt.groupBy !== undefined || aggs.length > 0 || stmt.having !== undefined;
 
+  if (grouped && stmt.star) {
+    throw new SqlError(stmt.line, `'*' cannot be used with GROUP BY or aggregates — name the grouping columns instead`);
+  }
   if (grouped) {
     const check = (e: Expr): void => {
       walk(e, (node, inAgg) => {
