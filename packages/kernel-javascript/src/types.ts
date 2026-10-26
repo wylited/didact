@@ -78,6 +78,7 @@ export interface Kernel {
     | 'lua'
     | 'python'
     | 'scheme'
+    | 'sql'
     | 'plain';
   createSession(): Session;
 }

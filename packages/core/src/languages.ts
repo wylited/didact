@@ -11,6 +11,7 @@ import { c } from '@codemirror/legacy-modes/mode/clike';
 import { lua } from '@codemirror/legacy-modes/mode/lua';
 import { python } from '@codemirror/legacy-modes/mode/python';
 import { scheme } from '@codemirror/legacy-modes/mode/scheme';
+import { sql } from '@codemirror/legacy-modes/mode/sql';
 import type { Extension } from '@codemirror/state';
 import { intelAsm, mipsAsm, riscvAsm } from './asm';
 import type { Kernel } from './kernel';
@@ -25,6 +26,7 @@ const LANGUAGES: Record<NonNullable<Kernel['editorSyntax']>, Extension | null> =
   lua: StreamLanguage.define(lua),
   python: StreamLanguage.define(python),
   scheme: StreamLanguage.define(scheme),
+  sql: StreamLanguage.define(sql({})),
   plain: null,
 };
 
