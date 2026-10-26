@@ -1,0 +1,144 @@
+#+TITLE: Prolog: State the Facts, Watch It Search
+#+SUBTITLE: A pure-TypeScript SLD resolution machine you can single-step, one resolution at a time
+
+* Facts first, then ask questions
+
+A Prolog program is a /knowledge base/: a list of /clauses/. The simplest
+clause is a /fact/ — `likes(ada, prolog).` says just that: Ada likes
+Prolog. No functions, no assignment. Then you ask a /query/ — `?-
+likes(ada, X).` — where a capital-letter =X= is a /variable/, and the
+question means: /is there some X such that likes(ada, X)?/
+
+Run the block. Prolog answers =Yes.= and shows the binding it found: =X =
+prolog=. Watch the *Bindings* panel: the query's variables and what they
+are bound to right now. (There is a second answer hiding here — =X =
+lisp= — but a run stops at the /first/ solution. Calling run again makes
+Prolog backtrack and search for the next one; the last run answers =No.=
+when the search space is exhausted.)
+
+The kernel's unifier performs the /occurs check/: asking =?- X = f(X).=
+would build an infinite term, so it is refused with a clean, line-numbered
+error instead of a hang.
+
+#+NAME: facts-and-queries
+#+BEGIN_SRC prolog
+likes(ada, prolog).
+likes(ada, lisp).
+likes(bob, prolog).
+?- likes(ada, X).
+#+END_SRC
+
+#+RESULTS:
+: Yes.
+: X = prolog
+
+* Rules: conjunction on the Goal stack
+
+A /rule/ has a head and a body, joined by =:-= (read: "if"). The query
+below asks for Tom's grandchildren:
+
+: grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
+
+means: /X is a grandparent of Z if there is some Y with X a parent of Y
+and Y a parent of Z./ Step through the block and watch the *Goal stack*
+panel — the /resolvent/, the conjunction still to be proven, leftmost
+goal first. Resolving =grandparent(tom, G)= against the rule replaces it
+with the two body goals =parent(tom, Y)= and =parent(Y, G)=; the annotation
+shows which clause of a predicate the cursor is about to try. When the
+resolvent is empty, a solution has been found.
+
+#+NAME: rules-and-conjunction
+#+BEGIN_SRC prolog
+parent(tom, mary).
+parent(mary, ann).
+parent(mary, pat).
+grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
+?- grandparent(tom, G).
+#+END_SRC
+
+#+RESULTS:
+: Yes.
+: G = ann
+
+* member, defined by ourselves — recursion and findall
+
+=member/2= is /not/ built into this kernel. We define it the classic way:
+=X= is a member of a list if the list's head /is/ X (the anonymous =_= is
+a fresh variable at every occurrence), or if X is a member of the tail.
+The second clause is /recursive/: it shrinks the list by one and tries
+again.
+
+To see /all/ solutions at once we use =findall/3= — the workhorse builtin.
+It runs its second argument as a nested search, collects the first
+argument's value at /every/ solution — in clause order, exactly the order
+backtracking finds them — and unifies the third with the resulting list.
+Here =X = X= simply reports that the query's template variable was left
+unbound; the collected answers are in =Es=.
+
+#+NAME: member-by-recursion
+#+BEGIN_SRC prolog
+member(E, [E|_]).
+member(E, [_|T]) :- member(E, T).
+?- findall(E, member(E, [ada, bob, cy]), Es).
+#+END_SRC
+
+#+RESULTS:
+: Yes.
+: E = E
+: Es = [ada, bob, cy]
+
+* Backtracking: append in generation mode
+
+=append/3= is two facts-and-one-rule of pure structure, yet it works in
+three directions. Give it two lists and it concatenates; give it the
+result only and it /generates/ every decomposition. Each recursive step
+pushes an alternative onto the choice-point stack — watch the *Choice
+points* panel grow as =append/2= climbs through =[1, 2]=, then pop, one
+row at a time, as backtracking unwinds the search. =findall= collects all
+three decompositions in the order the search discovered them.
+
+#+NAME: append-generates
+#+BEGIN_SRC prolog
+append([], Ys, Ys).
+append([X|Xs], Ys, [X|Zs]) :- append(Xs, Ys, Zs).
+?- findall(p(Xs, Ys), append(Xs, Ys, [1, 2]), Ps).
+#+END_SRC
+
+#+RESULTS:
+: Yes.
+: Xs = Xs
+: Ys = Ys
+: Ps = [p([], [1, 2]), p([1], [2]), p([1, 2], [])]
+
+* Cut: pruning the search on purpose
+
+Backtracking explores /every/ alternative. Sometimes that is waste. The
+/cut/, written =!=, is a goal that always succeeds and commits Prolog to
+every choice made since its parent goal was invoked — the *Choice points*
+stack is truncated to that point, and the discarded alternatives are gone
+forever. Both programs below define max on two clauses; the only
+difference is the =!=.
+
+With the cut, =max3(5, 3, M)= commits to the first clause and there is
+exactly one solution. Without it, both clauses match and backtracking
+finds a /second/ answer — =3= — which is not the maximum of anything. The
+solution count is the story: =[5]= versus =[5, 3]=. A block may hold
+several queries; each is answered in turn.
+
+#+NAME: cut-prunes
+#+BEGIN_SRC prolog
+max3(X, Y, X) :- X >= Y, !.
+max3(_, Y, Y).
+maxu(X, Y, X) :- X >= Y.
+maxu(_, Y, Y).
+?- findall(M, max3(5, 3, M), WithCut).
+?- findall(M, maxu(5, 3, M), WithoutCut).
+#+END_SRC
+
+#+RESULTS:
+: Yes.
+: M = M
+: WithCut = [5]
+: Yes.
+: M = M
+: WithoutCut = [5, 3]
