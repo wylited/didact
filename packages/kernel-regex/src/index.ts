@@ -1,0 +1,11 @@
+export { regexKernel } from './kernel';
+export { RegexSession, renderVerdict, encodeText } from './session';
+export { RegexError, parsePattern } from './pattern';
+export type { Pattern, PatternNode, ClassItem } from './pattern';
+export { compilePattern, MAX_STATES } from './nfa';
+export type { Nfa, NfaState, NfaStateKind, NfaClass } from './nfa';
+export { RegexEngine, MAX_CHAR_STEPS, MAX_CLOSURE_VISITS, emptyTable } from './engine';
+export type { InputLine, LineResult, Table } from './engine';
+export { parseBlock, decodeInput } from './block';
+export type { BlockResult } from './block';
+export type { Kernel, Session, Panel, Field, ListingRow, LoadResult, RunResult } from './types';
