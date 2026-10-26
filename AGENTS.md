@@ -79,6 +79,9 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
 - Textbook-light visual language: white background, no border radius, no
   accent color. Atkinson Hyperlegible for text, a mono face for code
   (`packages/core/src/theme.css` owns the tokens).
+- Three-rail site chrome: left page-nav rail, center document, right rail
+  hosting the page TOC — which yields to the machine panel while a block's
+  panel is attached (`packages/core/src/site.ts`).
 - DOM hooks for tests/tools use `data-test` attributes
   (e.g. `data-test="results"` on results slots, `.lw-block-slot` mounts).
 - No UI framework; hand-written DOM in `packages/core/src/*.ts`.

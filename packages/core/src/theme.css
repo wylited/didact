@@ -1,6 +1,6 @@
 /* theme.css — "textbook, light" visual language (docs/design.md §Visual
    language). White background, near-black prose, hairline rules, zero
-   radius, no accent color, small-caps section labels, two-pane layout. */
+   radius, no accent color, small-caps section labels, three-rail layout. */
 
 :root {
   --lw-ink: #1a1a1a;
@@ -20,70 +20,122 @@
   box-sizing: border-box;
 }
 
-/* ---- layout: lesson left ~55%, panel right ~45%, sticky, stacks <900px */
+/* ---- layout: page-nav rail left ~200px, document center, right rail
+   ~320px (page TOC, or the machine panel while one is attached); rails
+   sticky + internally scrolling, hairline column separators; stacks
+   <900px with the page list above the document and the rail below it */
 
-.lw-site { background: var(--lw-paper); color: var(--lw-ink); }
-
-.lw-layout {
+.lw-site {
   display: grid;
-  grid-template-columns: 55fr 45fr;
-  gap: 2.5rem;
-  align-items: start;
+  grid-template-columns: 200px minmax(0, 1fr) 320px;
   max-width: 82rem;
   margin: 0 auto;
-  padding: 2rem 1.5rem 4rem;
+  background: var(--lw-paper);
+  color: var(--lw-ink);
 }
 
-.lw-doc-pane { min-width: 0; }
+.lw-doc-pane { min-width: 0; padding: 2rem 2.5rem 4rem; }
 
-.lw-panel-pane {
+.lw-page-nav {
   position: sticky;
-  top: 1.5rem;
-  max-height: calc(100vh - 3rem);
+  top: 0;
+  max-height: 100vh;
   overflow-y: auto;
-  min-width: 0;
-}
-
-@media (max-width: 899px) {
-  .lw-layout { grid-template-columns: 1fr; }
-  .lw-panel-pane {
-    position: static;
-    max-height: none;
-    border-top: 1px solid var(--lw-hairline);
-    padding-top: 1.5rem;
-  }
-}
-
-/* ---- nav: slim textbook page bar, aligned with the layout grid */
-
-.lw-nav {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1.5rem;
-  flex-wrap: wrap;
-  max-width: 82rem;
-  margin: 0 auto;
-  padding: 0.75rem 1.5rem;
-  border-bottom: 1px solid var(--lw-hairline);
+  border-right: 1px solid var(--lw-hairline);
+  padding: 1.75rem 1rem 2rem 1.5rem;
   font-family: var(--lw-serif);
 }
 
-.lw-nav-label { font-weight: 700; }
+.lw-rail {
+  position: sticky;
+  top: 0;
+  max-height: 100vh;
+  overflow-y: auto;
+  min-width: 0;
+  border-left: 1px solid var(--lw-hairline);
+}
 
-.lw-nav-pages { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+/* while a panel is attached it owns the rail; the TOC waits hidden */
+.lw-site.lw-panel-attached .lw-toc { display: none; }
+.lw-rail > .lw-panel { margin: 1.5rem; }
 
-.lw-nav-link { color: var(--lw-gray); text-decoration: none; }
+@media (max-width: 899px) {
+  .lw-site { display: block; }
+  .lw-page-nav {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    border-right: none;
+    border-bottom: 1px solid var(--lw-hairline);
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    padding: 0.75rem 1.5rem;
+  }
+  .lw-doc-pane { padding: 1.5rem 1.5rem 3rem; }
+  .lw-rail {
+    position: static;
+    max-height: none;
+    border-left: none;
+    border-top: 1px solid var(--lw-hairline);
+    padding: 1.5rem 1.5rem 3rem;
+  }
+  /* the TOC is a desktop affordance; an attached panel still shows */
+  .lw-toc { display: none; }
+}
+
+/* ---- page nav: vertical list of page links under a small-caps label */
+
+.lw-page-nav-label {
+  display: block;
+  font-variant: small-caps;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
+
+.lw-nav-link {
+  display: block;
+  color: var(--lw-gray);
+  text-decoration: none;
+  padding: 0.18rem 0;
+  line-height: 1.35;
+}
 .lw-nav-link:hover { color: var(--lw-ink); }
 .lw-nav-link.lw-nav-active { color: var(--lw-ink); text-decoration: underline; }
 
-/* ---- detached panel: no right pane, single column, ~70ch prose measure
-   (code blocks may extend wider) */
+/* ---- right-rail TOC: small, muted; active near-black + 2px left rule
+   (the panel's current-entry language, applied vertically) */
 
-.lw-site.lw-detached .lw-layout { grid-template-columns: minmax(0, 1fr); }
-.lw-site.lw-detached .lw-panel-pane { display: none; }
-.lw-site.lw-detached .lw-para { max-width: 70ch; }
-.lw-site.lw-detached .lw-list { max-width: 70ch; }
+.lw-toc {
+  padding: 1.75rem 1rem 2rem 0.9rem;
+  font-family: var(--lw-serif);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.lw-toc-label {
+  display: block;
+  font-variant: small-caps;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  margin-bottom: 0.6rem;
+}
+
+.lw-toc-item {
+  display: block;
+  color: var(--lw-gray);
+  text-decoration: none;
+  padding: 0.22rem 0.5rem 0.22rem 0.75rem;
+  border-left: 2px solid transparent; /* reserves the active rule's width */
+}
+.lw-toc-item:hover { color: var(--lw-ink); }
+.lw-toc-item.lw-toc-sub { padding-left: 1.75rem; }
+.lw-toc-item.lw-toc-active {
+  color: var(--lw-ink);
+  border-left-color: var(--lw-ink);
+}
 
 /* ---- document */
 

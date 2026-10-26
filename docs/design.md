@@ -46,16 +46,16 @@ adding kernels a matter of implementing one package against
    behavior.
 5. **Block Reset** restores that block's machine to its just-assembled
    state and clears its output; code and breakpoints are kept.
-6. **Under-the-hood panel** is a single right-hand pane attached to at
-   most ONE block at a time — the last block that ran/stepped. The panel
-   **starts detached**: at load no panel pane exists and the document
-   renders in the single centered column; the first run/step of any
-   block attaches it. Its header shows the attached block (`#name` or `Block N`) and kernel label, plus
-   a **detach** button. Detaching hides the panel entirely — the panel
-   element leaves the DOM and the layout collapses to a single centered
-   column (~70ch prose measure; code blocks may extend wider). Any later
-   run/step of any block re-attaches the panel and restores the two-pane
-   layout. Switching pages also detaches.
+6. **Under-the-hood panel** lives in the right rail, attached to at
+   most ONE block at a time — the last block that ran/stepped. The
+   panel **starts detached**: the rail hosts the active page's table of
+   contents instead, and the first run/step of any block attaches the
+   panel, which takes over the rail (the TOC hides while the site root
+   carries `lw-panel-attached`). Its header shows the attached block
+   (`#name` or `Block N`) and kernel label, plus a **detach** button.
+   Detaching — or switching pages — unmounts the panel and restores the
+   TOC; the layout never collapses and the document keeps its column
+   width throughout. Any later run/step of any block re-attaches.
 7. **Output.** Program output renders in the block's results slot
    (`#+RESULTS:` convention) and in the panel's console when attached.
    Trusted kernel-generated markup (`html` panels, e.g. rendered SVG)
@@ -69,17 +69,26 @@ adding kernels a matter of implementing one package against
    can't be read as a change.
 9. Machine state UI renders zeroed / idle states before first execution
    (visible once the panel is attached).
-10. **Pages.** One mount renders several org documents. A slim textbook
-    nav bar sits atop the site (hairline bottom border): site label left
-    (the first page's title), page titles as plain text links right —
-    active page underlined and near-black, others gray. Pages are
-    hash-routed: each page's fragment is `#/<slug>` (slug = kebab-cased
-    page title: lowercased, non-alphanumeric runs collapsed to single
-    '-'). On mount the site reads `location.hash` and shows that page
-    (unknown or missing hash → the first page); nav links are fragment
-    hrefs, and `hashchange` (nav click, back/forward) switches the
-    rendered document: the old page's blocks are disposed and the
-    panel detaches until the next run/step.
+10. **Pages.** One mount renders several org documents. A left page-nav
+    rail lists the page titles as plain text links under a small-caps
+    "Pages" label (hairline right border): active page underlined and
+    near-black, others gray. Pages are hash-routed: each page's
+    fragment is `#/<slug>` (slug = kebab-cased page title: lowercased,
+    non-alphanumeric runs collapsed to single '-'). On mount the site
+    reads `location.hash` and shows that page (unknown or missing hash →
+    the first page); nav links are fragment hrefs, and `hashchange`
+    (nav click, back/forward) switches the rendered document: the old
+    page's blocks are disposed and the panel detaches until the next
+    run/step.
+11. **Right-rail TOC.** The h2/h3 headings (org depth 1/2) of the
+    rendered page build the right rail's table of contents while no
+    panel is attached: one small gray link per heading (h3 indented),
+    ids `lw-h-<n>` in document order per page, and a scroll-spy keeping
+    exactly one active entry — near-black with a 2px left rule —
+    starting from the first entry and reset on page switch. Entries
+    smooth-scroll on click and never touch location.hash (fragments
+    name pages); a page without h2/h3 headings leaves the rail empty
+    until a panel attaches.
 
 ## Visual language — "textbook, light"
 
@@ -96,11 +105,14 @@ adding kernels a matter of implementing one package against
   section labels. Changed registers marked with a left rule + tint, not
   color-coded text. Status/error states: error text may use dark red
   `#8b1a1a`; success states stay black-on-white (no green).
-- Layout: two panes — lesson left (~55%), under-the-hood panel right (~45%),
-  sticky, internally scrolling; panes stack vertically < 900px. While the
-  panel is detached the document becomes a single centered column (~70ch
-  prose measure, code blocks may extend wider). Page-level chrome is
-  limited to the slim nav bar and the plain document title header.
+- Layout: three columns — page-nav rail left (~200px), document center,
+  right rail (~320px) hosting the page TOC or, while attached, the
+  under-the-hood panel; hairline column separators, rails sticky and
+  internally scrolling. The document keeps its width whether or not a
+  panel is attached. < 900px the page nav becomes a horizontal wrap
+  list above the document and the rail drops below it (TOC hidden on
+  narrow screens; an attached panel still shows). Page-level chrome is
+  limited to the two rails and the plain document title header.
 
 ## Org-mode compatibility (binding, unchanged from v0.1)
 
@@ -141,7 +153,9 @@ Per block: `block-run`, `block-step`, `block-reset`, `block-status`,
 `uth-title`, `uth-detach`; panel sections `uth-sections`; register cells
 `reg-<name>`; disassembly current row `current-instr`; console `output`;
 trusted markup sections `html-panel`. Site: `nav`, `nav-item` (one per
-page link), `page` (rendered document root). Vite `base: './'`.
+page link), `page` (rendered document root), `toc` (right-rail table of
+contents), `toc-item` (one per h2/h3 heading link; the active entry
+carries `lw-toc-active`). Vite `base: './'`.
 
 ## Non-goals
 
