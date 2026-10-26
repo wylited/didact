@@ -157,10 +157,10 @@ export class Machine {
         trailTop: this.ctx.trail.length, barrier: g.barrier, fromLine: g.fromLine,
         pred: ';/2 alternative', nclauses: 0,
       });
-      // The left disjunct's barrier sits ABOVE the just-pushed alternative:
-      // a cut inside the left disjunct prunes its own clause choices but
-      // must leave the right disjunct reachable (parent-goal semantics).
-      this.goals = [{ term: g.term.args[0]!, barrier: this.cps.length, fromLine: g.fromLine }, ...this.goals.slice(1)];
+      // The left disjunct inherits the disjunction goal's own barrier: a
+      // cut inside it prunes the ;/2 alternative too — cut commits the
+      // parent goal of the cut, and (A, !) ; B makes ;/2 that parent.
+      this.goals = [{ term: g.term.args[0]!, barrier: g.barrier, fromLine: g.fromLine }, ...this.goals.slice(1)];
       this.lastKind = 'builtin';
       return true;
     }
@@ -404,7 +404,8 @@ export function evalArith(t: Term, ctx: Ctx, line: number): number {
     }
     if (d.name === 'mod' && a.length === 2) {
       if (a[1] === 0) throw new PrologError('mod by zero', line);
-      return a[0]! - a[1]! * Math.trunc(a[0]! / a[1]!);
+      // mod is FLOORED (sign of divisor), unlike // which truncates.
+      return a[0]! - a[1]! * Math.floor(a[0]! / a[1]!);
     }
   }
   throw new PrologError(`arithmetic: ${renderTerm(d)} is not a number`, line);

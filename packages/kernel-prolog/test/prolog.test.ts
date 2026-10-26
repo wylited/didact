@@ -106,12 +106,44 @@ member2(X, [_|T]) :- member2(X, T).
 ?- findall(X, (first([a, b], X) ; member2(X, [z])), Ls).`);
     expect(text).toBe('Yes.\nX = X\nLs = [a, z]\n');
   });
+
+  it('cut inside a disjunct commits the ;/2 itself (SWI semantics)', async () => {
+    // SWI: ?- (X = 1, !, fail ; X = 2).  ->  No. The cut's parent is the
+    // whole disjunction, so failing after it cannot fall through to X = 2.
+    const { text, result } = await runOnce('?- (X = 1, !, fail ; X = 2).');
+    expect(text).toBe('No.\n');
+    expect(result).toMatchObject({ finished: true, exit: 'no' });
+  });
+
+  it('cut in the left disjunct removes the right disjunct from findall', async () => {
+    // SWI: ?- findall(X, ((X = 1, !) ; X = 2), L).  ->  L = [1].
+    const { text } = await runOnce('?- findall(X, ((X = 1, !) ; X = 2), L).');
+    expect(text).toBe('Yes.\nX = X\nL = [1]\n');
+  });
+
+  it('cut in the left disjunct still yields that disjunct\u2019s solution once', async () => {
+    // SWI: ?- (X = 1, ! ; X = 2).  ->  X = 1, and no second solution.
+    const { text } = await runOnce('?- (X = 1, ! ; X = 2).');
+    expect(text).toBe('Yes.\nX = 1\n');
+  });
+
+  it('cut then failure inside a disjunct empties findall', async () => {
+    // SWI: ?- findall(X, ((X = 1, !, fail) ; X = 2), L).  ->  L = [].
+    const { text } = await runOnce('?- findall(X, ((X = 1, !, fail) ; X = 2), L).');
+    expect(text).toBe('Yes.\nX = X\nL = []\n');
+  });
 });
 
 describe('arithmetic', () => {
   it('is evaluates, honoring * precedence and // and mod', async () => {
     const { text } = await runOnce('?- X is 3 + 4 * 2, Y is 17 // 5, Z is 17 mod 5.');
     expect(text).toBe('Yes.\nX = 11\nY = 3\nZ = 2\n');
+  });
+
+  it('mod is floored (sign of divisor); // still truncates', async () => {
+    // SWI: ?- (0-17) mod 5 =:= 3, (0-17) // 5 =:= -3.
+    const { text } = await runOnce('?- X is (0 - 17) mod 5, Y is (0 - 17) // 5.');
+    expect(text).toBe('Yes.\nX = 3\nY = -3\n');
   });
 
   it('= unifies without evaluating; =:= evaluates both sides', async () => {
@@ -193,6 +225,26 @@ describe('run/continue semantics', () => {
     const { text, result } = await runOnce(`a(1).\n?- a(2).`);
     expect(text).toBe('No.\n');
     expect(result).toMatchObject({ finished: true, exit: 'no' });
+  });
+
+  it('after exhaustion, further run()s stay exit no (sticky)', async () => {
+    // Two runs: the query fails, then run() again — still 'no', no bare
+    // consult flip back to 'yes'.
+    const s = await loaded(`a(1).\n?- a(2).`);
+    expect(await s.run()).toMatchObject({ finished: true, exit: 'no' });
+    expect(await s.run()).toMatchObject({ finished: true, exit: 'no' });
+    expect(consoleOf(s.state())).toBe('No.\n');
+  });
+
+  it('a four-run sequence: yes, yes, no, no', async () => {
+    const s = await loaded(`${MEMBER}?- member(X, [a, b]).`);
+    const exits: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const r = await s.run();
+      exits.push(r.exit ?? '?');
+    }
+    expect(exits).toEqual(['yes', 'yes', 'no', 'no']);
+    expect(consoleOf(s.state())).toBe('Yes.\nX = a\nYes.\nX = b\nNo.\n');
   });
 });
 

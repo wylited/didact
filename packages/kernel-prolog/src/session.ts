@@ -32,7 +32,8 @@ export class PrologSession implements Session {
   private program: Program | null = null;
   private machine: Machine | null = null;
   private queryIdx = 0;
-  private steps = 0;
+  /** Set when a query exhausts ('no'); run() after exhaustion stays 'no'. */
+  private finalExit: 'no' | null = null;
   /** Previous rendered value per variable — drives `changed` flags. */
   private prevBindings = new Map<string, string>();
   private readonly console: string[] = [];
@@ -51,6 +52,7 @@ export class PrologSession implements Session {
     this.queryIdx = 0;
     this.steps = 0;
     this.console.length = 0;
+    this.finalExit = null;
     this.prevBindings = new Map();
     return {
       ok: true,
@@ -64,7 +66,7 @@ export class PrologSession implements Session {
     if (this.machine === null && this.queryIdx >= this.program.queries.length) {
       // No queries at all, or every query already answered: a bare consult
       // counts as done.
-      return { finished: true, steps: this.steps, exit: 'yes' };
+      return { finished: true, steps: this.steps, exit: this.finalExit ?? 'yes' };
     }
     // Parked on a solution? This run() asks the CURRENT query for MORE
     // solutions: one redo step starts the backtrack; the next solution
@@ -82,6 +84,7 @@ export class PrologSession implements Session {
     for (;;) {
       if (this.machine === null) {
         if (this.queryIdx >= this.program.queries.length) {
+          this.finalExit = 'no';
           return { finished: true, steps: this.steps, exit: 'no' };
         }
         this.machine = new Machine(clauseTable(this.program.clauses), this.program.queries[this.queryIdx]!);
@@ -156,7 +159,7 @@ export class PrologSession implements Session {
   reset(): void {
     this.machine = null;
     this.queryIdx = 0;
-    this.steps = 0;
+    this.finalExit = null;
     this.console.length = 0;
     this.prevBindings = new Map();
   }
