@@ -10,6 +10,25 @@ Prolog, and Typst. No server, no runtime network beyond
 same-origin vendor assets: parsing, assembly, execution, and stepping are
 all client-side.
 
+## What it looks like
+
+Every block is real: assemble, step, and watch the machine. Below, the
+first x86-64 syscall block five steps in — registers that changed since the
+last step are tinted, the disassembly row about to execute is highlighted,
+and the console shows the bytes `write` just emitted.
+
+![x86-64: stepping the first syscall block](docs/screenshots/asm64-hello-step.png)
+
+The same right-rail panel hosts a different machine per kernel.
+
+| regex: Thompson NFA mid-match | SQL: one `SELECT` under the plan panel |
+| --- | --- |
+| ![two live NFA states highlighted as just-arrived, the input caret at `zza│bcaz` — no backtracking anywhere](docs/screenshots/regex-nfa-step.png) | ![plan counters — `Scan` read 5 rows, `Filter` passed 2, `Project` emitted 2, with the psql-style result below](docs/screenshots/sql-plan-step.png) |
+
+More demos — a loop mid-iteration, RISC-V, MIPS `mult`, the Lisp
+cons-heap, and MATLAB's column-major memory — live in
+[`docs/showcase/`](docs/showcase/).
+
 ## Quickstart
 
 ```sh
