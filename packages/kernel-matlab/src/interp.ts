@@ -23,6 +23,7 @@ import {
 export const RUN_BUDGET = 1_000_000;
 export const MAX_DEPTH = 512;
 
+
 // ─── values ────────────────────────────────────────────────────────────────
 
 /** A single-quoted string. Strings exist only as display text: they may be
@@ -78,6 +79,20 @@ export interface Frame {
   line: number;
 }
 
+/** The loop the interpreter is inside right now (innermost), for the
+ *  Columns panel: which instance of a `for`/`while` this statement is in.
+ *  Null at top level and after the loop returned. */
+export interface LoopState {
+  kind: 'for' | 'while';
+  /** The loop variable (`for v`) — a `while` has `condition` instead. */
+  over: string;
+  /** Iteration index, 1-based — a `while` counts its passes the same way. */
+  iter: number;
+  /** Columns in the walked matrix (a `while` has none). */
+  total: number | null;
+  line: number;
+}
+
 /** The most recent base-workspace write, for the Matrices panel. */
 export interface WriteMark {
   name: string;
@@ -103,6 +118,10 @@ export class Interpreter {
   output = '';
   /** Which base-workspace matrix the Matrices panel dissects. */
   lastWrite: WriteMark | null = null;
+  /** Innermost live loop, if any — the Columns panel's subject. */
+  loop: LoopState | null = null;
+  /** For a `for` loop: the matrix it walks (`for v = M` → M). */
+  loopSource: { name: string | null; rows: number; cols: number } | null = null;
 
   private program: Program;
   private funcs = new Map<string, FunctionDecl>();
@@ -217,15 +236,21 @@ export class Interpreter {
         return;
       }
       case 'While': {
-        for (;;) {
-          this.tick(s.line);
-          if (!condTruthy(yield* this.evalExpr(s.cond), s.line)) break;
-          try {
-            yield* this.execStmts(s.body);
-          } catch (e) {
-            if (e instanceof BreakSignal) break;
-            throw e;
+        const outer = this.loop;
+        try {
+          for (let iter = 1; ; iter++) {
+            this.loop = { kind: 'while', over: 'condition', iter, total: null, line: s.line };
+            this.tick(s.line);
+            if (!condTruthy(yield* this.evalExpr(s.cond), s.line)) break;
+            try {
+              yield* this.execStmts(s.body);
+            } catch (e) {
+              if (e instanceof BreakSignal) break;
+              throw e;
+            }
           }
+        } finally {
+          this.loop = outer;
         }
         return;
       }
@@ -236,16 +261,29 @@ export class Interpreter {
           s.line,
         );
         // MATLAB truth: `for` walks the COLUMNS of the matrix.
-        for (let j = 1; j <= over.cols; j++) {
-          this.tick(s.line);
-          const column = new Mat(over.rows, 1, over.data.slice((j - 1) * over.rows, j * over.rows));
-          this.frame().ws.set(s.v, column);
-          try {
-            yield* this.execStmts(s.body);
-          } catch (e) {
-            if (e instanceof BreakSignal) break;
-            throw e;
+        const outer = this.loop;
+        const outerSource = this.loopSource;
+        // Only a named matrix can be re-read from the workspace per pass;
+        // `for v = [1 2 3]` has no name, and the source is the walked one.
+        this.loopSource = s.expr.type === 'Name'
+          ? { name: s.expr.name, rows: over.rows, cols: over.cols }
+          : null;
+        try {
+          for (let j = 1; j <= over.cols; j++) {
+            this.loop = { kind: 'for', over: s.v, iter: j, total: over.cols, line: s.line };
+            this.tick(s.line);
+            const column = new Mat(over.rows, 1, over.data.slice((j - 1) * over.rows, j * over.rows));
+            this.frame().ws.set(s.v, column);
+            try {
+              yield* this.execStmts(s.body);
+            } catch (e) {
+              if (e instanceof BreakSignal) break;
+              throw e;
+            }
           }
+        } finally {
+          this.loop = outer;
+          this.loopSource = outerSource;
         }
         return;
       }

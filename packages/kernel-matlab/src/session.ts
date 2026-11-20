@@ -18,6 +18,7 @@ import { LexError } from './lexer';
 import {
   Interpreter, RuntimeErr, BudgetErr, type YieldInfo, type WriteMark,
 } from './interp';
+import { columnsPanel } from './columns-panel';
 import { fmtNum, hex64, preview } from './matrix';
 import type { Field, ListingRow, LoadResult, Panel, RunResult, Session } from './types';
 import type { Program } from './parser';
@@ -184,6 +185,7 @@ export class MatlabSession implements Session {
     }
     return [
       workspacePanel(interp, this.prevWs),
+      columnsPanelAdapter(interp),
       matricesPanel(interp),
       stackPanel(interp),
       { kind: 'console', id: 'console', title: 'console', text: interp.output },
@@ -208,6 +210,11 @@ export class MatlabSession implements Session {
 }
 
 // ─── panel builders ────────────────────────────────────────────────────────
+
+/** Columns panel for the live interpreter: the loop plus the matrix it walks. */
+function columnsPanelAdapter(interp: Interpreter): Panel {
+  return columnsPanel({ loop: interp.loop, walked: interp.loopSource });
+}
 
 function workspacePanel(interp: Interpreter, prev: Map<string, string>): Panel {
   const fields: Field[] = [];

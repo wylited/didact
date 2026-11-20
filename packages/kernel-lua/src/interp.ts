@@ -34,6 +34,20 @@ export interface Frame {
   line: number;
 }
 
+/** One name the block assigned, for the Values panel (state-panel.ts). */
+export interface Assignment {
+  name: string;
+  value: LuaValue;
+  /** Declared with `local` (anywhere in the block) vs. written as a global. */
+  local: boolean;
+  /** The most recent write was `= nil` — the name now reads nil. */
+  erased: boolean;
+  /** 1-based line of the most recent write. */
+  line: number;
+  /** Block-ordered sequence number of the most recent write. */
+  seq: number;
+}
+
 export class RuntimeErr extends LuaError {}
 
 export class Interpreter {
@@ -78,6 +92,24 @@ export class Interpreter {
 
   isDone(): boolean { return this.done; }
   private done = false;
+
+  /** Every name the block has assigned, in first-assignment order. */
+  readonly assignments = new Map<string, Assignment>();
+  /** Block-ordered sequence number of the most recent assignment anywhere. */
+  private assignSeq = 0;
+
+  /** Note what an assignment just did to `name` (the Values panel). */
+  private record(name: string, v: LuaValue, local: boolean, line: number): void {
+    const prev = this.assignments.get(name);
+    this.assignments.set(name, {
+      name,
+      value: v,
+      local: prev?.local === true || local,
+      erased: v === null,
+      line,
+      seq: ++this.assignSeq,
+    });
+  }
 
   // ─── statements ──────────────────────────────────────────────────────────
 
@@ -132,7 +164,10 @@ export class Interpreter {
         const fresh = new Env(env);
         const initEnv = st.fn === true ? (fresh.vars.set(st.names[0]!, null), fresh) : env;
         const vals = yield* this.evalList(st.exps, initEnv);
-        st.names.forEach((n, i) => { fresh.vars.set(n, vals[i] ?? null); });
+        st.names.forEach((n, i) => {
+          fresh.vars.set(n, vals[i] ?? null);
+          this.record(n, vals[i] ?? null, true, st.line);
+        });
         return { kind: 'scope', env: fresh };
       }
       case 'assign': {
@@ -142,7 +177,11 @@ export class Interpreter {
           const tg = st.targets[i]!;
           const v = vals[i] ?? null;
           if (tg.kind === 'name') {
+            const wasLocal = env.frameOf(tg.name) !== null;
             this.assignName(tg.name, v, env);
+            // assignName falls back to _G when no local is bound; `wasLocal`
+            // is exactly that test, taken before the write.
+            this.record(tg.name, v, wasLocal, tg.line);
           } else {
             const obj = yield* this.eval(tg.obj, env);
             const key = yield* this.eval(tg.key, env);

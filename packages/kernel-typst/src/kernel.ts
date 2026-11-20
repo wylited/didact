@@ -5,7 +5,7 @@ import { TypstSession } from './session';
 export const typstKernel: Kernel = {
   id: 'typst',
   label: 'Typst · wasm',
-  editorSyntax: 'plain',
+  editorSyntax: 'typst',
   features: { stepping: false },
   createSession: () => new TypstSession(),
 };

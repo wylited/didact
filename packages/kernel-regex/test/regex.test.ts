@@ -39,7 +39,7 @@ describe('registration and load', () => {
   it('declares the org id, label, syntax, and features', () => {
     expect(regexKernel.id).toBe('regex');
     expect(regexKernel.label).toBe('Regex · NFA engine');
-    expect(regexKernel.editorSyntax).toBe('plain');
+    expect(regexKernel.editorSyntax).toBe('regexp');
     expect(regexKernel.features).toEqual({ breakpoints: true, stepping: true });
   });
 

@@ -7,6 +7,11 @@
 //                   would try next), most recent first, head marked.
 //   Bindings      — the query's named variables → bound terms, `changed`
 //                   marking whatever the latest step created or undid.
+//   Search        — what the last step *did* (resolve / mismatch /
+//                   backtrack / cut / builtin / solution / no), the clause
+//                   line the cursor tries next, and the depth of the
+//                   choice-point stack: the transition that x86 shows as
+//                   its flags update.
 //   Output        — write/nl text plus the Yes./bindings/No. reports.
 //
 // run() semantics: the FIRST run() of a block answers every query once —
@@ -16,7 +21,7 @@
 // the search space is exhausted the block is finished with exit 'no'.
 
 import { Machine, clauseTable } from './engine';
-import type { Status } from './engine';
+import type { Status, StepKind } from './engine';
 import { parseProgram, type Program } from './parse';
 import type { Field, ListingRow, LoadResult, Panel, RunResult, Session } from './types';
 import { predOf, renderResolved, renderTerm } from './terms';
@@ -37,6 +42,9 @@ export class PrologSession implements Session {
   private finalExit: 'no' | null = null;
   /** Previous rendered value per variable — drives `changed` flags. */
   private prevBindings = new Map<string, string>();
+  /** The last run() backtracked every query to exhaustion: the machine is
+   *  gone, but its final trace is still the Search panel's story. */
+  private lastRunExhausted = false;
   private readonly console: string[] = [];
 
   async load(src: string): Promise<LoadResult> {
@@ -50,6 +58,7 @@ export class PrologSession implements Session {
     }
     this.program = parsed;
     this.machine = null;
+    this.lastRunExhausted = false;
     this.queryIdx = 0;
     this.steps = 0;
     this.console.length = 0;
@@ -86,8 +95,10 @@ export class PrologSession implements Session {
       if (this.machine === null) {
         if (this.queryIdx >= this.program.queries.length) {
           this.finalExit = 'no';
+          this.lastRunExhausted = true; // the Search panel keeps the final trace
           return { finished: true, steps: this.steps, exit: 'no' };
         }
+        this.lastRunExhausted = false;
         this.machine = new Machine(clauseTable(this.program.clauses), this.program.queries[this.queryIdx]!);
         this.prevBindings = new Map();
       }
@@ -159,6 +170,7 @@ export class PrologSession implements Session {
 
   reset(): void {
     this.machine = null;
+    this.lastRunExhausted = false;
     this.queryIdx = 0;
     this.finalExit = null;
     this.console.length = 0;
@@ -166,11 +178,15 @@ export class PrologSession implements Session {
   }
 
   state(): Panel[] {
-    const m = this.machine;
+    // Loaded but not started: the Search panel says so instead of vanishing.
+    const m = this.machine ?? (this.program !== null && !this.lastRunExhausted
+      ? new Machine(clauseTable(this.program.clauses), this.program.queries[this.queryIdx]!)
+      : null);
     if (m === null) {
-      return [{ kind: 'console', id: 'output', title: 'Output', text: this.console.join('') }];
+      const output: Panel = { kind: 'console', id: 'output', title: 'Output', text: this.console.join('') };
+      return this.lastRunExhausted ? [exhaustedPanel(), output] : [output];
     }
-    return [this.goalStack(m), this.choicePoints(m), this.bindings(m), {
+    return [this.goalStack(m), this.choicePoints(m), this.bindings(m), this.searchPanel(m), {
       kind: 'console',
       id: 'output',
       title: 'Output',
@@ -237,6 +253,30 @@ export class PrologSession implements Session {
     };
   }
 
+  /** The machine's last resolution step: what the engine just *did*. */
+  private searchPanel(m: Machine): Panel {
+    const step = describeStep(m.lastKind);
+    const fields: Field[] = [{ key: 'last step', value: step.what, tip: step.tip }];
+    if (m.nextClauseLine() !== null || m.attemptInfo() !== null) {
+      // The clause the cursor would try next is the line a breakpoint there
+      // would stop *before* — the one line that matters for this goal.
+      const line = m.nextClauseLine();
+      if (line !== null) fields.push({ key: 'next clause', value: `line ${line}`, tip: 'the clause the cursor tries on the next step' });
+    }
+    fields.push({
+      key: 'choice points',
+      value: String(m.cps.length),
+      tip: 'open alternatives on the stack — 0 means the next failure backtracks to "No."',
+    });
+    return {
+      kind: 'fields',
+      id: 'search',
+      title: 'Search',
+      tip: 'One row per engine transition: resolve, mismatch, backtrack, cut. Watch it flip between resolve and mismatch before it settles.',
+      fields,
+    };
+  }
+
   /** The query's named variables with their current bindings. */
   private bindings(m: Machine): Panel {
     const fields: Field[] = m.queryVars.map((v) => {
@@ -253,4 +293,37 @@ export class PrologSession implements Session {
       fields,
     };
   }
+}
+
+// One row of the Search panel per StepKind the engine records on the way
+// through (engine.ts sets lastKind wherever it moves the machine).
+const STEP_TEXT: Record<StepKind, { what: string; tip: string }> = {
+  resolve: { what: 'resolve', tip: 'unified the goal with its next clause, pushed alternatives, replaced the goal by the body' },
+  mismatch: { what: 'mismatch', tip: 'the clause did not unify — undo its bindings, advance the clause cursor' },
+  backtrack: { what: 'backtrack', tip: 'the current path failed — popped the newest choice point and restored its bindings' },
+  redo: { what: 'redo', tip: 'another solution was requested — backtracking toward the next one' },
+  cut: { what: 'cut', tip: 'pruned every alternative created since the clause was selected' },
+  builtin: { what: 'builtin', tip: 'a builtin /2, is/2, write/1 … ran: no clause lookup' },
+  'builtin-fail': { what: 'builtin failed', tip: 'the builtin held false and the search backtracked from it' },
+  solution: { what: 'solution', tip: 'the resolvent emptied — every goal is proven under the current substitution' },
+  no: { what: 'no', tip: 'no clause and no choice point left — the search is exhausted' },
+};
+
+/** The Search panel's reading of the machine's last transition. */
+export function describeStep(kind: StepKind | null): { what: string; tip: string } {
+  return kind === null ? { what: '—', tip: 'no step taken yet' } : STEP_TEXT[kind];
+}
+
+/** After the search exhausted: the machine is gone, its verdict is not. */
+function exhaustedPanel(): Panel {
+  return {
+    kind: 'fields',
+    id: 'search',
+    title: 'Search',
+    tip: 'The run ended with "No." — every query was answered, and the last one had nothing left to backtrack.',
+    fields: [
+      { key: 'last step', value: 'no', tip: STEP_TEXT.no.tip },
+      { key: 'choice points', value: '0', tip: 'an empty choice-point stack is exactly why "No." is final' },
+    ],
+  };
 }

@@ -76,8 +76,11 @@ export interface Kernel {
     | 'lua'
     | 'octave'
     | 'python'
+    | 'regexp'
     | 'scheme'
     | 'sql'
+    | 'typst'
+    | 'wat'
     | 'plain';
   createSession(): Session;
 }

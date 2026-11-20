@@ -52,15 +52,22 @@ Open the printed URL. (If pnpm blocks esbuild's install script, run
 | `c` | C · clang wasm | `c` | `packages/kernel-c` | `public/vendor-c/` (~105 MB, clang → wasm32-wasi) |
 | `cpp` | C++ · clang wasm | `cpp` | `packages/kernel-cpp` | shares `public/vendor-c/` with `c` (same clang engine) |
 | `python` | Python · Pyodide | `python` | `packages/kernel-python` | `public/vendor-python/` (~13 MB, CPython 3.14 wasm) |
-| `wasm` | WebAssembly · interpreter | `scheme` | `packages/kernel-wasm` | none (pure TypeScript interpreter) |
+| `wasm` | WebAssembly · interpreter | `wat` | `packages/kernel-wasm` | none (pure TypeScript interpreter) |
 | `sql` | SQL · query engine | `sql` | `packages/kernel-sql` | none (pure TypeScript engine) |
 | `matlab` | MATLAB · interpreter | `octave` | `packages/kernel-matlab` | none (pure TypeScript interpreter) |
 | `lua` | Lua · interpreter | `lua` | `packages/kernel-lua` | none (pure TypeScript interpreter) |
 | `javascript` | JavaScript · interpreter | `javascript` | `packages/kernel-javascript` | none (pure TypeScript interpreter) |
-| `regex` | Regex · NFA engine | `plain` | `packages/kernel-regex` | none (pure TypeScript Thompson NFA) |
+| `regex` | Regex · NFA engine | `regexp` | `packages/kernel-regex` | none (pure TypeScript Thompson NFA) |
 | `lisp` | Lisp · interpreter | `scheme` | `packages/kernel-lisp` | none (pure TypeScript interpreter) |
 | `prolog` | Prolog · interpreter | `plain` | `packages/kernel-prolog` | none (pure TypeScript SLD engine) |
-| `typst` | Typst · wasm | `plain` | `packages/kernel-typst` | `public/vendor-typst/` (~25 MB, compiler wasm + fonts) |
+| `typst` | Typst · wasm | `typst` | `packages/kernel-typst` | `public/vendor-typst/` (~25 MB, compiler wasm + fonts) |
+
+Syntax modes: each `editorSyntax` id maps to a CodeMirror mode in
+`packages/core/src/languages.ts` (assembly dialects in `asm.ts`, the
+sql/regexp/WAT/Typst modes in `packages/core/src/modes.ts`, the rest from
+`@codemirror/legacy-modes` or Lezer grammars); `plain` means no mode yet —
+`prolog` is the only kernel still there. The full matrix, with each
+kernel's panel depth, is in [`docs/languages.md`](docs/languages.md).
 
 Engine payloads are npm dependencies pinned by `pnpm-lock.yaml`;
 `scripts/sync-vendors.mjs` copies them into `public/` at build time — the

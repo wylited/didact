@@ -5,7 +5,9 @@ export { parse, ParseError } from './parser';
 export {
   BUDGET, Interpreter, RuntimeErr,
 } from './interp';
-export type { YieldInfo, Frame } from './interp';
+export type { YieldInfo, Frame, Assignment } from './interp';
+export { valuesPanel, assignmentNote, scopeNote } from './state-panel';
+export type { ValuedName } from './state-panel';
 export {
   Closure, LuaError, LuaFloat, LuaInt, Table,
   formatFloat, isNum, numOf, toStr, truthy, typeName,

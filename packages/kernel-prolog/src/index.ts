@@ -1,5 +1,5 @@
 export { prologKernel } from './kernel';
-export { PrologSession } from './session';
+export { PrologSession, describeStep } from './session';
 export { Machine, BUDGET, clauseTable, evalArith } from './engine';
 export type { Status, StepKind, Goal } from './engine';
 export { parseProgram, tokenize, flattenConj } from './parse';

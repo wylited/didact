@@ -1,7 +1,13 @@
 // session.ts — the Kernel/Session contract over the Lua interpreter.
 // Panels tell the under-the-hood story:
+//   Values           — every name the block assigned, in first-assignment
+//                      order, with the type tag assignment gave it (integer
+//                      vs float, local vs _G key, assigned-nil) — the
+//                      dynamic-typing story a static kernel shows as a
+//                      declaration; `changed` marks the latest write;
 //   Locals / Globals — the current frame's bindings and the _G table,
-//                      `changed` marks what the last step created or rewrote;
+//                      the libraries collapsed, `changed` marks what the
+//                      last step created or rewrote;
 //   Tables           — the heap view: every table ever allocated, array part
 //                      first ([1]=…), then hash rows (key=…), new/changed
 //                      rows marked;
@@ -9,6 +15,7 @@
 //   Console          — print output.
 
 import { Interpreter, type YieldInfo } from './interp';
+import { valuesPanel, type ValuedName } from './state-panel';
 import { LexError, ParseError, parse } from './parser';
 import {
   LuaError, Table, toStr, typeName,
@@ -27,6 +34,8 @@ export class LuaSession implements Session {
   /** Per-table entry snapshots: tableId -> (key -> display). */
   private prevTables = new Map<number, Map<Key, string>>();
   private prevTableIds = new Set<number>();
+  /** Value display the Values panel's `changed` flags diff against. */
+  private prevValues = new Map<string, string>();
   /** A crashed run keeps reporting its error until reset() (house pattern). */
   private runError: string | null = null;
 
@@ -54,6 +63,7 @@ export class LuaSession implements Session {
     this.prevGlobals = new Map();
     this.prevTables = new Map();
     this.prevTableIds = new Set();
+    this.prevValues = new Map();
     this.runError = null;
   }
 
@@ -174,11 +184,39 @@ export class LuaSession implements Session {
       return [{ kind: 'console', id: 'lua-console', title: 'Console', text: '' }];
     }
     return [
+      this.valuesPanel(m),
       ...this.scopePanels(m),
       this.tablesPanel(m),
       this.stackPanel(m),
       { kind: 'console', id: 'lua-console', title: 'Console', text: m.out },
     ];
+  }
+
+  /** Every assigned name, newest write's `changed` flag, block order. */
+  private valuesPanel(m: Interpreter): Panel {
+    const names: ValuedName[] = [...m.assignments.values()]
+      .sort((a, b) => a.seq - b.seq)
+      .map((a) => {
+        const prev = this.prevValues.get(a.name);
+        const value = toStr(a.value);
+        this.prevValues.set(a.name, value);
+        return {
+          name: a.name,
+          value,
+          type: typeName(a.value),
+          local: a.local,
+          erased: a.erased,
+          // a global is always in scope; a local only while a frame holds it
+          live: !a.local || this.inScope(a.name),
+          changed: prev !== value,
+        };
+      });
+    return valuesPanel(names);
+  }
+
+  /** Is `name` bound in one of the live frames' scopes right now? */
+  private inScope(name: string): boolean {
+    return (this.interp?.frames ?? []).some((f) => f.env.frameOf(name) !== null);
   }
 
   private scopePanels(m: Interpreter): Panel[] {

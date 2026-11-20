@@ -8,7 +8,7 @@ import { WasmSession } from './session';
 export const wasmKernel: Kernel = {
   id: 'wasm',
   label: 'WebAssembly · interpreter',
-  editorSyntax: 'scheme',
+  editorSyntax: 'wat',
   features: { breakpoints: true, stepping: true },
   createSession: () => new WasmSession(),
 };

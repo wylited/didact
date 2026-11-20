@@ -8,7 +8,9 @@ export {
   Interpreter, RuntimeErr, BudgetErr, isStr, isBuiltinName,
   RUN_BUDGET, MAX_DEPTH,
 } from './interp';
-export type { Value, StrVal, YieldInfo, Frame, WriteMark } from './interp';
+export type { Value, StrVal, YieldInfo, Frame, WriteMark, LoopState } from './interp';
+export { columnsPanel, columnNote, COLUMN_TRUTH } from './columns-panel';
+export type { ColumnsInput } from './columns-panel';
 export {
   Mat, MatErr, fmtNum, fmtRows, preview, hex64, transpose, gather,
   gaussSolve, det as matDet, inv as matInv, MAX_ELEMS,

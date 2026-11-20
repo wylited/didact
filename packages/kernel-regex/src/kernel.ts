@@ -9,7 +9,7 @@ import { RegexSession } from './session';
 export const regexKernel: Kernel = {
   id: 'regex',
   label: 'Regex · NFA engine',
-  editorSyntax: 'plain',
+  editorSyntax: 'regexp',
   features: { breakpoints: true, stepping: true },
   createSession: () => new RegexSession(),
 };
