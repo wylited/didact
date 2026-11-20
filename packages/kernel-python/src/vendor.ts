@@ -89,3 +89,16 @@ export function serialized<T>(job: () => Promise<T>): Promise<T> {
   queue = next.then(() => undefined, () => undefined);
   return next;
 }
+
+/**
+ * Serialize one *live* job: unlike serialized(), the job holds the engine
+ * across its awaits (statements, macrotask yields) until it settles, so no
+ * other session can interleave with a run that is still streaming snapshots.
+ * The returned tick() drains the queue while the job is in flight; the
+ * session awaits a macrotask between statements and then calls tick().
+ */
+export function serializedLive<T>(job: () => Promise<T>): Promise<T> {
+  const next = queue.then(job, job);
+  queue = next.then(() => undefined, () => undefined);
+  return next;
+}

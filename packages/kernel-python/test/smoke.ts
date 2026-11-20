@@ -8,6 +8,7 @@
 // Excluded from vitest (include is **/*.test.ts) on purpose: booting
 // Pyodide takes seconds, not milliseconds.
 
+import { Window } from 'happy-dom';
 import { loadPyodide, type PyodideInterface } from 'pyodide';
 import { pythonKernel } from '../src/kernel';
 import { PythonSession } from '../src/session';
@@ -19,15 +20,40 @@ function assert(cond: unknown, msg: string): asserts cond {
 }
 
 function consoleText(s: PythonSession): string {
+  // by id: the panels also carry non-program sections, and only this one is
+  // the block's own stdout/stderr
   const con = s.state().find(
-    (p): p is Extract<Panel, { kind: 'console' }> => p.kind === 'console');
+    (p): p is Extract<Panel, { kind: 'console' }> => p.id === 'py-console');
   return con?.text ?? '';
 }
 
-function fieldsOf(s: PythonSession): Field[] {
+function fieldsOf(s: PythonSession, id = 'py-vars'): Field[] {
   const panel = s.state().find(
-    (p): p is Extract<Panel, { kind: 'fields' }> => p.kind === 'fields');
+    (p): p is Extract<Panel, { kind: 'fields' }> => p.kind === 'fields' && p.id === id);
   return panel?.fields ?? [];
+}
+
+/** The trace panel's rows, flattened from the html section the panel
+ *  host receives (the session never exposes the raw hook payload). */
+function traceTable(s: PythonSession): HTMLElement {
+  // a throwaway DOM parses the trusted html section (bun has no document)
+  const win = new Window();
+  const panel = s.state().find((p) => p.kind === 'html' && /trace/i.test(p.title)) as
+    | Extract<Panel, { kind: 'html' }>
+    | undefined;
+  if (panel === undefined) throw new Error('smoke FAIL: no Trace section in state()');
+  const host = win.document.createElement('div');
+  host.innerHTML = panel.html;
+  return host as unknown as HTMLElement;
+}
+
+/** [line, hits] for every row of the trace table. */
+function traceRows(s: PythonSession): { line: number; hits: number }[] {
+  const host = traceTable(s);
+  return [...host.querySelectorAll('tr[data-line]')].map((tr) => ({
+    line: Number(tr.getAttribute('data-line')),
+    hits: Number(tr.getAttribute('data-hits') ?? '0'),
+  }));
 }
 
 function fieldMap(s: PythonSession): Map<string, Field> {
@@ -52,7 +78,9 @@ async function main(): Promise<void> {
     'run finished, steps 0, no exit/error');
   assert(consoleText(s1) === 'Hello, Python!\n2 + 3 * 4 = 14\n',
     `stdout captured exactly (got ${JSON.stringify(consoleText(s1))})`);
-  assert(fieldsOf(s1).length === 0, 'no globals defined by hello block');
+  // the under-the-hood trace: both print statements ran, once each
+  assert(traceRows(s1).map((r) => r.line).join(',') === '1,2',
+    'trace lists the two executed lines');
 
   // 2. loop + list: variables panel shows n and squares with types.
   const s2 = makeSession();
@@ -61,10 +89,16 @@ async function main(): Promise<void> {
   assert(r2.finished, 'loop block finished');
   assert(consoleText(s2) === 'squares: [1, 4, 9, 16, 25]\n', 'loop stdout');
   const v2 = fieldMap(s2);
-  assert(v2.get('n')?.value === '5' && v2.get('n')?.sub === 'int' && v2.get('n')?.changed === true,
-    'field n = 5 (int, changed)');
-  assert(v2.get('squares')?.value === '[1, 4, 9, 16, 25]' && v2.get('squares')?.sub === 'list',
-    'field squares = [1, 4, 9, 16, 25] (list)');
+  assert(v2.get('n')?.value === '5' && v2.get('n')?.changed === true,
+    'field n = 5 (changed)');
+  assert(v2.get('n')?.sub?.includes('int') === true, `n is an int (${v2.get('n')?.sub})`);
+  assert(v2.get('squares')?.value.startsWith('[1, 4, 9, 16, 25]') === true,
+    `field squares = [1, 4, 9, 16, 25] (got ${v2.get('squares')?.value})`);
+  assert(v2.get('squares')?.sub?.includes('list') === true && v2.get('squares')?.sub?.includes('len 5') === true,
+    `squares is a list of 5 (${v2.get('squares')?.sub})`);
+  // the loop at line 2 ran 5 times — the trace shows the header re-read
+  const header = traceRows(s2).find((r) => r.line === 2);
+  assert(header?.hits === 6, `loop header hit 6 times (${header?.hits})`);
 
   // 3. fib: function global, deterministic output.
   const s3 = makeSession();
@@ -72,17 +106,23 @@ async function main(): Promise<void> {
   const r3 = await s3.run();
   assert(r3.finished && consoleText(s3) === 'fib(10) = 55\n', 'fib(10) = 55');
   const v3 = fieldMap(s3);
-  assert(v3.size === 1 && v3.get('fib')?.sub === 'function'
+  assert(v3.get('fib')?.sub?.includes('function') === true
     && (v3.get('fib')?.value ?? '').startsWith('<function fib at'),
-    'field fib (function); underscore loop var filtered');
+    `field fib is a function (${JSON.stringify(v3.get('fib'))})`);
+  // the grouped panel carries section headers; no loop-local or dunder
+  // name may appear as a variable row
+  assert(!['a', 'b', '_', 'n'].some((k) => v3.has(k)), 'loop locals are not module variables');
 
-  // 4. long repr truncated to ~40 chars.
+  // 4. long strings keep their info: a preview, not a bare ellipsis.
   const s4 = makeSession();
-  await s4.load('words = "abcdefghijklmnopqrstuvwxyz" * 4\n');
+  // 234 characters: past the helper's 200-char repr cap, so the row must
+  // carry a truncated preview (one '…') and the real length beside it
+  await s4.load('words = "abcdefghijklmnopqrstuvwxyz" * 9\n');
   await s4.run();
   const w = fieldMap(s4).get('words');
-  assert(w !== undefined && w.value.length === 40 && w.value.endsWith('…') && w.sub === 'str',
-    `long repr truncated to 40 chars with ellipsis (got ${JSON.stringify(w?.value)})`);
+  assert(w !== undefined && w.value.startsWith("'abcdefghij") && w.value.endsWith('…')
+    && w.value.length <= 200 && w.sub?.includes('str') === true && w.sub.includes('len 234'),
+    `long str keeps a preview and its length (${JSON.stringify(w)})`);
 
   // 5. syntax error: CPython's exact line.
   const s5 = makeSession();
@@ -100,6 +140,15 @@ async function main(): Promise<void> {
   assert(out6.includes('Traceback (most recent call last)') && out6.includes('lesson.py') && out6.includes('1 / 0'),
     'console gets the traceback with source lines');
   assert(out6.split('ZeroDivisionError').length === 2, 'traceback appears exactly once');
+  // the failure story: the traceback listing marks the failing frame,
+  // and the trace table marks the failing line
+  const tb = s6.state().find((p) => p.kind === 'listing' && /traceback/i.test(p.title)) as
+    | Extract<Panel, { kind: 'listing' }>
+    | undefined;
+  assert(tb?.rows.some((r) => r.current === true && r.line === 2) === true,
+    'traceback marks the failing frame (line 2)');
+  assert(traceTable(s6).querySelector('tr.py-failed') !== null,
+    'trace marks the failing line');
 
   // 7. fresh namespace: another block cannot see s2's globals.
   const l7 = await s1.load('print(squares)\n');

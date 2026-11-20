@@ -1,106 +1,111 @@
 // Session: one executable python block over the shared Pyodide engine.
 //
-// Semantics:
+// Semantics kept from the original kernel:
 //  - Fresh namespace per session: each block execs in its own dict passed
 //    as `globals`, so state never carries between blocks — and load()
 //    recreates the dict, so re-running a block starts from an empty slate.
 //  - load(src) is a compile() gate: CPython's own SyntaxError, with
 //    CPython's own line number, is surfaced verbatim. Engine-boot failures
 //    surface as line-0 load failures.
-//  - run() execs to completion (Pyodide has no notion of single-statement
-//    steps, so features.stepping is false and step() never runs). stdout
-//    and stderr are captured via setStdout/setStderr `write` handlers —
+//  - stdout/stderr are captured via setStdout/setStderr `write` handlers —
 //    every chunk verbatim, in write order — then flushed and reset at run
 //    end, so an unflushed tail neither vanishes nor leaks into the next
-//    session's console over the shared engine. The variables panel diffs
-//    the namespace before/after:
-//    globals defined or changed by the run, keyed by name, value =
-//    repr(value) truncated, sub = type name; dunder/underscore names and
-//    modules are skipped.
+//    session's console over the shared engine.
 //  - An uncaught exception finishes the run with error = "Type: message"
 //    (the traceback's last line) and appends the full traceback to the
 //    console panel.
+//
+// Added by the x-ray (the engine side is toolkit.py):
+//  - the block is compiled once, whole; a LINE hook counts every executed
+//    line of its module and is always removed at run end (failure included);
+//  - run() execs the block once, as one engine job, under the line hook:
+//    hit counts, loop/branch flow, the frames and the grouped namespace all
+//    come back in one snapshot when it finishes. There is NO per-statement
+//    heartbeat: Pyodide cannot pause mid-job, so the panel updates on
+//    attach and at the end (the progress line says how far it got);
+//  - step() is a no-op (`ran: false`): CPython's only pause points are
+//    before a code object starts, so a running block cannot be suspended
+//    from outside. Line-level x-raying comes from the hook instead.
+//  - the failure story keeps the traceback frames and the failing frame's
+//    locals, and the snapshot groups the namespace.
 
 import type { PyodideInterface } from 'pyodide';
 import type { PyProxy } from 'pyodide/ffi';
-import { loadEngine, serialized } from './vendor';
-import type { Field, LoadResult, Panel, RunResult, Session } from './types';
+import { loadEngine, serializedLive } from './vendor';
+import { TOOLKIT_SOURCE } from './toolkit';
+import {
+  buildPanels,
+  flattenTrace,
+  sourceLines,
+  type AnnotationRow,
+  type FailureData,
+  type FlowData,
+  type Progress,
+  type TraceMeta,
+  type VarInfo,
+} from './xray';
+import type { LoadResult, Panel, RunResult, Session } from './types';
 
-const REPR_LIMIT = 40;
-/** Traceback file name; real (not <>-wrapped) so tracebacks show source lines. */
-const FILENAME = 'lesson.py';
+/** One top-level statement: its source text and line range. */
+export interface Statement {
+  /** The statement's source, dedented by the helper (null: not runnable). */
+  text: string | null;
+  first: number;
+  last: number;
+}
 
-/** name → [repr(value), type name] */
-type Snapshot = Map<string, { repr: string; type: string }>;
+/** `lw_trace()` row: [line, statement number, hits, meta]. */
+type RawTrace = readonly (readonly [number, number, number, TraceMeta | null])[];
 
-// Python-side helpers, installed once per engine into the interpreter's own
-// main namespace (underscore-prefixed, so they can never appear in a block
-// snapshot). Results cross back to JS as JSON strings to avoid proxy churn.
-const HELPERS = `
-import json, types
-
-def _lw_check(src):
-    try:
-        compile(src, ${JSON.stringify(FILENAME)}, 'exec')
-    except SyntaxError as e:
-        return json.dumps([e.lineno or 1, '%s: %s' % (type(e).__name__, e.msg)])
-    except ValueError as e:
-        return json.dumps([0, 'ValueError: %s' % e])
-    return None
-
-def _lw_snapshot(ns):
-    snap = {}
-    for name, value in ns.items():
-        if name.startswith('_') or isinstance(value, types.ModuleType):
-            continue
-        try:
-            snap[name] = [repr(value), type(value).__name__]
-        except Exception:
-            snap[name] = ['<unrepresentable>', type(value).__name__]
-    return json.dumps(snap)
-`;
-
-/** Engines that already have the _lw_* helpers installed. */
+/** Engines that have the `lw_*` helper installed. */
 const helperReady = new WeakSet<object>();
 
 export class PythonSession implements Session {
   private readonly engine: () => Promise<PyodideInterface>;
   private py: PyodideInterface | null = null;
-  /** This block's namespace dict (fresh per load); `null` before first load. */
   private ns: PyProxy | null = null;
   private src: string | null = null;
   private out: string[] = [];
-  private fields: Field[] = [];
+  private statements: Statement[] = [];
+  private hook: string | null = null;
+  private trace: RawTrace | null = null;
+  private flow: FlowData | null = null;
+  private vars: Map<string, VarInfo> = new Map();
+  /** The reprs the `changed` marks diff against (null = nothing changed). */
+  private prevVars: Map<string, string> | null = null;
+  private frames: [string, number][] = [];
+  private failure: FailureData | null = null;
+  private locals: Map<string, VarInfo> = new Map();
+  private annotations: AnnotationRow[] = [];
+  private progress: Progress | null = null;
+  /** 0-based index of the next top-level statement to execute. */
+  private cursor = 0;
+  /** Bumped by reset()/dispose(): a live run stops at its next boundary. */
+  private epoch = 0;
+
 
   constructor(engine: () => Promise<PyodideInterface> = loadEngine) {
     this.engine = engine;
   }
+
+  // -- load ----------------------------------------------------------------
 
   async load(src: string): Promise<LoadResult> {
     let py: PyodideInterface;
     try {
       py = await this.engine();
     } catch (e) {
-      return {
-        ok: false,
-        line: 0,
-        message: `failed to load the Python engine: ${message(e)}`,
-      };
+      return { ok: false, line: 0, message: `failed to load the Python engine: ${message(e)}` };
     }
     this.py = py;
-    let verdict: string | undefined;
+    let verdict: string | null;
     try {
-      verdict = await serialized(async () => {
+      verdict = await serializedLive(async () => {
         await this.ensureHelpers(py);
-        const locals = py.toPy({ src });
-        try {
-          return await py.runPythonAsync('_lw_check(src)', {
-            globals: py.globals,
-            locals,
-          });
-        } finally {
-          locals.destroy();
-        }
+        const syntax = (await this.helper(py, 'lw_check(src)', { src })) as unknown;
+        if (syntax !== null && syntax !== undefined && syntax !== '') return String(syntax);
+        await this.helper(py, 'lw_compile(src)', { src });
+        return null;
       });
     } catch (e) {
       return { ok: false, line: 0, message: `compile check failed: ${message(e)}` };
@@ -109,87 +114,80 @@ export class PythonSession implements Session {
       const [line, msg] = JSON.parse(verdict) as [number, string];
       return { ok: false, line, message: msg };
     }
-    // Fresh namespace and a clean console for the run that follows.
     this.ns?.destroy();
     this.ns = py.toPy({ __name__: '__main__' });
     this.src = src;
     this.out = [];
-    this.fields = [];
-    return { ok: true, summary: `loaded · ${lineCount(src)} lines` };
+    this.cursor = 0;
+    this.prevVars = null;
+    this.failure = null;
+    this.locals = new Map();
+    this.annotations = [];
+    this.progress = null;
+    this.trace = null;
+    this.flow = null;
+    this.frames = [];
+    this.statements = await this.json<Statement[]>(py, 'lw_split_json(src)', { src });
+    await this.refresh(py, null);
+    return { ok: true, summary: `loaded · ${lineCount(src)} lines · ${this.statements.length} statements` };
   }
+
+  // -- run / step ----------------------------------------------------------
 
   async run(): Promise<RunResult> {
     const py = this.py;
     const ns = this.ns;
-    const src = this.src;
-    if (!py || !ns || src === null) {
+    if (!py || !ns || this.src === null) {
       return { finished: false, steps: 0, error: 'nothing is loaded — press Run first' };
     }
-    return serialized(async () => {
-      const before = await this.snapshot(py, ns);
-      // Pyodide's `batched` handlers only deliver complete lines: an
-      // unflushed tail would be dropped here and later leak into whichever
-      // session writes the next newline (the handlers are engine-global).
-      // `write` Writers receive every byte chunk verbatim instead.
-      const stdoutDecoder = new TextDecoder();
-      const stderrDecoder = new TextDecoder();
-      py.setStdout({
-        write: (b) => {
-          this.out.push(stdoutDecoder.decode(b, { stream: true }));
-          return b.length;
-        },
-      });
-      py.setStderr({
-        write: (b) => {
-          this.out.push(stderrDecoder.decode(b, { stream: true }));
-          return b.length;
-        },
-      });
-      let error: string | undefined;
-      let traceback: string | undefined;
-      try {
-        await py.runPythonAsync(src, { globals: ns, filename: FILENAME });
-      } catch (e) {
-        traceback = message(e).trimEnd();
-        error = traceback.split('\n').pop() ?? traceback;
-      } finally {
-        // Drain whatever CPython still holds (print with end='', a partial
-        // stderr line) into THIS session's console, then detach the handlers
-        // so nothing can leak into the next session over the shared engine.
-        try {
-          py.runPython('import sys; sys.stdout.flush(); sys.stderr.flush()');
-        } catch {
-          // flushing must never mask the run's own result
-        }
-        py.setStdout();
-        py.setStderr();
-      }
-      if (traceback !== undefined) this.out.push(traceback + '\n');
-      const after = await this.snapshot(py, ns);
-      this.fields = diff(before, after);
-      return error === undefined
-        ? { finished: true, steps: 0 }
-        : { finished: false, steps: 0, error };
-    });
+    if (this.failure !== null) {
+      return { finished: false, steps: 0, error: this.failure.error };
+    }
+    // steps stay 0: the block runs in one engine job, so there is no step
+    // grain to count (see the module comment and features.stepping)
+    return this.episode(py, ns);
   }
 
+  /** No stepping: see the module comment. */
   async step(): Promise<{ ran: boolean; result?: RunResult }> {
-    return { ran: false }; // Pyodide executes to completion; there are no steps.
+    return { ran: false };
   }
 
   reset(): void {
+    this.epoch++;
     this.ns?.destroy();
     this.ns = null;
     this.src = null;
     this.out = [];
-    this.fields = [];
+    this.prevVars = null;
+    this.vars = new Map();
+    this.trace = null;
+    this.flow = null;
+    this.frames = [];
+    this.failure = null;
+    this.locals = new Map();
+    this.annotations = [];
+    this.progress = null;
+    this.cursor = 0;
+    this.statements = [];
   }
 
   state(): Panel[] {
-    return [
-      { kind: 'console', id: 'py-console', title: 'Console · stdout + stderr', text: this.out.join('') },
-      { kind: 'fields', id: 'py-variables', title: 'Variables · block namespace', fields: this.fields },
-    ];
+    return buildPanels({
+      source: this.src === null ? [] : sourceLines(this.src),
+      trace: this.trace === null ? null : flattenTrace(this.trace),
+      flow: this.flow,
+      vars: this.vars,
+      prevVars: this.prevVars,
+      frames: this.frames,
+      failure: this.failure,
+      locals: this.locals,
+      annotations: this.annotations,
+      console: this.out.join(''),
+      running: this.progress?.live ?? false,
+      progress: this.progress,
+      hook: this.hook,
+    });
   }
 
   dispose(): void {
@@ -197,45 +195,148 @@ export class PythonSession implements Session {
     this.py = null;
   }
 
-  private async snapshot(py: PyodideInterface, ns: PyProxy): Promise<Snapshot> {
-    const locals = py.toPy({ ns });
+  // -- the execution stream ------------------------------------------------
+
+  /**
+   * Execute the block in a single engine job under the line hook, then take
+   * one snapshot of everything the x-ray shows. Any failure ends the job
+   * with the failure story captured in the same serialized section.
+   */
+  private async episode(py: PyodideInterface, ns: PyProxy): Promise<RunResult> {
+    const epoch = this.epoch;
+    const total = this.statements.length;
+    const from = this.cursor;
+    // the diff baseline: the reprs the namespace held before this run, so
+    // the vars panel can mark what the run changed (empty on a fresh block)
+    this.prevVars = new Map([...this.vars].map(([name, info]) => [name, info.repr] as const));
+    this.progress = { from: this.statements[from]?.first ?? 0, to: total, done: from, total, live: true };
+    this.installWriters(py);
+    let error: string | undefined;
     try {
-      const raw: unknown = await py.runPythonAsync('_lw_snapshot(ns)', {
-        globals: py.globals,
-        locals,
-      });
-      // The helper always returns json.dumps(...), a Python str → a JS string.
-      const json = raw as string;
-      const snap: Snapshot = new Map();
-      const parsed = JSON.parse(json) as Record<string, [string, string]>;
-      for (const [name, [repr, type]] of Object.entries(parsed)) {
-        snap.set(name, { repr, type });
+      this.hook = String(await this.helper(py, 'lw_mode()'));
+      await this.helper(py, 'lw_start()');
+      // The block runs exactly as CPython compiled it (one exec, no per-
+      // statement recompiles), so every hit count is the interpreter's own.
+      // The hook samples its position; each sample re-reads the panels and
+      // re-renders, which is the progress heartbeat.
+      // Runs are not resumable at statement granularity: a second Run after
+      // a pause restarts the block (see the final summary for why).
+      await this.helper(py, 'lw_run(ns, True)', { ns });
+      if (this.epoch === epoch) this.cursor = total;
+    } catch (e) {
+      // the helper recorded the failure; its `text` is the lesson's own
+      // frames, so the console does not show pyodide's internals
+      error = message(e);
+      try {
+        this.failure = (await this.json<FailureData | null>(py, 'lw_fail_exc()'))
+          ?? { error, traceback: [] };
+        error = this.failure.error;
+        this.out.push((this.failure.text ?? message(e)).trimEnd() + '\n');
+        this.locals = new Map(Object.entries(
+          (await this.json<Record<string, VarInfo>>(py, 'lw_locals()')) ?? {},
+        ));
+      } catch {
+        this.failure = { error, traceback: [] };
       }
-      return snap;
     } finally {
-      locals.destroy();
+      try {
+        await this.helper(py, 'lw_stop()');
+      } catch {
+        // removing the hook must never mask the run's own result
+      }
+      try {
+        py.runPython('import sys; sys.stdout.flush(); sys.stderr.flush()');
+      } catch {
+        // flushing must never mask the run's own result
+      }
+      py.setStdout();
+      py.setStderr();
     }
+    if (this.epoch === epoch) {
+      await this.refresh(py, epoch);
+      const last = this.cursor === 0 ? undefined : this.statements[this.cursor - 1];
+      this.progress = {
+        from: last?.first ?? 0,
+        to: last?.last ?? 0,
+        done: this.cursor,
+        total,
+        live: false,
+      };
+    }
+    if (error !== undefined) return { finished: false, steps: 0, error };
+    const finished = this.cursor >= total;
+    return finished ? { finished: true, steps: 0 } : { finished: false, steps: 0 };
   }
+
+  private installWriters(py: PyodideInterface): void {
+    // Pyodide's `batched` handlers only deliver complete lines: an
+    // unflushed tail would be dropped here and later leak into whichever
+    // session writes the next newline (the handlers are engine-global).
+    // `write` Writers receive every byte chunk verbatim instead.
+    const decoder = new TextDecoder();
+    const push = (b: Uint8Array): number => {
+      this.out.push(decoder.decode(b, { stream: true }));
+      return b.length;
+    };
+    py.setStdout({ write: push });
+    py.setStderr({ write: push });
+  }
+
+  // -- snapshots -----------------------------------------------------------
+
+  /**
+   * Re-read every panel's data. `epoch` is null at rest (the diff baseline
+   * becomes this snapshot); during a run the baseline stays the value the
+   * run started with, so `changed` means "changed since the run started".
+   */
+  private async refresh(py: PyodideInterface, epoch: number | null): Promise<void> {
+    const ns = this.ns;
+    if (ns === null) return;
+    const trace = await this.json<RawTrace>(py, 'lw_trace()');
+    const annotations = await this.json<AnnotationRow[]>(py, 'lw_annotations(ns)', { ns });
+    if (epoch !== null && this.epoch !== epoch) return;
+    this.trace = trace;
+    this.annotations = annotations;
+    try {
+      this.flow = await this.json<FlowData>(py, 'lw_flow()');
+      this.frames = await this.json<[string, number][]>(py, 'lw_frames()');
+    } catch {
+      // frames/flow are diagnostics: never fail a snapshot over them
+    }
+    const vars = await this.json<Record<string, VarInfo>>(py, 'lw_snapshot(ns)', { ns });
+    this.vars = new Map(Object.entries(vars ?? {}));
+    // only a run fills in a missing baseline; at rest the marks set by the
+    // last run stay visible until the next run (or reset) replaces them
+    if (epoch !== null && this.prevVars === null) this.prevVars = new Map();
+  }
+
+  // -- engine plumbing -----------------------------------------------------
 
   private async ensureHelpers(py: PyodideInterface): Promise<void> {
     if (helperReady.has(py)) return;
-    await py.runPythonAsync(HELPERS);
+    await py.runPythonAsync(TOOLKIT_SOURCE);
     helperReady.add(py);
   }
-}
 
-/** Fields for globals defined or changed by the run (untouched ones hidden). */
-function diff(before: Snapshot, after: Snapshot): Field[] {
-  const fields: Field[] = [];
-  for (const [name, { repr, type }] of after) {
-    const prev = before.get(name);
-    if (prev !== undefined && prev.repr === repr) continue;
-    const value = repr.length <= REPR_LIMIT
-      ? repr
-      : repr.slice(0, REPR_LIMIT - 1) + '…';
-    fields.push({ key: name, value, sub: type, changed: true });
+  /** Evaluate a helper expression with optional locals, decoded to JS. */
+  private async helper(py: PyodideInterface, code: string, locals?: Record<string, unknown>): Promise<unknown> {
+    const lc = locals === undefined ? null : py.toPy(locals);
+    try {
+      const raw = await py.runPythonAsync(code, {
+        globals: py.globals,
+        ...(lc === null ? {} : { locals: lc }),
+      });
+      return decode(raw);
+    } finally {
+      lc?.destroy();
+    }
   }
-  return fields;
+
+  private async json<T>(py: PyodideInterface, code: string, locals?: Record<string, unknown>): Promise<T> {
+    const text = await this.helper(py, code, locals);
+    if (typeof text !== 'string') throw new Error(`helper ${code} returned ${typeof text}, expected JSON text`);
+    return JSON.parse(text) as T;
+  }
 }
 
 function lineCount(src: string): number {
@@ -245,4 +346,10 @@ function lineCount(src: string): number {
 
 function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** A Python str arrives as a JS string; bytes as a view of the heap. */
+function decode(raw: unknown): unknown {
+  if (raw instanceof Uint8Array) return new TextDecoder().decode(raw);
+  return raw;
 }
