@@ -1,6 +1,50 @@
 /* theme.css — "textbook, light" visual language (docs/design.md §Visual
    language). White background, near-black prose, hairline rules, zero
-   radius, no accent color, small-caps section labels, two-pane layout. */
+   radius, no accent color, small-caps section labels.
+
+   Layout: nav rail (fixed 232px) | document | panel rail (0 until a
+   panel attaches).
+
+   At rest the document is the only elastic band, and on a big display
+   BOTH the reading measure and the body type grow, so the document
+   fills more of the page at a comfortable line length:
+
+     viewport      doc type   measure          text width   line
+     900-1599px    16px       74ch              767px        ~100 chars
+     1600-2199px   17px       82ch              903px        ~111 chars
+     2200px+       18px       90ch             1050px        ~122 chars
+
+   (1ch = 0.648em in Atkinson Hyperlegible: 0.648 * px * ch. Chars
+   are counted at a mean 0.476em advance; see "wide screens" for the
+   derivation.) Headings and inner spacing are em-based, so the type
+   bump carries them; the `ch` measure lives on .lw-doc, so it is the
+   doc's ch.
+
+   The layout frame caps at rail + 2 * (text + 4.5rem): 119.4rem at
+   the base measure, 136.4rem from 1600px, 154.7rem from 2200px. Below
+   its cap the gutter is the whole gap from the nav hairline to the
+   text; past it the frame centres and the band keeps 4.5rem per side
+   (gutter plus slack). At rest (no panel) the text is centred on the
+   page by the grid itself — the rail's 232px is exactly what the
+   track is short of — so no left/right compensation is applied (see
+   "centring check"). Prose, lists and headings use the measure (prose
+   one ch short, so the last word fits); tables, listings and
+   executable blocks may exceed it to min(100%, 90ch). No
+   42rem/40rem prose caps, no fixed 88rem frame stranding a 74ch
+   column.
+
+   While a panel is attached the grid is the same frame split three
+   ways: the panel takes clamp(420px, 42vw, 720px) — 28vw under
+   1420px, where a 42vw panel would squeeze the doc under its 40ch
+   floor — and the doc shrinks from its measure toward that floor,
+   centred on the remaining band, so the gutter, not a squeezed band,
+   is what separates the two. The 40ch floor is in the doc's own ch,
+   so it too grows with the type (40 * 0.648 * 18 = 467px at 18px).
+
+   At 1920px attached: the 780px panel beside a 77ch (903px) doc.
+
+   <900px the zones stack: rail on top, one full-width doc column,
+   panel full-width underneath while attached. */
 
 :root {
   --lw-ink: #1a1a1a;
@@ -25,35 +69,127 @@
    panel attaches, then clamp(420px, 42vw, 720px). The grid's outer
    tracks are `auto`, so the rails' animated element widths drive the
    grid: width 300ms cubic-bezier(.2,.7,.3,1); the panel fades in
-   ~160ms. */
+   ~160ms.
 
-.lw-site { background: var(--lw-paper); color: var(--lw-ink); }
+   --lw-doc-measure is the reading measure the document column asks
+   for; --lw-gutter is the doc pane's side padding, the gap from a rail
+   hairline to the text. .lw-layout caps the frame at nav rail + 2 *
+   (measure + 4.5rem): the 4.5rem per side is the widest gutter
+   (2.25rem) plus the 2.25rem of slack the band keeps once the frame
+   centres, so both a table at max-width: 100% and the text fit. */
+
+.lw-site {
+  /* the layout cap: rail + 2 * (text + 4.5rem of gutter/slack), in rem
+     — 119.4rem at the base measure (232px + 2 * 69.4rem), 136.4rem from
+     1600px, 154.7rem from 2200px. A ch here would be this rule's 16px
+     ch, and the text grows with the doc's font-size, so the cap is
+     spelled out per tier instead. --lw-doc-measure itself lives on
+     .lw-doc ("document" below): a ch resolves against the font-size of
+     the element that USES it, and the measure must be the doc's ch. */
+  --lw-frame: 119.4rem;
+  --lw-gutter: 1.5rem;       /* doc pane side padding: 1.75/2/2.25rem >= 900px */
+  --lw-rail-w: 232px;        /* nav rail width, in the frame sum */
+  background: var(--lw-paper);
+  color: var(--lw-ink);
+}
 
 .lw-layout {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: stretch;
-  max-width: 88rem;
+  max-width: var(--lw-frame);
   margin: 0 auto;
   min-height: 100vh;
 }
 
 .lw-doc-pane {
   min-width: 0;
-  padding: 2rem 2.25rem 4rem;
+  padding: 2rem var(--lw-gutter) 4rem;
 }
 
-/* the doc column always keeps a readable measure — wide open at rest,
-   capped against the 42vw panel when attached */
+/* the doc column always keeps a readable measure: it fills the band up
+   to the measure (so prose, lists and tables agree), and narrows only
+   when an attached panel squeezes the band below it — never under 40ch
+   (the 40ch floor wins in a short band: the text may then run past
+   the page edge rather than become unreadable) */
 .lw-doc-pane > .lw-doc {
-  max-width: 74ch;
+  max-width: max(min(var(--lw-doc-measure), 100%), 40ch);
   margin-inline: auto;
 }
 
-/* ---- left navigation rail: contents (this page) above, pages below */
+/* ---- centring check — no rule needed, the geometry already centres
+   the text. At rest the track between the rail and the empty panel
+   rail is viewport - 232px, the doc is centred in it, and the rail is
+   232px, so
 
-.lw-rail-left {
-  width: 232px;
+     text centre = 232 + (viewport - 232) / 2 + 1/2 = (viewport + 1) / 2
+
+   i.e. the text is centred on the page to within the rail's 1px
+   hairline. Measured gap from the nav hairline vs from the right edge
+   of the page (doc in brackets): 1280: 14.25rem = 14.25rem (74ch);
+   1440: 19.25 = 19.25 (74ch); 1600: 23.25 = 23.25 (78ch);
+   1920: 24.00 / 33.25 (78ch, frame capped); 2560: 25.00 / 52.25
+   (82ch, frame capped). With a panel attached the same symmetry holds
+   on the smaller side: both gaps are the gutter — 1.75rem at
+   1280/1440, 2rem at 1600, 2rem / 2.5rem at 1920/2560.
+
+   So no left/right compensation is applied: a one-sided extra padding
+   moves the auto-centred text by only half the padding, and an
+   asymmetric padding would split the gutter unevenly — both would
+   take the level text off centre rather than onto it. */
+
+/* ---- wide screens (>=900px only; <900px the zones stack and the doc
+   fills a phone column). Two things grow together on a big display:
+   the reading measure and the body type.
+
+   1ch is the width of the font's '0' — 0.648em in Atkinson
+   Hyperlegible (measured from the shipped woff: advance 648/1000
+   units) — so a `ch` measure scales with the font-size while the
+   CHARACTER count does not: 74ch is 74 characters whether set at 16
+   or 18px, but 74ch at 18px occupies 74 * 0.648 * 18 = 863px instead
+   of 767px. Growing the measure in ch therefore widens the text
+   without making it longer per line; growing the type makes it fill
+   more of the page at the same character count.
+
+   Line length, counted in real characters (mean prose advance
+   measured at 0.476em over the latin lowercase set + space, i.e.
+   1.36 characters per `ch`; the -1ch allowance .lw-para takes off is
+   included):
+
+     width        type   measure        line at 16px   line as set
+     900-1599px   16px   74ch =  767px  ~100           ~100
+     1600-2199px  17px   82ch =  903px  ~117           ~111
+     2200px+      18px   90ch = 1050px  ~137           ~122
+
+   Within a tier, `ch` and the mean character both scale with the em,
+   so a tier's line holds the same characters whatever its font-size;
+   across tiers the count rises with the measure (100 -> 111 -> 122)
+   while every character is also set larger, which is the trade the
+   user asked for: bigger type, and a wider text block, not a longer
+   line at the same size. The 82ch/90ch measures keep the block from
+   looking narrow beside the larger letters (903px at 17px against
+   767px at 16px). */
+@media (min-width: 900px) {
+  .lw-site { --lw-gutter: 1.75rem; }
+}
+
+@media (min-width: 1600px) {
+  .lw-site { --lw-frame: 136.4rem; --lw-gutter: 2rem; }
+  /* bigger body type; headings and spacing are em/rem-relative to it
+     (see "document" below), so the whole page scales coherently */
+  .lw-doc { --lw-doc-measure: 82ch; font-size: 1.0625rem; line-height: 1.68; }
+}
+
+@media (min-width: 2200px) {
+  .lw-site { --lw-frame: 154.7rem; --lw-gutter: 2.25rem; }
+  .lw-doc { --lw-doc-measure: 90ch; font-size: 1.125rem; line-height: 1.66; }
+}
+
+/* ---- the navigation rail: ONE list at a time (contents | pages),
+   either grid end (theme.css side rules below; packages/core/src/site.ts) */
+
+.lw-rail-nav {
+  width: var(--lw-rail-w);
   border-right: 1px solid var(--lw-hairline);
   position: sticky;
   top: 0;
@@ -63,11 +199,21 @@
   overflow: hidden;
 }
 
+/* navigator moved to the right: document stays in the middle, hairline
+   moves to the navigator's left edge */
+.lw-site.lw-nav-right .lw-rail-nav {
+  border-right: none;
+  border-left: 1px solid var(--lw-hairline);
+}
+
+/* the header bar: a segmented CONTENTS | PAGES switch plus the side
+   toggle, small-caps on a hairline */
 .lw-rail-head {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.9rem 0.75rem 0.6rem;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
   border-bottom: 1px solid var(--lw-hairline);
   font-family: var(--lw-serif);
   font-size: 0.82rem;
@@ -77,34 +223,64 @@
   white-space: nowrap;
 }
 
-.lw-rail-title { padding-left: 0.25rem; }
-
-/* both rail sections scroll independently when the viewport is short:
-   contents takes its natural height (but can shrink), pages fills the
-   rest — min-height: 0 lets each box actually engage overflow-y */
-.lw-contents {
-  overflow-y: auto;
-  flex: 0 1 auto;
-  min-height: 0;
+.lw-nav-switch {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  min-width: 0;
 }
 
-.lw-rail-pages {
-  border-top: 1px solid var(--lw-hairline);
-  overflow-y: auto;
+/* one small-caps switch button; the pressed one is near-black behind a
+   2px rule — the same emphasis the active list rows use */
+.lw-nav-tab {
+  font: inherit;
+  font-variant: small-caps;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  padding: 0 0 0.15rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: var(--lw-paper);
+  color: var(--lw-gray);
+  cursor: pointer;
+}
+.lw-nav-tab:hover { color: var(--lw-ink); }
+.lw-nav-tab[aria-pressed='true'] {
+  color: var(--lw-ink);
+  border-bottom-color: var(--lw-ink);
+}
+.lw-nav-tab:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
+
+/* compact side flip: mono, hairline box at rest */
+.lw-nav-side {
+  flex: none;
+  font-family: var(--lw-mono);
+  font-size: 0.66rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.25rem;
+  background: var(--lw-paper);
+  color: var(--lw-gray);
+  border: 1px solid var(--lw-hairline);
+  cursor: pointer;
+}
+.lw-nav-side:hover { border-color: var(--lw-ink); color: var(--lw-ink); }
+.lw-nav-side:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 1px; }
+
+/* ONE list at a time: the shown column fills the rail below the header
+   and is the only box that scrolls (min-height: 0 engages overflow);
+   the other is emptied and hidden, so it paints nothing */
+.lw-contents { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.lw-rail-pages-list {
   flex: 1 1 auto;
   min-height: 0;
-}
-
-.lw-rail-pages-list {
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.3rem;
   padding: 0.75rem 0.75rem 1.5rem;
 }
-
-.lw-nav-link { color: var(--lw-gray); text-decoration: none; }
-.lw-nav-link:hover { color: var(--lw-ink); }
-.lw-nav-link.lw-nav-active { color: var(--lw-ink); text-decoration: underline; }
+.lw-contents[hidden], .lw-rail-pages-list[hidden] { display: none; }
 
 .lw-toc-list {
   display: flex;
@@ -112,6 +288,16 @@
   gap: 0.3rem;
   padding: 0.75rem 0.75rem 1.5rem;
 }
+
+/* page links share the contents rhythm: same size, same line height */
+.lw-nav-link {
+  color: var(--lw-gray);
+  text-decoration: none;
+  line-height: 1.35;
+  font-size: 0.95rem;
+}
+.lw-nav-link:hover { color: var(--lw-ink); }
+.lw-nav-link.lw-nav-active { color: var(--lw-ink); text-decoration: underline; }
 
 .lw-toc-item {
   color: var(--lw-gray);
@@ -130,7 +316,6 @@
   padding-left: 0.5rem;
 }
 
-
 /* ---- right rail: the under-the-hood panel; zero-width (and
    hairline-invisible) until one attaches, then it slides wide */
 
@@ -145,9 +330,19 @@
               border-color 300ms cubic-bezier(.2, .7, .3, 1);
 }
 
+/* attached width: clamp(420px, 42vw, 720px) — 682px at 1920/2560px.
+   Under 1420px the vw term eases to 28vw (420-460px): the range where
+   the frame is too short for a 42vw panel beside the doc's 40ch floor,
+   and where the doc's capped 74ch column leaves band slack the flat
+   gutter cannot spend — so the panel takes it and the doc keeps 48-74ch
+   instead of overflowing. */
 .lw-site.lw-panel-attached .lw-rail-right {
   width: clamp(420px, 42vw, 720px);
   border-left-color: var(--lw-hairline);
+}
+
+@media (max-width: 1419px) {
+  .lw-site.lw-panel-attached .lw-rail-right { width: clamp(420px, 28vw, 460px); }
 }
 
 .lw-panel-pane {
@@ -184,50 +379,64 @@
 
 @media (max-width: 899px) {
   .lw-layout { grid-template-columns: minmax(0, 1fr); }
-  .lw-rail-left, .lw-rail-right {
+  .lw-rail-nav, .lw-rail-right {
     position: static;
     height: auto;
     width: auto;
     transition: none;
   }
-  .lw-rail-left {
+  /* the rail stacks above the document: header (view switch + side
+     toggle) first, then the shown list as a wrapping row */
+  .lw-rail-nav {
     border-right: none;
     border-bottom: 1px solid var(--lw-hairline);
-    display: flex;
   }
-  /* section links matter less than pages on a phone: contents hidden */
-  .lw-contents { display: none; }
-  .lw-rail-pages { border-top: none; }
+  .lw-site.lw-nav-right .lw-rail-nav { border-left: none; }
+  .lw-contents, .lw-rail-pages-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    overflow-y: visible;
+    padding-top: 0.5rem;
+  }
   .lw-rail-right { display: none; }
   .lw-site.lw-panel-attached .lw-rail-right {
     display: block;
     width: auto; /* beats the clamp() minimum, which overflows phones */
     border-top: 1px solid var(--lw-hairline);
   }
-  .lw-rail-pages-list { flex-direction: row; flex-wrap: wrap; }
   .lw-panel-pane { position: static; overflow: visible; }
+  /* one full-width column: the gutter alone pads it (1.5rem), the
+     --lw-gutter media queries only apply from 900px */
   .lw-doc-pane > .lw-doc { max-width: none; }
 }
 
-/* ---- document */
+/* ---- document. Everything inside scales with the doc's own
+   font-size (em, not rem), so the 1600/2200px type bump above carries
+   the heading sizes and the vertical rhythm with it instead of
+   leaving them fixed beside larger prose. The `ch` measures come from
+   --lw-doc-measure, so a `ch` here is the doc's ch. */
 
-.lw-doc { font-family: var(--lw-serif); line-height: 1.65; }
+.lw-doc {
+  --lw-doc-measure: 74ch;    /* the doc's own ch: 82ch >= 1600px, 90ch >= 2200px */
+  font-family: var(--lw-serif);
+  line-height: 1.65;
+}
 
 .lw-title {
-  font-size: 2rem;
+  font-size: 2em;
   font-weight: 700;
-  margin: 0 0 0.25rem;
+  margin: 0 0 0.12em;
 }
 
 .lw-subtitle {
   font-style: italic;
   color: var(--lw-ink);
-  margin: 0 0 2rem;
+  margin: 0 0 1.25em;
 }
 
 .lw-heading {
   font-weight: 700;
-  margin: 2.25rem 0 0.75rem;
+  margin: 1.4em 0 0.47em;
   letter-spacing: 0.01em;
 }
 
@@ -236,11 +445,19 @@
   letter-spacing: 0.06em;
 }
 
-.lw-doc > h2.lw-heading { font-size: 1.4rem; border-top: 1px solid var(--lw-hairline); padding-top: 1.25rem; }
-.lw-doc > h3.lw-heading { font-size: 1.15rem; }
-.lw-doc > h4.lw-heading { font-size: 1rem; }
+.lw-doc > h2.lw-heading {
+  font-size: 1.4em;
+  border-top: 1px solid var(--lw-hairline);
+  padding-top: 0.9em;
+}
+.lw-doc > h3.lw-heading { font-size: 1.15em; }
+.lw-doc > h4.lw-heading { font-size: 1em; }
 
-.lw-para { margin: 0 0 1rem; max-width: 42rem; }
+/* prose fills the doc measure: -1ch because a ch is a '0' (wider than
+   average prose), so the last word fits rather than drops. The cap is
+   the same variable the doc column uses, minus that choke, so nothing
+   double-caps; em for the spacing. */
+.lw-para { margin: 0 0 1em; max-width: calc(var(--lw-doc-measure) - 1ch); }
 
 code.lw-inline {
   font-family: var(--lw-mono);
@@ -249,24 +466,38 @@ code.lw-inline {
   padding: 0 0.25em;
 }
 
-.lw-list { margin: 0 0 1.25rem; padding-left: 1.5rem; max-width: 40rem; }
-.lw-list li { margin-bottom: 0.35rem; }
+.lw-list {
+  margin: 0 0 1.25em;
+  padding-left: 1.5em;
+  /* the marker hangs in the indent already: keep the item text inside
+     the measure rather than 1.5em short of it (em, so it tracks the
+     doc font-size like the measure does) */
+  max-width: calc(var(--lw-doc-measure) + 1.5ch);
+}
+.lw-list li { margin-bottom: 0.35em; }
 
+/* tables and listings are not prose: they may run past the reading
+   measure up to the doc's 90ch ceiling (wider and the eye loses the
+   row across the page), but never past their column */
 .lw-table {
   border-collapse: collapse;
-  margin: 0 0 1.5rem;
+  margin: 0 0 1.25em;
   font-size: 0.92em;
+  max-width: min(100%, 90ch);
 }
 .lw-table th, .lw-table td {
   border: 1px solid var(--lw-hairline);
-  padding: 0.3rem 0.7rem;
+  padding: 0.3em 0.7em;
   text-align: left;
 }
 .lw-table th { font-weight: 700; }
 
 /* ---- read-only source listings */
 
-.lw-src { margin: 1.5rem 0 2rem; }
+/* code is not prose: listings and executable blocks may use up to
+   min(100%, 90ch) — long source lines wrap more often at the reading
+   measure, they did not get anywhere at a 40-42rem cap */
+.lw-src { margin: 1.5rem 0 2rem; max-width: min(100%, 90ch); }
 .lw-ro-head {
   font-family: var(--lw-mono);
   font-size: 0.75rem;

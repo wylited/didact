@@ -1,16 +1,45 @@
 // site.ts — mountSite: parse → render → block runtimes + panel host.
-// Layout: a left navigation rail — this page's section contents above,
-// all pages below — and the document column; the under-the-hood panel
-// is the third zone, a zero-width right rail until the first run/step
-// attaches it, then it animates wide (clamp(420px, 42vw, 720px)) while
-// the doc column keeps a readable measure (pure CSS, theme.css).
+//
+// Layout: one navigation rail, the document column, and the panel rail.
+// The panel rail (`lw-rail-right`) is the third zone: a zero-width right
+// column until the first run/step attaches it, then it animates wide
+// (clamp(420px, 42vw, 720px)) while the doc column keeps a readable
+// measure. The NAVIGATOR is a single rail (`lw-rail lw-rail-nav`,
+// `data-test="nav"`) that is the FIRST grid column by default and the
+// LAST when moved (see `navSide` below); the document column always
+// stays in the middle.
+//
+// The navigator shows ONE list at a time (`ALWAYS-ONE-LIST`): either this
+// page's section contents (`data-test="toc"` with one
+// `data-test="toc-item"` deep link per h2/h3) or the page list
+// (`data-test="nav-list"` with one `data-test="nav-item"` per page). The
+// unshown view is not painted: its slot is emptied, and the contents
+// container is emptied and hidden while pages show. A header bar
+// (small-caps tabs on a hairline) holds the segmented CONTENTS | PAGES
+// switch (`data-test="rail-view-contents"` /
+// `data-test="rail-view-pages"`, real <button type="button"> with
+// aria-pressed) and a compact side toggle (`data-test="rail-side"`).
+// The default view is contents; a page switch keeps whichever view is
+// showing — only the user switches views.
+//
+// Side convention (root class on the mount element, which also carries
+// `lw-site`): `lw-nav-left` = navigator is the first grid column, its
+// hairline on its right edge (default); `lw-nav-right` = navigator is the
+// last grid column, its hairline moved to its left edge, document still
+// in the middle. Exactly one of the two classes is present; the other is
+// removed. Chosen at mount by `MountOptions.navSide`, changed at runtime
+// by `SiteHandle.setNavSide`. A non-default choice is persisted in
+// localStorage under `didact:nav-side` (guarded: a throwing storage never
+// breaks mounting and a call that fails to store still applies); clearing
+// that key (or a stored value that is not 'left'/'right') returns to the
+// option default.
+//
 // Routing is hash-based and uniform: a page's fragment is
 // `#/<page-slug>`, a section's is `#/<page-slug>/<section-slug>` (both
 // kebab-cased). Every nav and contents link is a real fragment href;
 // hashchange switches pages (disposing the old page's blocks and
-// detaching the panel) or scrolls within the current page. A
-// scroll-spy keeps exactly one contents entry active; it never writes
-// the hash.
+// detaching the panel) or scrolls within the current page. A scroll-spy
+// keeps exactly one contents entry active; it never writes the hash.
 
 import { BlockRuntime } from './block';
 import type { Kernel } from './kernel';
@@ -19,6 +48,15 @@ import { renderDocument } from './render';
 import { PanelHost } from './panel';
 import { installTooltips } from './tooltip';
 import './theme.css';
+
+/** Navigator side: the grid column the navigation rail occupies. */
+export type NavSide = 'left' | 'right';
+
+/** Which list the navigator shows. */
+export type NavView = 'contents' | 'pages';
+
+/** localStorage key holding the user's navigator side ('left' | 'right'). */
+const NAV_SIDE_KEY = 'didact:nav-side';
 
 /** One lesson page: nav title plus its org source. */
 export interface PageSpec {
@@ -36,78 +74,190 @@ export interface MountOptions {
   pages: readonly PageSpec[];
   /** Set false to skip loading the web fonts (tests). */
   fonts?: boolean;
+  /** Initial navigator side (default 'left'). A persisted choice
+   *  (`localStorage['didact:nav-side']`) wins over this default. */
+  navSide?: NavSide;
 }
 
 export interface SiteHandle {
   /** Block runtimes on the active page, in document order. */
   readonly blocks: readonly BlockRuntime[];
-  /** The under-the-hood panel host (right rail). */
+  /** The under-the-hood panel host (panel rail). */
   readonly panel: PanelHost;
   /** 0-based index of the rendered page. */
   readonly activeIndex: number;
+  /** Which side the navigator rail is on (root class `lw-nav-<side>`). */
+  readonly navSide: NavSide;
+  /** Which list the navigator shows: the active page's contents
+   *  (default) or the page list. Never changed implicitly. */
+  readonly navView: NavView;
   /** Render page `index` (disposes the current page's blocks first). */
   show(index: number): void;
+  /** Move the navigator to `side` and persist the choice. */
+  setNavSide(side: NavSide): void;
+  /** Show `view` in the navigator (the user's explicit choice). */
+  setNavView(view: NavView): void;
   dispose(): void;
+}
+
+/** Read the persisted navigator side; null when absent, malformed or the
+ *  storage is unavailable (private mode, denied, disabled). */
+function readStoredNavSide(): NavSide | null {
+  try {
+    const stored = window.localStorage.getItem(NAV_SIDE_KEY);
+    return stored === 'left' || stored === 'right' ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the navigator side; a throwing storage is ignored. */
+function writeStoredNavSide(side: NavSide): void {
+  try {
+    window.localStorage.setItem(NAV_SIDE_KEY, side);
+  } catch {
+    /* storage denied: the choice still applies, it just does not survive */
+  }
 }
 
 export function mountSite(opts: MountOptions): SiteHandle {
   const { root, kernels, pages } = opts;
   if (pages.length === 0) throw new Error('mountSite: at least one page is required');
   const byLang = new Map(kernels.map((k) => [k.id, k] as const));
+  // every node is created in the ROOT's document: a mount can be handed an
+  // element from another document (an iframe, a test environment) and
+  // insertBefore/replaceChildren across documents silently drop nodes
+  const doc = root.ownerDocument ?? document;
 
   root.classList.add('lw-site');
   if (opts.fonts === false) root.classList.add('lw-no-fonts');
 
-  /** A rail section header: small-caps label on a hairline. */
-  const railHead = (label: string): HTMLElement => {
-    const head = document.createElement('div');
-    head.className = 'lw-rail-head';
-    const span = document.createElement('span');
-    span.className = 'lw-rail-title';
-    span.textContent = label;
-    head.appendChild(span);
-    return head;
+  // ---- navigator rail: ONE list at a time (contents | pages) ----
+  const navSideDefault: NavSide = opts.navSide === 'right' ? 'right' : 'left';
+  let navSide: NavSide = readStoredNavSide() ?? navSideDefault;
+  let navView: NavView = 'contents';
+
+  const rail = doc.createElement('nav');
+  rail.className = 'lw-rail lw-rail-nav';
+  rail.dataset.test = 'nav';
+
+  const railHead = doc.createElement('div');
+  railHead.className = 'lw-rail-head lw-nav-head';
+
+  const navSwitch = doc.createElement('div');
+  navSwitch.className = 'lw-nav-switch';
+  navSwitch.setAttribute('role', 'group');
+  navSwitch.setAttribute('aria-label', 'Navigator view');
+
+  /** A segmented-switch button: small-caps label, aria-pressed state. */
+  const railViewButton = (view: NavView, label: string): HTMLButtonElement => {
+    const button = doc.createElement('button');
+    button.type = 'button';
+    button.className = 'lw-nav-tab';
+    button.dataset.test = `rail-view-${view}`;
+    button.dataset.view = view;
+    button.textContent = label;
+    button.addEventListener('click', () => setView(view));
+    navSwitch.appendChild(button);
+    return button;
   };
+  const contentsBtn = railViewButton('contents', 'Contents');
+  const pagesBtn = railViewButton('pages', 'Pages');
 
-  // ---- left navigation rail: contents (this page's sections) + pages
-  const railLeft = document.createElement('nav');
-  railLeft.className = 'lw-rail lw-rail-left';
-  railLeft.dataset.test = 'nav';
+  const sideBtn = doc.createElement('button');
+  sideBtn.type = 'button';
+  sideBtn.className = 'lw-nav-side';
+  sideBtn.dataset.test = 'rail-side';
 
-  const contents = document.createElement('nav');
+  railHead.append(navSwitch, sideBtn);
+
+  // the contents container: always in the rail, hidden while pages show
+  const contents = doc.createElement('nav');
   contents.className = 'lw-contents';
   contents.dataset.test = 'toc';
-  contents.appendChild(railHead('Contents'));
-  const tocList = document.createElement('div');
+  const tocList = doc.createElement('div');
   tocList.className = 'lw-toc-list';
   contents.appendChild(tocList);
 
-  const pagesEl = document.createElement('div');
-  pagesEl.className = 'lw-rail-pages';
-  pagesEl.appendChild(railHead('Pages'));
-  const pagesList = document.createElement('div');
-  pagesList.className = 'lw-rail-pages-list';
-  pagesEl.appendChild(pagesList);
+  // the pages view's slot in the rail: empty (and unpainted) while the
+  // contents show; renderNav mounts the pages list into it on demand
+  const pageSlot = doc.createElement('div');
+  pageSlot.className = 'lw-nav-slot';
 
-  railLeft.append(contents, pagesEl);
+  rail.append(railHead, contents, pageSlot);
 
   // ---- document column
-  const docPane = document.createElement('div');
+  const docPane = doc.createElement('div');
   docPane.className = 'lw-doc-pane';
 
-  // ---- right rail: zero-width until a panel attaches (theme.css)
-  const railRight = document.createElement('aside');
+  // ---- panel rail: zero-width until a panel attaches (theme.css)
+  const railRight = doc.createElement('aside');
   railRight.className = 'lw-rail lw-rail-right';
-  const panelPane = document.createElement('div');
+  const panelPane = doc.createElement('div');
   panelPane.className = 'lw-panel-pane';
   railRight.appendChild(panelPane);
 
-  const layout = document.createElement('div');
+  const layout = doc.createElement('div');
   layout.className = 'lw-layout';
-  layout.append(railLeft, docPane, railRight);
+  layout.append(rail, docPane, railRight);
   root.appendChild(layout);
 
-  // attaching/detaching only modulates the root class: the right rail
+  /** Apply the side: root classes + which end of the grid the rail takes.
+   *  Right mode appends the navigator after the document (the panel rail
+   *  is always last, so the document stays in the middle). */
+  function applyNavSide(): void {
+    root.classList.toggle('lw-nav-left', navSide === 'left');
+    root.classList.toggle('lw-nav-right', navSide === 'right');
+    sideBtn.textContent = navSide === 'left' ? 'Nav left' : 'Nav right';
+    sideBtn.title = `Move navigation to the ${navSide === 'left' ? 'right' : 'left'}`;
+    if (navSide === 'left') layout.prepend(rail);
+    else layout.insertBefore(rail, railRight);
+  }
+
+  function setNavSide(side: NavSide): void {
+    if (side !== 'left' && side !== 'right') return;
+    navSide = side;
+    applyNavSide();
+    writeStoredNavSide(side);
+  }
+
+  sideBtn.addEventListener('click', () => {
+    setNavSide(navSide === 'left' ? 'right' : 'left');
+  });
+
+  /** ALWAYS-ONE-LIST: exactly ONE list paints in the rail.
+   *  Contents view: the contents container (`data-test="toc"`, built per
+   *  page) shows, and the pages slot holds nothing. Pages view: the
+   *  contents container is hidden and the pages slot holds a freshly
+   *  mounted `data-test="nav-list"` with one link per page. Called on
+   *  mount, every view change and every page build. */
+  function renderNav(): void {
+    const showContents = navView === 'contents';
+    (contents as HTMLElement).hidden = !showContents;
+    pageSlot.replaceChildren(...(showContents ? [] : [pageListView()]));
+    if (tocList.childElementCount !== tocEntries.length) {
+      tocList.replaceChildren(...tocEntries.map((e) => e.link));
+    }
+  }
+
+  function syncViewButtons(): void {
+    contentsBtn.setAttribute('aria-pressed', String(navView === 'contents'));
+    pagesBtn.setAttribute('aria-pressed', String(navView === 'pages'));
+    contentsBtn.dataset.active = String(navView === 'contents');
+    pagesBtn.dataset.active = String(navView === 'pages');
+  }
+
+  function setView(view: NavView): void {
+    if (view !== 'contents' && view !== 'pages') return;
+    if (view === navView) return;
+    navView = view;
+    syncViewButtons();
+    renderNav();
+    // never implicitly: the active entry is where the user left it
+    if (view === 'contents') setActiveToc(tocActive === -1 ? 0 : tocActive);
+  }
+
+  // attaching/detaching only modulates the root class: the panel rail
   // animates from 0 to the panel measure (theme.css)
   const panel = new PanelHost(panelPane, (visible) => {
     root.classList.toggle('lw-panel-attached', visible);
@@ -117,16 +267,26 @@ export function mountSite(opts: MountOptions): SiteHandle {
   let blocks: BlockRuntime[] = [];
   const slugs = pageSlugs(pages);
   const links = pages.map((page, i) => {
-    const a = document.createElement('a');
+    const a = doc.createElement('a');
     a.className = 'lw-nav-link';
     a.dataset.test = 'nav-item';
     // real fragment href: the click sets the hash, hashchange does the
     // switch (so the URL always names the visible page)
     a.href = `#/${slugs[i]}`;
     a.textContent = page.title;
-    pagesList.appendChild(a);
+    a.textContent = page.title;
     return a;
   });
+
+  /** A fresh pages list (the pages view's list) with one link per page. */
+  /** The pages view's list: one `data-test="nav-item"` link per page. */
+  function pageListView(): HTMLElement {
+    const view = doc.createElement('div');
+    view.className = 'lw-rail-pages-list';
+    view.dataset.test = 'nav-list';
+    view.replaceChildren(...links);
+    return view;
+  }
 
   // ---- contents: the active page's own sections ----
 
@@ -145,6 +305,25 @@ export function mountSite(opts: MountOptions): SiteHandle {
     if (tocActive !== -1) tocEntries[tocActive]!.link.classList.remove('lw-toc-active');
     tocActive = index;
     if (tocEntries[index]) tocEntries[index]!.link.classList.add('lw-toc-active');
+    revealActiveToc();
+  }
+
+  /** Keep the active entry visible when the rail's contents column
+   *  overflows. The list is laid out inside the rail, above or beside
+   *  the document — a link brought into view must never scroll the
+   *  DOCUMENT (that would corrupt the scroll position the spy reads), so
+   *  only the overflowing list is scrolled directly, by the minimal
+   *  amount that brings the entry back into the column's box. A no-op
+   *  in DOMs without layout (tests) and when everything fits. */
+  function revealActiveToc(): void {
+    const link = tocEntries[tocActive]?.link;
+    if (!link) return;
+    const column = contents;
+    const box = column.getBoundingClientRect();
+    const item = link.getBoundingClientRect();
+    if (box.height === 0 || box.bottom === box.top) return; // not laid out
+    if (item.top < box.top) column.scrollTop -= box.top - item.top;
+    else if (item.bottom > box.bottom) column.scrollTop += item.bottom - box.bottom;
   }
 
   /** Active entry = the heading nearest the viewport top: the last one
@@ -158,8 +337,8 @@ export function mountSite(opts: MountOptions): SiteHandle {
       if (tocEntries[i]!.heading.getBoundingClientRect().top <= 96) best = i;
       else break;
     }
-    const doc = document.documentElement;
-    if (window.scrollY + window.innerHeight >= doc.scrollHeight - 2) {
+    const docEl = doc.documentElement;
+    if (window.scrollY + window.innerHeight >= docEl.scrollHeight - 2) {
       best = tocEntries.length - 1;
     }
     setActiveToc(best);
@@ -179,11 +358,13 @@ export function mountSite(opts: MountOptions): SiteHandle {
    *  handler does the scrolling, so clicks, back/forward and shared
    *  URLs all take the same path. A page without any leaves the
    *  section empty. Heading ids are slugged (`lw-h-<slug>`), so
-   *  anchors survive insertions above them. */
-  function buildToc(doc: HTMLElement, pageSlugStr: string): void {
+   *  anchors survive insertions above them. The built entries are put
+   *  into the DOM only while the contents view is showing (see
+   *  renderNav), so the rail never carries both lists. */
+  function buildToc(docRoot: HTMLElement, pageSlugStr: string): void {
     disposeToc();
     const headings = Array.from(
-      doc.querySelectorAll<HTMLElement>('h2.lw-heading, h3.lw-heading'));
+      docRoot.querySelectorAll<HTMLElement>('h2.lw-heading, h3.lw-heading'));
     const taken = new Set<string>();
     tocEntries = headings.map((heading, i) => {
       let slug = kebab(heading.textContent ?? '');
@@ -193,16 +374,16 @@ export function mountSite(opts: MountOptions): SiteHandle {
       while (taken.has(unique)) unique = `${slug}-${n++}`;
       taken.add(unique);
       heading.id = `lw-h-${unique}`;
-      const link = document.createElement('a');
+      const link = doc.createElement('a');
       link.className = 'lw-toc-item';
       if (heading.tagName === 'H3') link.classList.add('lw-toc-sub');
       link.dataset.test = 'toc-item';
       link.href = `#/${pageSlugStr}/${unique}`;
       link.textContent = heading.textContent ?? '';
-      tocList.appendChild(link);
       return { heading, link, slug: unique };
     });
     setActiveToc(0);
+    renderNav(); // exactly one list in the rail after every page build
     if (tocEntries.length === 0 || typeof IntersectionObserver === 'undefined') {
       return; // tests/old DOMs: the hashchange path still works
     }
@@ -220,8 +401,8 @@ export function mountSite(opts: MountOptions): SiteHandle {
     if (active !== -1) panel.detach(); // page switch: panel detaches
     active = index;
 
-    const doc = parseOrg(pages[index]!.orgSource);
-    const rendered = renderDocument(doc, (lang) => byLang.has(lang));
+    const parsed = parseOrg(pages[index]!.orgSource);
+    const rendered = renderDocument(parsed, (lang) => byLang.has(lang));
     rendered.root.dataset.test = 'page';
     docPane.appendChild(rendered.root);
     buildToc(rendered.root, slugs[index]!);
@@ -239,9 +420,11 @@ export function mountSite(opts: MountOptions): SiteHandle {
     for (const [i, a] of links.entries()) {
       const on = i === index;
       a.classList.toggle('lw-nav-active', on);
+      a.dataset.active = String(on);
       if (on) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
     }
+    // the view is the user's choice: a page switch never changes it
   }
 
   /** Page named by the hash (`#/<slug>/…`): unknown or missing slug →
@@ -290,9 +473,13 @@ export function mountSite(opts: MountOptions): SiteHandle {
     }
   }
 
+  syncViewButtons();
+  navView = 'contents'; // every mount opens on the contents view
+  renderNav();          // …painted before the first route build
+  applyNavSide();
   const onHashChange = (): void => routeAndScroll(false);
   window.addEventListener('hashchange', onHashChange);
-  routeAndScroll(true);
+  routeAndScroll(true); // builds the first page (and its contents)
   const disposeTooltips = installTooltips(root);
 
   return {
@@ -303,7 +490,15 @@ export function mountSite(opts: MountOptions): SiteHandle {
     get activeIndex(): number {
       return active;
     },
+    get navSide(): NavSide {
+      return navSide;
+    },
+    get navView(): NavView {
+      return navView;
+    },
     show,
+    setNavSide,
+    setNavView: setView,
     dispose(): void {
       disposeTooltips();
       window.removeEventListener('hashchange', onHashChange);
@@ -311,7 +506,9 @@ export function mountSite(opts: MountOptions): SiteHandle {
       blocks = [];
       disposeToc();
       root.replaceChildren();
-      root.classList.remove('lw-site', 'lw-no-fonts', 'lw-panel-attached');
+      root.classList.remove(
+        'lw-site', 'lw-no-fonts', 'lw-panel-attached', 'lw-nav-left', 'lw-nav-right');
+      // the persisted side is deliberately kept: the next mount restores it
     },
   };
 }

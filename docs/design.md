@@ -119,16 +119,40 @@ adding kernels a matter of implementing one package against
   section labels. Changed registers marked with a left rule + tint, not
   color-coded text. Status/error states: error text may use dark red
   `#8b1a1a`; success states stay black-on-white (no green).
-- Layout: at rest two zones — navigation rail left (232px: Contents
-  above, Pages below, hairline between), document center (content
-  capped at ~74ch, centered) — and a third zone, the panel rail,
-  sliding from 0 to `clamp(420px, 42vw, 720px)` when attached.
-  Hairline separators, rails sticky and internally scrolling (each
-  rail section scrolls on its own when the viewport is short); zones
-  stack vertically < 900px, where Contents hides, Pages wrap
-  horizontally, and the panel (full-width, under the document)
-  appears only while attached. Page-level chrome is limited to the
-  rail's small-caps headers and the plain document title header.
+- Layout: at rest two zones — the navigation rail (232px, seesawing
+  between the left edge and the right one on demand) and the document
+  center — plus a third zone, the panel rail, sliding from 0 to
+  `clamp(420px, 42vw, 720px)` when attached (28vw < 1420px, where it
+  would squeeze the document). The rail shows **one list at a time**:
+  a header bar carries a small-caps `Contents | Pages` switch and a
+  compact side toggle, and below it either this page's section tree or
+  the page list renders in the same rhythm — never both, never split
+  top and bottom. On a large display the reading
+  **measure and the body type grow together** — wider text, bigger
+  letters: 74ch at 16px, 82ch at 17px from 1600px, 90ch at 18px from
+  2200px (a `ch` is 0.648em in Atkinson Hyperlegible, so 74ch is
+  767px, 82ch 903px, 90ch 1050px — about 100, 111 and 122 characters
+  a line); headings and spacing are em-based, so they scale with the
+  prose. Tables and code blocks may run to `min(100%, 90ch)`. The
+  layout frame is rail + 2 * (measure + 4.5rem) — 119.4rem at the
+  base measure, 136.4rem from 1600px, 154.7rem from 2200px — so side
+  padding stays a 1.5-2.25rem gutter instead of a half-empty band;
+  while a panel is attached the same frame is split three ways and the
+  document never narrows below 40ch (the doc's own ch, ~467px at
+  18px). With the panel detached the text is centred on the page by
+  the grid itself — the track beside the 232px rail is viewport minus
+  the rail, so its centre is the page centre — and no left/right
+  offset rule is used; while a panel is attached both gaps around the
+  text are the gutter.
+  Hairline separators, rails sticky and internally scrolling (the
+  one shown list scrolls on its own when the viewport is short); zones
+  stack vertically < 900px, where the rail header still shows both
+  switches and the shown list wraps horizontally, and the panel
+  (full-width, under the document) appears only while attached.
+  Page-level chrome is limited to the rail's small-caps switch and the
+  plain document title header. The navigator remembers which side it
+  was put on (`localStorage['didact:nav-side']`), and `mountSite` can
+  set the initial side with `navSide`.
 
 ## Org-mode compatibility (binding, unchanged from v0.1)
 
