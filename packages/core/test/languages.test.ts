@@ -31,7 +31,7 @@ function unionMembers(): Syntax[] {
 /** The kernel ids apps/site registers (mountSite's `kernels` array). */
 const REGISTERED = [
   'asm', 'riscv', 'mips', 'c', 'cpp', 'wasm', 'python', 'sql', 'matlab',
-  'lua', 'javascript', 'regex', 'lisp', 'prolog', 'typst',
+  'lua', 'javascript', 'regex', 'lisp', 'elisp', 'prolog', 'typst',
 ];
 
 /** id → editorSyntax for every kernel package's src/kernel.ts declaration. */
@@ -179,6 +179,7 @@ describe('every registered kernel declares a syntax that resolves', () => {
     expect(declared.get('regex')).toBe('regexp');
     expect(declared.get('typst')).toBe('typst');
     expect(declared.get('lisp')).toBe('scheme');
+    expect(declared.get('elisp')).toBe('scheme');
     expect(declared.get('matlab')).toBe('octave');
   });
 });

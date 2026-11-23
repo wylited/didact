@@ -4,9 +4,9 @@ A client-side literate-programming site framework. Drop `.org` files in and
 get a site where prose interleaves with executable, steppable code blocks;
 each block drives an under-the-hood machine panel — registers, disassembly,
 memory, console; a disassembly row shows its source line's `;` comment on
-hover. Fifteen kernels ship out of the box: x86-64, RV32IM, MIPS32, C,
+hover. Sixteen kernels ship out of the box: x86-64, RV32IM, MIPS32, C,
 C++, WebAssembly, Python, SQL, MATLAB, Lua, JavaScript, regex, Lisp,
-Prolog, and Typst. No server, no runtime network beyond
+Emacs Lisp, Prolog, and Typst. No server, no runtime network beyond
 same-origin vendor assets: parsing, assembly, execution, and stepping are
 all client-side.
 
@@ -59,6 +59,7 @@ Open the printed URL. (If pnpm blocks esbuild's install script, run
 | `javascript` | JavaScript · interpreter | `javascript` | `packages/kernel-javascript` | none (pure TypeScript interpreter) |
 | `regex` | Regex · NFA engine | `regexp` | `packages/kernel-regex` | none (pure TypeScript Thompson NFA) |
 | `lisp` | Lisp · interpreter | `scheme` | `packages/kernel-lisp` | none (pure TypeScript interpreter) |
+| `elisp` | Emacs Lisp · interpreter | `scheme` | `packages/kernel-elisp` | none (pure TypeScript interpreter) |
 | `prolog` | Prolog · interpreter | `plain` | `packages/kernel-prolog` | none (pure TypeScript SLD engine) |
 | `typst` | Typst · wasm | `typst` | `packages/kernel-typst` | `public/vendor-typst/` (~25 MB, compiler wasm + fonts) |
 

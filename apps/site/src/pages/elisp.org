@@ -1,0 +1,47 @@
+#+TITLE: Emacs Lisp
+
+* Two cells per symbol
+#+BEGIN_SRC elisp
+(defun double (x) (* 2 x))
+(setq double 99)
+(list (double 4) double)
+#+END_SRC
+
+#+RESULTS:
+: (8 99)
+
+* Dynamic by default
+#+BEGIN_SRC elisp
+(setq x 1)
+(defun get-x () x)
+(let ((x 2)) (get-x))
+#+END_SRC
+
+#+RESULTS:
+: 2
+
+* Lexical with the file-local header
+#+BEGIN_SRC elisp
+;; -*- lexical-binding: t; -*-
+(setq x 1)
+(defun get-x () x)
+(let ((x 2)) (get-x))
+#+END_SRC
+
+#+RESULTS:
+: 1
+
+* Buffers and hooks
+#+BEGIN_SRC elisp
+(defvar launched 0)
+(defun note-launch () (setq launched (1+ launched)))
+(add-hook 'after-init-hook #'note-launch)
+(run-hooks 'after-init-hook)
+(with-current-buffer (get-buffer-create "notes")
+  (insert "hello")
+  (goto-char 1)
+  (buffer-string))
+#+END_SRC
+
+#+RESULTS:
+: "hello"

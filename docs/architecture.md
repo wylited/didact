@@ -19,6 +19,7 @@ packages/kernel-lua        @didact/kernel-lua        Lua teaching-subset interpr
 packages/kernel-javascript @didact/kernel-javascript JavaScript teaching-subset interpreter (pure TypeScript)
 packages/kernel-regex      @didact/kernel-regex      Thompson-NFA regex engine, state-set panels (pure TypeScript)
 packages/kernel-lisp       @didact/kernel-lisp       Scheme-flavored Lisp interpreter, cons-heap panels (pure TypeScript)
+packages/kernel-elisp      @didact/kernel-elisp      Emacs Lisp: Lisp-2 cells, dynamic/lexical binding, buffers, hooks, keymaps (pure TypeScript)
 packages/kernel-prolog     @didact/kernel-prolog     SLD-resolution Prolog, choice-point panels (pure TypeScript)
 packages/kernel-typst      @didact/kernel-typst      Typst via vendored compiler wasm + fonts
 apps/site                  @didact/site             the website (src/pages/*.org + kernel registration)

@@ -193,6 +193,9 @@ importers:
       '@didact/kernel-cpp':
         specifier: workspace:*
         version: link:../../packages/kernel-cpp
+      '@didact/kernel-elisp':
+        specifier: workspace:*
+        version: link:../../packages/kernel-elisp
       '@didact/kernel-javascript':
         specifier: workspace:*
         version: link:../../packages/kernel-javascript
@@ -296,6 +299,8 @@ importers:
       '@yowasp/clang':
         specifier: 22.0.0-git20542-10
         version: 22.0.0-git20542-10
+
+  packages/kernel-elisp: {}
 
   packages/kernel-javascript: {}
 

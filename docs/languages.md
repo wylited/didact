@@ -24,6 +24,7 @@ the same change.
 | `lua` | `lua` | Stream (legacy `lua`) | good | Lua 5.x keywords, long strings/comments |
 | `matlab` | `octave` | Stream (legacy `octave`) | good | the M-file grammar is shared with Octave |
 | `lisp` | `scheme` | Stream (legacy `scheme`) | good | the kernel is Scheme-flavoured; quasi-quote reads right |
+| `elisp` | `scheme` | Stream (legacy `scheme`) | good | no Emacs Lisp mode is vendored; Scheme reads quote/backquote/comma and `;;` comments correctly |
 | `sql` | `sql` | Stream (`modes.ts` `sqlMode`) | good | the id existed but was wired to the legacy multi-dialect `sql({})`, which knows no types and reads `[` in comments; now dialect-specific (SQLite keywords/types, `''` escaping, `--` and `/* */`) |
 | `regex` | `regexp` | Stream (`modes.ts` `regexpMode`) | good | *was `plain`*: now metacharacters, `[]`/`[^]` classes, `{n,m}`, `#` comment lines; test-input lines stay plain |
 | `wasm` | `wat` | Stream (`modes.ts` `watMode`) | good | *was `scheme`* (highlighted as Lisp): nodes `(module`/`(func`, `i32.*` opcodes, `$names`, `;;`/`(; ;)` |
@@ -32,7 +33,7 @@ the same change.
 
 Superseded ids: the README/AGENTS list of supported syntaxes was stale
 (`lua`/`octave` absent). They are listed now, alongside the three new ids.
-The union gained `regexp`, `typst`, `wat` and lost nothing; all fifteen
+The union gained `regexp`, `typst`, `wat` and lost nothing; all sixteen
 `packages/*/src/types.ts` mirrors were re-synced with `packages/core/src/kernel.ts`.
 
 Verification: `packages/core/test/languages.test.ts` scans every
@@ -63,6 +64,7 @@ the control-flow/state story *of that language*.
 | 13 | `cpp` | mediocre | same as `c` | same as `c` |
 | 14 | `python` | deep | **Progress** (new), **Trace · executed lines** (counts, source text, failure row, flow sentence), **Call stack**, **Traceback**, **Variables · grouped** (scalars/collections/functions/classes, previews + lengths), **Locals · failing frame**, **Types · declared vs observed**, console (traceback: the lesson's frames only) | unit: per-line "what changed" (needs a resumable run); see §5 |
 | 15 | `typst` | shallow | rendered page (html), diagnostics, page count | unit: layout boxes; it is a compiler, so "fetch/compile/render" is its story |
+| 16 | `elisp` | good | control stack, buffer fields/text, lexical and dynamic environments, Lisp-2 symbol cells, hooks, keymaps, output | unit: dynamic vs lexical closure; macro expansion is steppable |
 
 ## 3. Implemented this round
 

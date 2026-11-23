@@ -460,6 +460,8 @@ export class BlockRuntime {
     );
     this.setError(load);
     this.setMarks({ current: null });
+    // a program that does not load has no result to show
+    if (this.resultsEl !== null) this.resultsEl.replaceChildren();
     this.busy = false;
     this.events.onActivity(this);
   }

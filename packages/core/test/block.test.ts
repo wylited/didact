@@ -98,8 +98,9 @@ describe('BlockRuntime: run and reset', () => {
     expect(status.textContent).toContain('error · line 2: bad instruction');
     expect(error.hidden).toBe(false);
     expect(error.textContent).toBe('line 2: bad instruction');
-    // a failed load never reaches the engine
+    // a failed load never reaches the engine and clears the canned result
     expect(session.runCalls).toBe(0);
+    expect(root.querySelector("[data-test='results']")!.textContent).toBe('');
 
     // a line-less failure (e.g. linker error) reports the message raw
     session.loadResult = { ok: false, message: 'undefined symbol' };

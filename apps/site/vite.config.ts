@@ -45,6 +45,10 @@ export default defineConfig({
         '../../packages/kernel-lisp/src',
         import.meta.url,
       ).pathname,
+      '@didact/kernel-elisp': new URL(
+        '../../packages/kernel-elisp/src',
+        import.meta.url,
+      ).pathname,
       '@didact/kernel-lua': new URL(
         '../../packages/kernel-lua/src',
         import.meta.url,

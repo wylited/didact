@@ -14,6 +14,7 @@ one `tsc --noEmit` + `vite build` covers everything. No per-package build step.
 - `packages/kernel-cpp` — `@didact/kernel-cpp`: C++ kernel on the same clang wasm engine (libc++, c++20, no exceptions).
 - `packages/kernel-javascript` — `@didact/kernel-javascript`: JavaScript teaching-subset interpreter kernel (pure TypeScript).
 - `packages/kernel-lisp` — `@didact/kernel-lisp`: Scheme-flavored Lisp interpreter kernel with cons-heap panels (pure TypeScript).
+- `packages/kernel-elisp` — `@didact/kernel-elisp`: Emacs Lisp teaching kernel (Lisp-2, dynamic/lexical binding, macros, simulated buffers/hooks/keymaps; pure TypeScript).
 - `packages/kernel-python` — `@didact/kernel-python`: Python kernel on vendored Pyodide.
 - `packages/kernel-typst` — `@didact/kernel-typst`: Typst kernel on typst wasm + fonts.
 - `packages/kernel-wasm` — `@didact/kernel-wasm`: WebAssembly WAT-subset stack-machine interpreter kernel (pure TypeScript).
