@@ -64,9 +64,9 @@
   box-sizing: border-box;
 }
 
-/* ---- layout: navigation rail left (232px: contents above, pages
-   below), document center, panel rail right — zero-width until a
-   panel attaches, then clamp(420px, 42vw, 720px). The grid's outer
+/* ---- layout: navigation rail (232px, one list at a time) at either
+   edge, document center, panel rail at the right edge — zero-width
+   until a panel attaches, then clamp(420px, 42vw, 720px). The grid's outer
    tracks are `auto`, so the rails' animated element widths drive the
    grid: width 300ms cubic-bezier(.2,.7,.3,1); the panel fades in
    ~160ms.
@@ -175,14 +175,10 @@
 
 @media (min-width: 1600px) {
   .lw-site { --lw-frame: 136.4rem; --lw-gutter: 2rem; }
-  /* bigger body type; headings and spacing are em/rem-relative to it
-     (see "document" below), so the whole page scales coherently */
-  .lw-doc { --lw-doc-measure: 82ch; font-size: 1.0625rem; line-height: 1.68; }
 }
 
 @media (min-width: 2200px) {
   .lw-site { --lw-frame: 154.7rem; --lw-gutter: 2.25rem; }
-  .lw-doc { --lw-doc-measure: 90ch; font-size: 1.125rem; line-height: 1.66; }
 }
 
 /* ---- the navigation rail: ONE list at a time (contents | pages),
@@ -204,6 +200,18 @@
 .lw-site.lw-nav-right .lw-rail-nav {
   border-right: none;
   border-left: 1px solid var(--lw-hairline);
+}
+
+/* the right-side DOM order is document, panel rail, navigator (site.ts
+   appends the rail in right mode), so the tracks follow that order:
+   the document takes the flexible track and both rails take `auto`.
+   Without this the document landed in the leading `auto` track and the
+   rail in the 1fr one — the panel then painted over the rail. Only in
+   multi-column mode: the <900px stack uses a single column. */
+@media (min-width: 900px) {
+  .lw-site.lw-nav-right .lw-layout {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
 }
 
 /* the header bar: a segmented CONTENTS | PAGES switch plus the side
@@ -386,8 +394,10 @@
     transition: none;
   }
   /* the rail stacks above the document: header (view switch + side
-     toggle) first, then the shown list as a wrapping row */
+     toggle) first, then the shown list as a wrapping row. On the right
+     the rail is last in DOM order, so `order` brings it back on top. */
   .lw-rail-nav {
+    order: -1;
     border-right: none;
     border-bottom: 1px solid var(--lw-hairline);
   }
@@ -410,8 +420,52 @@
   .lw-doc-pane > .lw-doc { max-width: none; }
 }
 
+/* ---- small desktops (900-1199px) with a panel attached: the 420px
+   panel beside the 232px rail would leave the document under its 40ch
+   floor (at 900px barely 17ch). The rail moves to a header strip and
+   the panel keeps its place beside the document, so the panel stays
+   visible and the document keeps ~40-65ch; the rail returns to its
+   own column as soon as the panel detaches. */
+
+@media (min-width: 900px) and (max-width: 1199px) {
+  .lw-site.lw-panel-attached .lw-layout {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "nav nav" "doc panel";
+  }
+  .lw-site.lw-panel-attached .lw-rail-nav {
+    grid-area: nav;
+    position: static;
+    height: auto;
+    width: auto;
+    overflow: visible;
+    border-right: none;
+    border-left: none;
+    border-bottom: 1px solid var(--lw-hairline);
+  }
+  .lw-site.lw-panel-attached .lw-doc-pane { grid-area: doc; }
+  /* a touch narrower than the 420px default: the 20px go to the text */
+  .lw-site.lw-panel-attached .lw-rail-right {
+    grid-area: panel;
+    width: clamp(400px, 40vw, 460px);
+  }
+  /* the rail's lists flow below the switch instead of filling a
+     full-height column */
+  .lw-site.lw-panel-attached .lw-contents,
+  .lw-site.lw-panel-attached .lw-rail-pages-list {
+    flex: none;
+    overflow-y: visible;
+    padding-top: 0.5rem;
+  }
+  .lw-site.lw-panel-attached .lw-rail-pages-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  /* the doc keeps its normal measure (the base rule centres it); only
+     the phones drop the cap, where the viewport is already the cap */
+}
+
 /* ---- document. Everything inside scales with the doc's own
-   font-size (em, not rem), so the 1600/2200px type bump above carries
+   font-size (em, not rem), so the 1600/2200px type tiers below carry
    the heading sizes and the vertical rhythm with it instead of
    leaving them fixed beside larger prose. The `ch` measures come from
    --lw-doc-measure, so a `ch` here is the doc's ch. */
@@ -420,6 +474,17 @@
   --lw-doc-measure: 74ch;    /* the doc's own ch: 82ch >= 1600px, 90ch >= 2200px */
   font-family: var(--lw-serif);
   line-height: 1.65;
+}
+
+/* Wide-screen tiers: measure AND type grow together. These must follow
+   the base .lw-doc rule above — same specificity, and the older placement
+   beside the frame tiers was overridden by the 74ch default. */
+@media (min-width: 1600px) {
+  .lw-doc { --lw-doc-measure: 82ch; font-size: 1.0625rem; line-height: 1.68; }
+}
+
+@media (min-width: 2200px) {
+  .lw-doc { --lw-doc-measure: 90ch; font-size: 1.125rem; line-height: 1.66; }
 }
 
 .lw-title {

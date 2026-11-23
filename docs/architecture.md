@@ -47,9 +47,11 @@ today so pyodide-style kernels need no contract change later.
 
 
 - `parseOrg(src): OrgDoc` — grammar per `docs/design.md`.
-- `mountSite({ root, fonts?, kernels, pages })` → renders the nav bar +
-  active page document, block runtimes, panel host. Handle exposes
-  `blocks`, `panel`, `activeIndex`, `show(index)`, `dispose()`.
+- `mountSite({ root, fonts?, kernels, pages, navSide?, navView? })` →
+  renders the navigation rail + active page document, block runtimes,
+  panel host. Handle exposes `blocks`, `panel`, `activeIndex`, `navSide`,
+  `navView`, `show(index)`, `setNavSide(side)`, `setNavView(view)`,
+  `dispose()`.
 - Block runtime: CodeMirror 6 editor (Ayu Light), per-block controls +
   status + error box + results slot; running/attached highlights; current
   line decoration on step and breakpoint pause; gutter breakpoints when

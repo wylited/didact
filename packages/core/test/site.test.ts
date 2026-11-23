@@ -245,6 +245,23 @@ describe('mountSite: navigator rail and panel zone', () => {
     expect(tocTexts(root)).toEqual(['Alpha', 'Sub', 'Beta']);
   });
 
+  it("mount option navView: 'pages' opens on the page list (the example site's default)", () => {
+    const { handle, root } = mount(TOC_PAGES, { navView: 'pages' });
+    handles.push(handle);
+    expect(handle.navView).toBe('pages');
+    expect(root.querySelector<HTMLButtonElement>("[data-test='rail-view-pages']")!
+      .getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector<HTMLButtonElement>("[data-test='rail-view-contents']")!
+      .getAttribute('aria-pressed')).toBe('false');
+    expect(shownLists(root).map((el) => el.dataset.test)).toEqual(['nav-list']);
+    expect(pageLinkTexts(root)).toEqual(['Guide', 'Plain']);
+    expect(root.querySelector("[data-test='toc']")!.hidden).toBe(true);
+    // the contents are dormant, not lost: the switch brings them back
+    root.querySelector<HTMLButtonElement>("[data-test='rail-view-contents']")!.click();
+    expect(handle.navView).toBe('contents');
+    expect(tocTexts(root)).toEqual(['Alpha', 'Sub', 'Beta']);
+  });
+
   it('clicking "Pages" shows the page links and empties the contents; "Contents" restores them', () => {
     const { handle, root } = mount(TOC_PAGES);
     handles.push(handle);
@@ -476,24 +493,26 @@ describe('mountSite: navigator side', () => {
       'lw-rail lw-rail-nav', 'lw-doc-pane', 'lw-rail lw-rail-right',
     ]);
     expect(window.localStorage.getItem(NAV_SIDE_KEY)).toBeNull(); // default is not persisted
-    // the side toggle is a real button naming the current side
+    // the side toggle is a real button naming the ACTION, not the state
     const side = root.querySelector<HTMLButtonElement>("[data-test='rail-side']")!;
     expect(side.tagName).toBe('BUTTON');
     expect(side.getAttribute('type')).toBe('button');
-    expect(side.textContent).toBe('Nav left');
+    expect(side.textContent).toBe('Right →');
+    expect(side.getAttribute('aria-label')).toBe('Move navigation to the right');
   });
 
-  it("mount option navSide: 'right' puts the navigator last, document in the middle, panel rail last", () => {
+  it("mount option navSide: 'right' puts the navigator on the right edge, document in the middle", () => {
     const { handle, root } = mount(PAGES, { navSide: 'right' });
     handles.push(handle);
     expect(handle.navSide).toBe('right');
     expect(sideClass(root)).toEqual(['lw-nav-right']);
     const layout = root.querySelector('.lw-layout')!;
     expect([...layout.children].map((el) => el.className)).toEqual([
-      'lw-doc-pane', 'lw-rail lw-rail-nav', 'lw-rail lw-rail-right',
+      'lw-doc-pane', 'lw-rail lw-rail-right', 'lw-rail lw-rail-nav',
     ]);
-    expect(root.querySelector<HTMLButtonElement>("[data-test='rail-side']")!.textContent)
-      .toBe('Nav right');
+    const side = root.querySelector<HTMLButtonElement>("[data-test='rail-side']")!;
+    expect(side.textContent).toBe('← Left');
+    expect(side.getAttribute('aria-label')).toBe('Move navigation to the left');
   });
 
   it('the rail-side toggle flips root class, layout order and handle state, and persists', () => {
@@ -504,11 +523,11 @@ describe('mountSite: navigator side', () => {
     expect(handle.navSide).toBe('right');
     expect(sideClass(root)).toEqual(['lw-nav-right']);
     expect([...layout.children].map((el) => el.className)).toEqual([
-      'lw-doc-pane', 'lw-rail lw-rail-nav', 'lw-rail lw-rail-right',
+      'lw-doc-pane', 'lw-rail lw-rail-right', 'lw-rail lw-rail-nav',
     ]);
     expect(window.localStorage.getItem(NAV_SIDE_KEY)).toBe('right');
     expect(root.querySelector<HTMLButtonElement>("[data-test='rail-side']")!.textContent)
-      .toBe('Nav right');
+      .toBe('← Left');
 
     root.querySelector<HTMLButtonElement>("[data-test='rail-side']")!.click();
     expect(handle.navSide).toBe('left');
@@ -535,7 +554,7 @@ describe('mountSite: navigator side', () => {
     expect(second.handle.navSide).toBe('right');
     expect(sideClass(second.root)).toEqual(['lw-nav-right']);
     expect(second.root.querySelector<HTMLButtonElement>("[data-test='rail-side']")!.textContent)
-      .toBe('Nav right');
+      .toBe('← Left');
     expect(window.localStorage.getItem(NAV_SIDE_KEY)).toBe('right');
 
     // clearing the key returns to the option default on the next mount
@@ -655,26 +674,31 @@ describe('theme: measure', () => {
   function declares(head: string, decl: string): boolean {
     return ruleBody(head).includes(decl);
   }
-  /** Custom properties set in the `@media (min-width: <width>)` block;
+  /** Bodies of every `@media (min-width: <width>)` block: layout tokens
+   *  and the doc's type tiers live in separate blocks of the same
+   *  breakpoint, and both matter. */
+  function mediaBodies(width: string | number): string[] {
+    const query = typeof width === 'number' ? `${width}px` : width;
+    const blocks = [...bare.matchAll(
+      new RegExp(`@media \\(min-width: ${query}\\)\\s*\\{([\\s\\S]*?)\\n\\}`, 'g'))];
+    expect(blocks.length > 0).toBe(true); // the media block exists
+    return blocks.map((b) => b[1]!);
+  }
+  /** Custom properties set in the `@media (min-width: <width>)` blocks;
    *  a bare number is read as px. */
   function varsIn(width: string | number): Record<string, string> {
-    const query = typeof width === 'number' ? `${width}px` : width;
-    const block = new RegExp(
-      `@media \\(min-width: ${query}\\)\\s*\\{([\\s\\S]*?)\\n\\}`).exec(bare);
-    expect(block !== null).toBe(true); // the media block exists
     const vars: Record<string, string> = {};
-    for (const m of block![1]!.matchAll(/--([a-z-]+)\s*:\s*([^;]+);/g)) {
-      vars[m[1]!] = m[2]!.trim();
+    for (const body of mediaBodies(width)) {
+      for (const m of body.matchAll(/--([a-z-]+)\s*:\s*([^;]+);/g)) {
+        vars[m[1]!] = m[2]!.trim();
+      }
     }
     return vars;
   }
-  /** The .lw-doc font-sizes declared in the `@media (min-width)` block. */
+  /** The .lw-doc font-sizes declared in the `@media (min-width)` blocks. */
   function fontSizesIn(minWidth: number): string[] {
-    const block = new RegExp(
-      `@media \\(min-width: ${minWidth}px\\)\\s*\\{([\\s\\S]*?)\\n\\}`).exec(bare);
-    expect(block !== null).toBe(true);
-    return [...block![1]!.matchAll(/\.lw-doc\s*\{[^}]*?font-size:\s*([^;]+);/g)]
-      .map((m) => m[1]!.trim());
+    return mediaBodies(minWidth).flatMap((body) => [...body.matchAll(
+      /\.lw-doc\s*\{[^}]*?font-size:\s*([^;]+);/g)].map((m) => m[1]!.trim()));
   }
 
   it('the measure grows to 90ch with the type: 74ch @16px, 82ch @17px, 90ch @18px', () => {
@@ -748,6 +772,9 @@ describe('mountSite: navigator layout', () => {
     expect(text).toContain('.lw-site.lw-nav-right .lw-rail-nav {\n  border-right: none;\n  border-left: 1px solid var(--lw-hairline);');
     // the document keeps the middle track in both modes
     expect(text).toContain('.lw-layout {\n  display: grid;\n  grid-template-columns: auto minmax(0, 1fr) auto;');
+    // right mode reorders the DOM (doc, panel, nav), so its template
+    // must follow: the rail never lands in the flexible track
+    expect(text).toMatch(/\.lw-site\.lw-nav-right \.lw-layout \{\s+grid-template-columns: minmax\(0, 1fr\) auto auto;/);
     // one list at a time: the hidden view paints nothing
     expect(text).toContain('.lw-contents[hidden]');
   });
@@ -757,6 +784,19 @@ describe('mountSite: navigator layout', () => {
     const narrow = text.slice(text.indexOf('@media (max-width: 899px)'));
     expect(narrow).toContain('.lw-rail-nav {');
     expect(narrow).toContain('.lw-contents, .lw-rail-pages-list {\n    flex-direction: row;');
+    expect(narrow).toContain('.lw-rail-nav {\n    order: -1;');
+  });
+
+  it('small desktops stack while a panel is attached, so the document keeps its full width', () => {
+    const text = stripComments(css());
+    const mid = text.slice(text.indexOf('@media (min-width: 900px) and (max-width: 1199px)'));
+    // the rail becomes a header strip; doc + panel stay side by side, so
+    // the panel is never pushed below the document
+    expect(mid).toContain('grid-template-areas: "nav nav" "doc panel";');
+    expect(mid).toContain('.lw-site.lw-panel-attached .lw-rail-nav {\n    grid-area: nav;');
+    expect(mid).toContain('.lw-site.lw-panel-attached .lw-rail-right {\n    grid-area: panel;');
+    // the doc keeps its measure: only phones drop the cap
+    expect(mid).not.toContain('max-width: none');
   });
 
   it('the navigator renders the same three zones in both modes, with no duplicated rail', () => {
@@ -769,7 +809,7 @@ describe('mountSite: navigator layout', () => {
       expect(root.querySelectorAll('.lw-layout').length).toBe(1);
       expect(order).toEqual(navSide === 'left'
         ? ['lw-rail lw-rail-nav', 'lw-doc-pane', 'lw-rail lw-rail-right']
-        : ['lw-doc-pane', 'lw-rail lw-rail-nav', 'lw-rail lw-rail-right']);
+        : ['lw-doc-pane', 'lw-rail lw-rail-right', 'lw-rail lw-rail-nav']);
     }
   });
 });

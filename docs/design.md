@@ -139,11 +139,16 @@ adding kernels a matter of implementing one package against
   padding stays a 1.5-2.25rem gutter instead of a half-empty band;
   while a panel is attached the same frame is split three ways and the
   document never narrows below 40ch (the doc's own ch, ~467px at
-  18px). With the panel detached the text is centred on the page by
-  the grid itself — the track beside the 232px rail is viewport minus
-  the rail, so its centre is the page centre — and no left/right
-  offset rule is used; while a panel is attached both gaps around the
-  text are the gutter.
+  18px). The text is centred in the band beside the rail by the grid
+  itself (`margin-inline: auto` on the doc, no left/right offset), and
+  while a panel is attached both gaps around the text are the gutter.
+  The navigator's DOM order follows its side: left = rail, document,
+  panel; right = document, panel, rail. The grid template matches that
+  order, so the rail always keeps its 232px track and the panel never
+  rides over it. At 900-1199px with a panel attached the rail moves to
+  a header strip (its lists wrap horizontally) and document + panel
+  stay side by side, so the panel is not pushed below the fold and the
+  document keeps ~40-65ch.
   Hairline separators, rails sticky and internally scrolling (the
   one shown list scrolls on its own when the viewport is short); zones
   stack vertically < 900px, where the rail header still shows both
@@ -152,7 +157,9 @@ adding kernels a matter of implementing one package against
   Page-level chrome is limited to the rail's small-caps switch and the
   plain document title header. The navigator remembers which side it
   was put on (`localStorage['didact:nav-side']`), and `mountSite` can
-  set the initial side with `navSide`.
+  set the initial side with `navSide` and the initial list with
+  `navView` (the example site opens on Pages; the core default is
+  Contents).
 
 ## Org-mode compatibility (binding, unchanged from v0.1)
 

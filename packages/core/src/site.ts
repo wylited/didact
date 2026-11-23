@@ -19,16 +19,20 @@
 // switch (`data-test="rail-view-contents"` /
 // `data-test="rail-view-pages"`, real <button type="button"> with
 // aria-pressed) and a compact side toggle (`data-test="rail-side"`).
-// The default view is contents; a page switch keeps whichever view is
-// showing — only the user switches views.
+// The default view is contents (`MountOptions.navView` can open on the
+// page list, which the example site does); a page switch keeps whichever
+// view is showing — only the user switches views.
 //
 // Side convention (root class on the mount element, which also carries
 // `lw-site`): `lw-nav-left` = navigator is the first grid column, its
 // hairline on its right edge (default); `lw-nav-right` = navigator is the
-// last grid column, its hairline moved to its left edge, document still
-// in the middle. Exactly one of the two classes is present; the other is
-// removed. Chosen at mount by `MountOptions.navSide`, changed at runtime
-// by `SiteHandle.setNavSide`. A non-default choice is persisted in
+// last grid column, its hairline on its left edge, document still in the
+// middle and the panel rail between them. Exactly one of the two classes
+// is present; the other is removed. Chosen at mount by
+// `MountOptions.navSide`, changed at runtime by `SiteHandle.setNavSide`.
+// The column order follows the side (theme.css), so the rail's track is
+// always the 232px `auto` one, never the flexible document track. A
+// non-default choice is persisted in
 // localStorage under `didact:nav-side` (guarded: a throwing storage never
 // breaks mounting and a call that fails to store still applies); clearing
 // that key (or a stored value that is not 'left'/'right') returns to the
@@ -77,6 +81,9 @@ export interface MountOptions {
   /** Initial navigator side (default 'left'). A persisted choice
    *  (`localStorage['didact:nav-side']`) wins over this default. */
   navSide?: NavSide;
+  /** Initial navigator view (default 'contents'). Not persisted: the
+   *  example site opens on the page list. */
+  navView?: NavView;
 }
 
 export interface SiteHandle {
@@ -135,7 +142,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
   // ---- navigator rail: ONE list at a time (contents | pages) ----
   const navSideDefault: NavSide = opts.navSide === 'right' ? 'right' : 'left';
   let navSide: NavSide = readStoredNavSide() ?? navSideDefault;
-  let navView: NavView = 'contents';
+  let navView: NavView = opts.navView === 'pages' ? 'pages' : 'contents';
 
   const rail = doc.createElement('nav');
   rail.className = 'lw-rail lw-rail-nav';
@@ -203,15 +210,20 @@ export function mountSite(opts: MountOptions): SiteHandle {
   root.appendChild(layout);
 
   /** Apply the side: root classes + which end of the grid the rail takes.
-   *  Right mode appends the navigator after the document (the panel rail
-   *  is always last, so the document stays in the middle). */
+   *  Right mode appends the navigator after the panel rail, so the rail
+   *  stays on the page's right edge (theme.css assigns the matching
+   *  column template); the document stays in the middle. */
   function applyNavSide(): void {
     root.classList.toggle('lw-nav-left', navSide === 'left');
     root.classList.toggle('lw-nav-right', navSide === 'right');
-    sideBtn.textContent = navSide === 'left' ? 'Nav left' : 'Nav right';
-    sideBtn.title = `Move navigation to the ${navSide === 'left' ? 'right' : 'left'}`;
+    const target: NavSide = navSide === 'left' ? 'right' : 'left';
+    // the label names the ACTION (where a click moves the rail), not the
+    // current side; the current side is visible in the layout itself
+    sideBtn.textContent = target === 'left' ? '← Left' : 'Right →';
+    sideBtn.title = `Move navigation to the ${target}`;
+    sideBtn.setAttribute('aria-label', `Move navigation to the ${target}`);
     if (navSide === 'left') layout.prepend(rail);
-    else layout.insertBefore(rail, railRight);
+    else layout.append(rail);
   }
 
   function setNavSide(side: NavSide): void {
@@ -273,7 +285,6 @@ export function mountSite(opts: MountOptions): SiteHandle {
     // real fragment href: the click sets the hash, hashchange does the
     // switch (so the URL always names the visible page)
     a.href = `#/${slugs[i]}`;
-    a.textContent = page.title;
     a.textContent = page.title;
     return a;
   });
@@ -474,7 +485,6 @@ export function mountSite(opts: MountOptions): SiteHandle {
   }
 
   syncViewButtons();
-  navView = 'contents'; // every mount opens on the contents view
   renderNav();          // …painted before the first route build
   applyNavSide();
   const onHashChange = (): void => routeAndScroll(false);
