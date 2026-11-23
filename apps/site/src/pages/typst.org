@@ -64,3 +64,91 @@ Euclid gives us $x^2 + y^2 = z^2$.
 : one page: heading, theorem statement, roman-numbered four-step proof
 
 Try deleting a closing =$= and running again: Typst pins the /unclosed delimiter/ error to the exact line while leaving the other blocks alone.
+
+* Prose math, pre-rendered at build time
+
+Inline math is Typst too: $sum_(k=1)^n k = (n(n+1))/2$, $e^(i pi) + 1 = 0$, and $norm(v) = sqrt(v_1^2 + v_2^2 + dots.c + v_n^2)$ all typeset with the same compiler as the blocks below, but before the page ships. The browser receives MathML, so the text stays selectable and accessible.
+
+Display math gets its own line:
+
+$$ integral_0^1 x^2 dif x = 1/3 quad "and" quad sum_(k=0)^oo 1/2^k = 2 $$
+
+No engine download, no JavaScript, no font fetch: this paragraph is static HTML. The live blocks further down are a separate layer (the kernel) and still compile locally on Run.
+
+* Diagrams, compiled to SVG
+
+A typst block with =:results svg= is a diagram, not an editor: the build compiles it once and inlines the vector result. Everything else about the block is ordinary Typst, including package imports — any =@preview= package name resolves from the registry with no allowlist.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 10pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let stage(pos, body) = node(
+  pos, body,
+  shape: rect, inset: 6pt, width: 64pt,
+  stroke: 0.8pt + rgb("#1A9988"), fill: white,
+)
+#let wire(from, to, marks: "->", label: none) = edge(
+  from, to, marks,
+  stroke: 0.9pt + rgb("#1A9988"),
+  label: label, label-pos: 50%, label-sep: 4pt, label-fill: white,
+)
+
+#diagram(
+  stage((0, 0), [source]),
+  stage((1, 0), [parse]),
+  stage((2, 0), [emit]),
+  stage((3, 0), [run]),
+  wire((0, 0), (1, 0)),
+  wire((1, 0), (2, 0)),
+  wire((2, 0), (3, 0)),
+  wire((3, 0), (3, -1), marks: "-"),
+  wire((3, -1), (0, -1), marks: "-", label: [feedback]),
+  wire((0, -1), (0, 0)),
+)
+#+END_SRC
+
+A plot is the same mechanism with a different package: =@preview/lilaq= computes the samples at compile time, and the SVG reaches the page as geometry.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 10pt)
+#import "@preview/lilaq:0.6.0" as lq
+
+#let xs = lq.linspace(0, 4, num: 41)
+#let ys = xs.map(t => calc.exp(-t / 1.6) * calc.sin(2 * calc.pi * 0.9 * t))
+
+#lq.diagram(
+  width: 9cm, height: 4.5cm,
+  xlabel: [$t$], ylabel: [$v$],
+  xaxis: (ticks: (0, 1, 2, 3, 4), subticks: none),
+  lq.plot(xs, ys, mark: none, stroke: rgb("#1A9988")),
+)
+#+END_SRC
+
+A third package, a third output style: =@preview/cetz= draws the same page with a Cartesian canvas, so a geometry figure is a handful of coordinates rather than a plotted function.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 10pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1.6cm, {
+  import draw: *
+  grid((0, 0), (4, 2.4), step: 1, stroke: 0.3pt + luma(210))
+  line((0, 0), (3.6, 2.2), stroke: 0.9pt + rgb("#1A9988"))
+  circle((1.8, 1.1), radius: 0.7, stroke: 0.9pt + rgb("#1A9988"))
+  content((1.8, 1.1), [$r$])
+  content((3.6, 2.2), [end], anchor: "south-west")
+})
+#+END_SRC
+
+* Executable blocks stay interactive
+
+The block below has no =:results= header, so it remains a kernel block: edit it, press Run, and the panel shows the compiled page. Same language, same packages, different lifecycle — the build-time layer and the in-browser layer never share a session.
+
+#+BEGIN_SRC typst
+#set page(width: auto, height: auto, margin: 1em)
+$ integral_(-oo)^(+oo) e^(-x^2) dif x = sqrt(pi) $
+#+END_SRC

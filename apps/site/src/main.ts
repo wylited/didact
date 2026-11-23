@@ -18,6 +18,9 @@ import { prologKernel } from '@didact/kernel-prolog';
 import { regexKernel } from '@didact/kernel-regex';
 import { sqlKernel } from '@didact/kernel-sql';
 import { typstKernel } from '@didact/kernel-typst';
+// Pre-rendered prose math and static diagrams; compiled from the org pages
+// by apps/site/typst/vite.ts. The executable typst KERNEL stays separate.
+import typstArtifacts from 'virtual:didact-typst';
 
 // Nav order, by page file stem (not alphabetical, not glob order).
 const PAGE_ORDER = ['x86-64-assembly', 'riscv', 'mips', 'c', 'cpp', 'wasm', 'python', 'sql', 'matlab', 'lua', 'javascript', 'regex', 'lisp', 'prolog', 'typst'] as const;
@@ -60,4 +63,5 @@ mountSite({
   // the lesson list is the primary way around the site; the in-page
   // contents are one click away (and always reachable by scrolling)
   navView: 'pages',
+  typst: { artifacts: typstArtifacts },
 });

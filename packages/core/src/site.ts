@@ -51,6 +51,7 @@ import { parseOrg } from './org';
 import { renderDocument } from './render';
 import { PanelHost } from './panel';
 import { installTooltips } from './tooltip';
+import type { TypstRenderOptions } from './typst-source';
 import './theme.css';
 
 /** Navigator side: the grid column the navigation rail occupies. */
@@ -84,6 +85,9 @@ export interface MountOptions {
   /** Initial navigator view (default 'contents'). Not persisted: the
    *  example site opens on the page list. */
   navView?: NavView;
+  /** Build-time Typst artifacts for prose math and static diagrams.
+   *  Absent → `$…$` stays literal and diagram blocks render as code. */
+  typst?: TypstRenderOptions;
 }
 
 export interface SiteHandle {
@@ -138,6 +142,16 @@ export function mountSite(opts: MountOptions): SiteHandle {
 
   root.classList.add('lw-site');
   if (opts.fonts === false) root.classList.add('lw-no-fonts');
+
+  // Typst emits its MathML layout rules with each HTML compile; the build
+  // pipeline keeps one copy, injected once per mounted document.
+  const mathCss = opts.typst?.artifacts.mathCss ?? '';
+  if (mathCss !== '') {
+    const style = doc.createElement('style');
+    style.dataset.test = 'typst-math-css';
+    style.textContent = mathCss;
+    (doc.head ?? root).appendChild(style);
+  }
 
   // ---- navigator rail: ONE list at a time (contents | pages) ----
   const navSideDefault: NavSide = opts.navSide === 'right' ? 'right' : 'left';
@@ -413,7 +427,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
     active = index;
 
     const parsed = parseOrg(pages[index]!.orgSource);
-    const rendered = renderDocument(parsed, (lang) => byLang.has(lang));
+    const rendered = renderDocument(parsed, (lang) => byLang.has(lang), opts.typst);
     rendered.root.dataset.test = 'page';
     docPane.appendChild(rendered.root);
     buildToc(rendered.root, slugs[index]!);

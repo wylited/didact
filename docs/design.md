@@ -174,8 +174,16 @@ The org file must remain valid org-babel source in Emacs.
 
 - `*`… headings (depth = stars); `#+TITLE:`/`#+SUBTITLE:` page header.
 - `#+NAME: <id>` names the next block.
-- `#+BEGIN_SRC <lang> [headers]` / `#+END_SRC`; babel headers parsed+ignored.
+- `#+BEGIN_SRC <lang> [headers]` / `#+END_SRC`; babel headers are parsed
+  (they distinguish the two Typst layers, below) and otherwise ignored.
 - `#+RESULTS:` slot replaced by live output on run (DOM only).
+- `$…$` inline Typst math and `$$…$$` display math are rendered at build
+  time (MathML by default, SVG fallback). `=code=` and `~verbatim~` are
+  literal, so `=$v0=` is not math; `\$` is a dollar.
+- `#+BEGIN_SRC typst :results svg` (or `:file x.svg`) is a **static
+  diagram**: the build compiles it once and inlines the SVG. A `typst`
+  block without that header is the executable in-browser kernel. Same
+  language, two lifecycles; they never share a session.
 - Paragraphs with `*bold*` `/italic/` `=code=` `~verbatim~`; `- ` bullet
   lists; `| a | b |` tables; `# ` comments hidden.
 
