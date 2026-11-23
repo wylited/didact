@@ -1,38 +1,19 @@
-#+TITLE: C, Compiled in Your Browser
-#+SUBTITLE: Real clang → wasm32-wasi → WebAssembly, all in this tab
+#+TITLE: C in the Browser
+#+SUBTITLE: Real clang compiling to WebAssembly right in this tab
 
-The blocks on this page are /real, editable C/, and the compiler is *real
-clang* — the same LLVM 22 compiler you would run on the command line, here
-delivered as a ~86 MB WebAssembly build (the YoWASP project's packaging,
-served once from this site and then cached). Pressing ▶ Run downloads the
-toolchain if needed, compiles your block to a =wasm32-wasi= module, and shows
-the compiler's own diagnostics — a missing semicolon is reported on the exact
-1-based source line, because it is clang, not a toy, reporting it. The
-toolchain ships unmodified from the =@yowasp/clang= npm package (~105 MB,
-fetched on first use); C is the target language.
+Every block on this page is real, editable C compiled by *clang* (LLVM 22 via =@yowasp/clang=, ~105 MB downloaded once on first run and cached by your browser). When you click *Run*, clang compiles your code to =wasm32-wasi=, links it with =wasm-ld=, and runs the resulting WebAssembly module in this tab. Compiler errors point to the exact line in the editor.
 
-The compiled module then runs *in the same tab* on the browser's built-in
-WebAssembly engine. A WebAssembly module cannot call the operating system, so
-a small hand-written WASI shim stands in for one: it captures =fd_write=
-(standard output and standard error), records =proc_exit= as the program's
-exit code, fills =random_get= from the browser's crypto, answers
-=clock_time_get= with a wall-clock stub, and reports *empty* arguments and
-environment. There is no file system: anything else — opening files,
-=nanosleep=, process spawning — fails with a clean "unsupported WASI call"
-error naming the call, rather than a silent stub.
+Because WebAssembly has no direct OS access, a small WASI shim handles the basics:
 
-Each block compiles independently, with its own session; the under-the-hood
-panel attaches to the block you last ran. Its console shows the compile step
-and the program's output, the fields show the exit code, the module size and
-the compile time, and the hexdump shows the first 256 bytes of the produced
-=wasm= file — the module clang's =wasm-ld= linked for you. Runs are bounded
-by a wall-clock guard; a program that loops forever *without* touching I/O
-cannot be preempted on the raw WebAssembly API and will hang the tab.
+- *Supported:* =stdout=/=stderr= (=fd_write=), exit codes (=proc_exit=), browser crypto (=random_get=), and a wall clock (=clock_time_get=).
+- *Unsupported:* File I/O, =nanosleep=, and process spawning fail cleanly with an explicit "unsupported WASI call" error instead of silently doing nothing.
+- *Isolation:* Each block compiles and runs in its own session. A tight infinite loop with no I/O cannot be interrupted by WebAssembly and will freeze the tab.
 
-* Hello, =puts= and =printf=
+Open the right-hand panel after running a block to inspect the compile log, exit code, binary size, compile time, and a hex dump of the first 256 bytes of the linked =.wasm= module.
 
-This program prints =Hello, world!= with =puts= (which appends the newline
-itself) and =2 + 3 = 5= with =printf=. Its output is fully deterministic.
+* Printing with =puts= and =printf=
+
+=puts= prints a string and automatically adds a newline. =printf= gives you format specifiers like =%d= for signed integers, without adding a newline unless you include =\n=.
 
 #+NAME: hello
 #+BEGIN_SRC c
@@ -49,10 +30,9 @@ int main(void) {
 : Hello, world!
 : 2 + 3 = 5
 
-* A loop that sums 1..10
+* Summing with a =for= loop
 
-The loop accumulates 1 through 10 into =sum= and prints =55= — one line,
-deterministic, computed by the module this block just compiled.
+A standard C =for= loop initializes =i = 1=, checks =i <= 10= before each iteration, and increments =i= afterward. Try changing the upper bound or introducing a syntax error (like dropping a semicolon) to see clang's diagnostics on the exact line.
 
 #+NAME: sum-loop
 #+BEGIN_SRC c
@@ -69,11 +49,9 @@ int main(void) {
 #+RESULTS:
 : 55
 
-* Recursion: factorial(10)
+* Recursion: =factorial(10)=
 
-=factorial= calls itself down to the base case; ten multiplications later
-the module prints =3628800=. Watch the module size and compile time in the
-panel — recursion costs the compiler nothing extra.
+=factorial= uses a ternary expression to stop at =n <= 1= and otherwise multiply =n= by =factorial(n - 1)=. Using =long= (and =%ld= in =printf=) gives room for larger products, though =factorial(13)= will still overflow a 32-bit =long= on =wasm32=. Try bumping =10= up to see where overflow kicks in.
 
 #+NAME: factorial
 #+BEGIN_SRC c

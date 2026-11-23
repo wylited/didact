@@ -1,57 +1,32 @@
 #+TITLE: x86-64 Assembly, Step by Step
-#+SUBTITLE: Real emulation in your browser — Unicorn engine · assembled by Keystone · disassembled by Capstone
+#+SUBTITLE: Real x86-64 emulation in your browser — Keystone assembler, Unicorn CPU, Capstone disassembler
 
-This page is a *literate program*: the prose explains an idea, and the code
-blocks below it are /real, editable, executable/ x86-64 assembly. Nothing is
-pre-recorded — every block carries its own ▶ Run, ⤵ Step and ⟲ Reset
-controls, and each kernel is a genuine CPU emulator running in your browser.
+Every code block on this page is real, editable x86-64 assembly. Clicking *Run* assembles your code with Keystone, executes it on the Unicorn CPU emulator, and displays live state in the right-hand panel: all 16 general-purpose registers (changed values highlight in blue), CPU flags, a Capstone disassembly listing, a hex dump of =.data=, and console output.
 
-The *under-the-hood* panel on the right shows the machine state of the block
-the panel is attached to: all sixteen general-purpose registers, the
-condition flags, a disassembly listing, a hex view of the =.data= section,
-and a console for output. While a block is running it is highlighted, and
-its status line under the editor reports *loaded*, *running*, *finished*
-or the exact source line of an error. Registers that change between steps
-light up in blue.
+Hover any row in the disassembly listing to see the =;= comment from your source line. Use *Step* to execute one instruction at a time and *Reset* to rewind the machine.
 
-Anything you don't recognize — a mnemonic in the disassembly listing, a
-source line — /hover its row/: a tooltip shows the comment written on that
-source line. Registers in the panel simply display their current values.
+* Registers and Linux syscalls
 
-* Registers and the syscall convention
+x86-64 provides sixteen 64-bit general-purpose registers. On Linux, syscalls follow a fixed register convention:
 
-An x86-64 CPU has sixteen 64-bit general-purpose registers. A few have a
-convention on Linux:
+- =rax=: syscall number before =syscall=, and its return value afterward
+- =rdi=, =rsi=, =rdx=: first three syscall arguments
+- =rsp=: stack pointer (starts near the top of a 1 MiB stack)
 
-- =rax= :: the syscall /number/ while executing =syscall=, and its return value
-- =rdi=, =rsi=, =rdx= :: the first three syscall arguments
-- =rsp= :: the stack pointer — points near the top of a private 1 MiB stack
+The two syscalls used on this page:
 
-Requests to the kernel are made with the =syscall= instruction. The two you
-need today:
+| Syscall | =rax= | Arguments                     |
+|---------+-------+-------------------------------|
+| =write= | 1     | =rdi= fd, =rsi= buf, =rdx= len |
+| =exit=  | 60    | =rdi= exit code               |
 
-| syscall  | rax | arguments                      |
-|----------|-----|--------------------------------|
-| =write=  | 1   | rdi fd, rsi buffer, rdx count  |
-| =exit=   | 60  | rdi exit code                 |
-
-=write= copies =rdx= bytes from the buffer at =rsi= to the file descriptor
-=rdi= (1 is standard output) and returns the number of bytes written in =rax=.
-=exit= stops the program — the kernel marks the block *finished* and stops
-the stepper.
+=write= copies =rdx= bytes from =rsi= to file descriptor =rdi= (=1= is stdout) and returns the byte count in =rax=. =exit= halts the CPU.
 
 * Your first syscall: =write=
 
-Here is the classic first program. The =section .data= directive places the
-string in the data region (mapped at address =0x601000= in this machine), and
-=msg_len= is computed with an =equ= constant using =$= (the current address)
-minus the label =msg=.
+=section .data= puts the message string in the data segment (mapped at =0x601000=), and =msg_len equ $ - msg= calculates its length at assembly time using the current location counter =$=.
 
-Edit the string, the length, or the registers — then press this block's
-▶ Run to assemble and run to completion. Or step through it one instruction
-at a time with ⤵ Step and watch =rax=, =rsi= and =rdx= change; the listing
-row of the instruction about to execute is highlighted, and ⟲ Reset restores
-the just-assembled machine.
+Step through the block and watch =rax=, =rsi=, and =rdx= load before =syscall=. Right after =syscall= runs, notice =rip= advances by 2 bytes and =rax= becomes =14= (the number of bytes written).
 
 #+NAME: hello
 #+BEGIN_SRC asm
@@ -78,28 +53,11 @@ msg_len  equ $ - msg
 #+RESULTS:
 : Hello, world!
 
-Try stepping to the =syscall= line: notice that =rip= (the instruction
-pointer, shown as the highlighted row in the disassembly) moves *two* bytes
-for the =syscall= instruction, and =rax= becomes =14= — the count returned by
-the kernel. Hover the highlighted row itself to see the =;= comment on that
-source line.
+* Loops, flags, and ASCII conversion
 
-* Loops, flags and digits
+Assembly has no built-in integer printer — to print =55=, you convert each digit to its ASCII byte (=5 + '0' = 0x35=) and pass the buffer to =write=.
 
-Printing a /number/ means converting it to ASCII yourself: the digit =5= is
-the byte =0x35=. This program accumulates the numbers 1 through 10 in =rax=
-with a loop — the total is 55 — then splits 55 into two digits with =div=,
-stores them into a buffer in =.data=, and writes the buffer.
-
-Watch the flags while stepping: =cmp rbx, 10= sets ZF/CF just like a real
-CPU (hover a flag chip for what it means), and =jbe= (jump if below-or-equal)
-keeps the loop going while the counter is at most 10. The loop runs ten
-times — a perfect excuse to press ⤵ Step repeatedly and see =rbx= and =rax=
-evolve.
-
-Both blocks run independently: each keeps its own machine, status, and
-results. Running or stepping a block attaches the under-the-hood view to it;
-the detach button in the panel header disconnects it again.
+Below, =rax= sums =1..10= while =rbx= counts up. Watch the CPU flags panel as =cmp rbx, 10= updates =ZF= and =CF=, and =jbe next= jumps back while =rbx <= 10=. Then =div rcx= divides =rdx:rax= by =10= (putting the tens digit in =rax= and ones digit in =rdx=), adds ='0'= to each, and writes them into =digits=.
 
 #+NAME: sum-loop
 #+BEGIN_SRC asm
@@ -143,24 +101,16 @@ digits:  db "00", 10      ; scratch buffer, overwritten at run time
 #+RESULTS:
 : 55
 
-After the program runs, look at the *Memory · .data* panel: the buffer at
-=0x601000= really changed from =0x30 0x30 0x0a= (="00\n"=) to =0x35 0x35
-0x0a= (="55\n"=). Press ⟲ Reset on the block and watch the memory image
-spring back to its initial bytes.
+After running, check *Memory · .data* at =0x601000=: the initial bytes =30 30 0a= (="00\n"=) have been overwritten with =35 35 0a= (="55\n"=). Click *Reset* to watch them snap back.
 
-* Supported syntax cheat sheet
+* Supported syntax quick reference
 
-- Intel syntax only: =mov rax, 42= (destination first), as accepted by Keystone
-- Labels: =name:= (and NASM-style =.local= labels scoped to the last global label)
-- Sections: =section .text= / =section .data= (or bare =.text= / =.data=)
-- Data: =db=, =dw=, =dd=, =dq= with numbers, characters, quoted strings, commas
-- Constants: =name equ expression=, or the shorter form with a single
-  equals sign after the name
-- Expressions: =+ - * /=, parentheses, hex =0x=, binary =0b=, characters ='a'=
-- Comments: everything after =;=
+- Intel syntax only (destination first): =mov rax, 42=
+- Labels: =name:= and NASM-style =.local= labels
+- Sections: =section .text= / =section .data= (or =.text= / =.data=)
+- Data directives: =db=, =dw=, =dd=, =dq= with numbers, chars, and strings
+- Constants & expressions: =name equ expr= (or =name = expr=), =+ - * /=, hex =0x=, binary =0b=, chars ='a'=
 - Memory operands: =[digits+1]=, =byte [digits+2]=, =[rax]=, =[rsp+8]=
-- Branches and calls may use labels; they are resolved to real addresses by a
-  two-pass assembler front-end before Keystone encodes them
+- Comments: =;= to end of line
 
-Anything the engine cannot assemble is reported on the exact source line, in
-red, in the editor and in the block's error box.
+Assembly errors highlight the exact line in red.

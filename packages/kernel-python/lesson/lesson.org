@@ -1,29 +1,17 @@
-#+TITLE: Real Python, Right Here
-#+SUBTITLE: CPython 3.14 compiled to WebAssembly — Pyodide — running entirely in your browser
+#+TITLE: Python in the Browser
+#+SUBTITLE: Real CPython 3.14 running locally via Pyodide WebAssembly
 
-This page runs *real CPython* — the same interpreter you would install on
-your machine, compiled to WebAssembly by the Pyodide project. The engine is
-about 13 MB and is fetched from this site the first time you press ▶ Run on
-a block below; from then on it stays in the browser cache. Nothing is
-pre-recorded and nothing runs on a server: =print=, loops, functions and
-exceptions all execute in this tab, and the deterministic outputs quoted in
-the prose are exactly what the blocks print.
+Every code block on this page runs on *real CPython* compiled to WebAssembly (Pyodide, ~13 MB fetched once on first run and cached locally). Nothing is sent to a server.
 
-Every block is its own little program with a *fresh namespace*: names
-defined in one block — a variable, a function — are /not/ visible in the
-others, and re-running a block starts from an empty namespace again. State
-does not carry between blocks. Run means /execute to completion/: there is
-no stepping, just run and observe. Output lands under the code and in the
-console of the under-the-hood panel; the panel's *variables* section lists
-every global the run defined or changed, as =repr(value)= with its type.
-A syntax error is reported by CPython itself on the exact line; an uncaught
-exception stops the run with the exception's type and message, and the full
-traceback lands in the console.
+A few quick things to know about how blocks behave:
 
-* Hello, Python
+- *Fresh namespace per block:* Variables and functions defined in one block are not shared with other blocks, and clicking *Run* resets the namespace from scratch.
+- *Run to completion:* There is no single-stepping here. Output appears under the block and in the right-hand panel's console.
+- *Live globals panel:* After a run finishes, the *Variables* panel lists every global created by your block along with its =repr()= and type. Syntax errors and uncaught exceptions show CPython's exact line number and traceback.
 
-The classic first program, plus one arithmetic line: precedence is real
-CPython precedence, so =2 + 3 * 4= prints =14=.
+* Hello and operator precedence
+
+=print= separates multiple arguments with a space by default, and standard CPython operator precedence evaluates multiplication before addition (=2 + 3 * 4 = 14=).
 
 #+NAME: hello
 #+BEGIN_SRC python
@@ -35,13 +23,9 @@ print("2 + 3 * 4 =", 2 + 3 * 4)
 : Hello, Python!
 : 2 + 3 * 4 = 14
 
-* Loops accumulate
+* Loops and block globals
 
-A =for= loop appends the first five squares to a list, then prints it. The
-run always ends with =squares: [1, 4, 9, 16, 25]=. After it finishes, look
-at the variables panel: =squares= (a =list=) and the leftover loop variable
-=n= (an =int=, value 5) are shown with their =repr= — this is the block's
-own namespace, the very dictionary Python executed in.
+This loop builds a list of squares from 1 to 5. After running it, check the *Variables* panel: you will see both =squares= (=list=) and =n= (=int=, value =5=), because Python's =for= loop variable stays bound in the enclosing scope after the loop finishes.
 
 #+NAME: squares
 #+BEGIN_SRC python
@@ -54,12 +38,9 @@ print("squares:", squares)
 #+RESULTS:
 : squares: [1, 4, 9, 16, 25]
 
-* Functions: Fibonacci
+* Functions: iterative Fibonacci
 
-An iterative =fib= — no recursion, just two rolling variables. It always
-prints =fib(10) = 55=. The variables panel shows =fib= with sub =function=:
-the function object itself lives in the block's namespace, and =repr= of a
-function is its qualified name.
+=fib= computes the nth Fibonacci number in O(n) time and O(1) space using tuple unpacking (=a, b = b, a + b=). In the *Variables* panel, =fib= shows up as a =function= object living in the block's global dictionary.
 
 #+NAME: fib
 #+BEGIN_SRC python
@@ -75,8 +56,4 @@ print("fib(10) =", fib(10))
 #+RESULTS:
 : fib(10) = 55
 
-Try the failure paths, too: delete the closing parenthesis on the =print=
-line and Run — the block status and error box point at the exact line.
-Then replace the body with =1 / 0= — the run finishes with
-=ZeroDivisionError: division by zero= and the console shows the traceback
-with source lines.
+Try breaking it on purpose: remove the closing parenthesis on =print= to see a line-mapped =SyntaxError=, or add =1 / 0= to inspect a full CPython traceback in the console panel.

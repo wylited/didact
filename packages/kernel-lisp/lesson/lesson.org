@@ -1,31 +1,18 @@
 #+TITLE: Lisp from Cons Cells Up
-#+SUBTITLE: A Scheme-flavored Lisp on an interpreter you can single-step, one reduction at a time
+#+SUBTITLE: Cons pairs, quoting, tail calls, closures, and macros on a steppable Scheme interpreter
 
-* One data structure to rule them all
+* Everything is either an atom or a cons cell
 
-Classic Lisp is built from a single ingredient: the /cons cell/, a pair of
-two slots named =car= (the first slot) and =cdr= (the second slot). Every
-list, every program, every value in this lesson is either an /atom/ — a
-number, a symbol like =x=, =#t=/=#f=, a string — or a cons cell pointing
-at two more values. That is the whole ontology.
+Lisp's entire data model fits in two concepts: *atoms* (numbers, symbols like =x=, booleans =#t=/=#f=, strings, and the empty list ='()=) and *cons cells* — two-slot pairs holding a =car= (first slot) and a =cdr= (second slot).
 
-A /list/ is not a primitive here. The list =(1 2)= is just an agreement to
-read cons cells left-to-right:
+A list like =(1 2)= is just a chain of cons cells ending in ='()=:
 
-: (cons 1 (cons 2 '()))          ; two cells, and '() — the empty list —
-                                 ; is an atom, not a cell
+=(cons 1 (cons 2 '()))=
 
-Run the block below and watch the *Heap* panel. The kernel gives every cons
-cell a stable address (0x0000, 0x0010, 0x0020, … — one cell is a car word
-plus a cdr word). Evaluating =(cons 2 '())= allocates the /first/ cell:
-=car 2 · cdr ()=. Evaluating =(cons 1 …)= allocates the /second/, whose
-cdr points at the first. Nothing is ever moved, and nothing is ever freed:
-the heap holds 4096 cells and there is no garbage collector — when it fills
-up, you get a clean, line-numbered error instead of a silent slowdown.
+Run the block below and watch the *Heap* panel. Each cons cell gets a fixed address (=0x0000=, =0x0010=, ...). Evaluating =(cons 2 '())= allocates the first cell (=car= =2=, =cdr= =()=), and =(cons 1 ...)= allocates a second cell whose =cdr= points to the first. (This teaching heap holds 4,096 cells with no garbage collector, stopping with a clean error if it fills up.)
 
-=car= and =cdr= take a list apart exactly where =cons= put it together.
-Note the last line: a pair whose cdr is not a list prints as a /dotted
-pair=, =(1 . 2)= — that is what every cons cell really is.
+- =car= reads the first slot; =cdr= reads the second.
+- If a cell's =cdr= is not a list, it prints as a *dotted pair* like =(1 . 2)=.
 
 #+NAME: cons-101
 #+BEGIN_SRC lisp
@@ -46,19 +33,16 @@ pair=, =(1 . 2)= — that is what every cons cell really is.
 : (1 2)
 : (1 . 2)
 
-* Quote: data is code is data
+* Quote and quasiquote: code as data
 
-Prefixing an expression with ='= (short for =quote=) says: /don't evaluate
-this, hand me the structure itself/. The reader only builds a syntax tree;
-quoted data becomes real cons cells when =quote= evaluates it — ='(1 2 3)=
-allocates three fresh cells on the heap, every time you evaluate it.
+Putting ='= in front of an expression tells Lisp: *do not evaluate this — return the list structure as data*. Evaluating ='(1 2 3)= allocates three fresh cons cells on the heap.
 
-Quasiquote, written with a backquote, starts as a quote and opens holes:
-=,= (unquote) evaluates one subexpression, =,@= (unquote-splicing)
-evaluates one and splices /all its elements/ into the surrounding list.
-Under the hood the kernel expands `` `(a ,b ,@c d) `` into ordinary
-=(cons …)= and =(append …)= calls — step through a quasiquoted form and
-you will see that expansion happen on the control stack.
+*Quasiquote* (backquote) works like quote, except you can punch evaluation holes inside it:
+
+- =,= (unquote) evaluates one expression and drops its value into place.
+- =,@= (unquote-splicing) evaluates a list and splices its elements directly into the enclosing list.
+
+Under the hood, the interpreter expands quasiquote into ordinary =cons= and =append= calls — single-step the block to watch that expansion on the *Control stack*.
 
 #+NAME: quote-vs-quasiquote
 #+BEGIN_SRC lisp
@@ -76,22 +60,14 @@ you will see that expansion happen on the control stack.
 : (x is 10 and doubled is 20)
 : (start 1 2 3 end)
 
-* Recursion, and why tail position is free
+* Recursion and why tail calls use O(1) stack
 
-A recursive function that /accumulates on the way back down/ — like this
-naive =fact=, where the multiplication happens /after/ the recursive call
-returns — needs one pending continuation per call. The interpreter keeps
-those continuations on an explicit /control stack/ (there is a panel for
-it), so deep recursion is bounded by the run budget, not by any machine
-limit: the kernel performs at most 1 000 000 reductions and then stops
-with a clean error naming the line.
+Look at the two recursive functions below:
 
-But a call in /tail position/ — the very last thing =sum-to= does — needs
-no return trip. The evaluator is a trampoline: a tail call replaces the
-current reduction instead of stacking on a new one, so =sum-to= counting
-to 100 000 runs in constant control-stack space and finishes without a
-whimper. Step through both functions with the Control-stack panel open and
-watch one of them pile up frames while the other does not.
+- =fact= multiplies *after* the recursive call returns, so every call must leave a pending continuation on the *Control stack*.
+- =sum-to= finishes by calling itself directly in *tail position* — there is nothing left to do when it returns. The interpreter replaces the current frame instead of pushing a new one, so =(sum-to 100000 0)= runs in constant stack space.
+
+Open the *Control stack* panel and step through both to see =fact= grow frames while =sum-to= stays flat. (Runs are capped at 1,000,000 reductions so infinite recursion stops cleanly.)
 
 #+NAME: tail-calls
 #+BEGIN_SRC lisp
@@ -113,17 +89,9 @@ watch one of them pile up frames while the other does not.
 : 5000050000
 : 3628800
 
-* Closures: functions with a memory
+* Closures: functions that keep their environment
 
-=(lambda …)= captures the environment it was created in. =make-counter=
-below creates a =let= frame holding =n= and returns a lambda that =define=
-then names =a=, so calling =(a)= builds the chain the Environment panel
-titles show: =a (line 3) → let (line 2) → make-counter (line 1) → global=.
-The =let= frame lives inside =make-counter='s own call frame, which is why
-that frame appears in the chain — and =set!= highlights =n= each time it
-changes.
-Two calls to =make-counter= make two /distinct/ =let= frames, so the two
-counters count independently: =a= has been bumped three times, =b= once.
+Every =(lambda ...)= captures the environment where it was created. Each call to =make-counter= creates a fresh =let= frame holding its own =n=, so =a= and =b= maintain completely separate counts. Step through the calls with the *Environment* panel open to watch the scope chain (=a -> let -> make-counter -> global=) and see =set!= update =n= in place.
 
 #+NAME: closures
 #+BEGIN_SRC lisp
@@ -140,22 +108,13 @@ counters count independently: =a= has been bumped three times, =b= once.
 #+RESULTS:
 : (3 1)
 
-This is also where =eq?= versus =equal?= earns its keep: =eq?= compares
-/addresses/ — two lists built by two calls to =list= live at different
-addresses, so =(eq? (list 1 2) (list 1 2))= is =#f= — while =equal?=
-walks the heap and compares structure, giving =#t=.
+Quick identity note: =eq?= checks whether two values point to the *same heap address* (so =(eq? (list 1 2) (list 1 2))= is =#f=), while =equal?= walks both structures and compares their contents (=#t=).
 
-* define-macro: programs that write programs
+* Macros: functions that transform syntax
 
-A macro is a function that runs /before/ evaluation, on the unevaluated
-forms themselves, and returns new code. =my-if= below receives =c=, =t=
-and =e= as /syntax/, and its quasiquote template stitches them into a
-=cond=. It is deliberately /unhygienic/, the classic teachable kind: the
-=swap!= macro gets away with using a variable literally named =tmp=
-because it happens not to collide with anything at its call site. Use
-=macroexpand-1= to see one expansion without running it — then step
-through a macro call and watch the expansion replace the original form on
-the control stack.
+A macro runs *before* evaluation, taking unevaluated syntax as input and returning new code to evaluate. Below, =my-if= rewrites itself into a =cond= expression, and =swap!= expands into a =let= block that swaps two variables in place. Use =macroexpand-1= to inspect the generated code without running it.
+
+Note: =define-macro= here is intentionally unhygienic — =swap!= uses a local variable named =tmp=, which works as long as the caller does not pass a variable also named =tmp=.
 
 #+NAME: macros
 #+BEGIN_SRC lisp
@@ -177,12 +136,8 @@ the control stack.
 : no
 : (2 1)
 
-* Where to go next
+* Try next
 
-Everything you met here is one machine: a reader that turns text into
-cons-cell-shaped syntax trees, an evaluator that reduces one form at a
-time over an explicit stack, a heap of stable addresses, and a chain of
-environment frames. Breakpoints pause before any source line; single-step
-watches each reduction mark its heap cells and its bindings. Try
- =(append '(1 2) '(3 4))= and check with =eq?= that only the last list is
-shared — then write a macro of your own and expand it.
+- Run =(append '(1 2) '(3 4))= and check with =eq?= whether the second list is shared.
+- Set a breakpoint inside =make-counter= and step through how =a= and =b= get distinct heap-allocated frames.
+- Write a small macro of your own and inspect its output with =macroexpand-1=.

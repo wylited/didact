@@ -1,20 +1,13 @@
-#+TITLE: Lua, Small Enough to Fit in Your Head
-#+SUBTITLE: One data structure, one assignment rule, and two habits to unlearn — a Lua 5.4 subset you can single-step
+#+TITLE: Lua: Small Enough to Hold in Your Head
+#+SUBTITLE: Tables, multiple returns, 1-based indexing, and metatables — step by step
 
-* Tables: the one data structure
+This page runs a steppable Lua 5.4 teaching interpreter. You can single-step through any block and watch live table allocations and mutations in the right-hand panel.
 
-Lua has exactly one compound data structure: the /table/. It is an
-associative array that can hold any value under any key, and it does
-double duty as an array: store values under the integer keys 1, 2, 3…
-and you have a list. The array part and the hash part live in the same
-table — ={10, 20, 30, name = "xs"}= has both at once.
+* Tables do everything
 
-Run the block and watch the *Tables* panel: every table the program
-allocates gets a stable slot, array rows first (=t[1] = …=), then hash
-rows. Rows the latest step added or changed are marked with Δ. Nothing
-is ever freed — there is no garbage collector in this kernel — so the
-panel is an honest, cumulative history of the heap. =#= returns the
-array border: how many consecutive integer keys start at 1.
+Lua has only one compound data structure: the *table*. A table is a hash map that also acts as an array when you use consecutive integer keys starting at 1. You can even mix both in the same table: ={10, 20, 30, name = "xs"}= stores =10, 20, 30= under keys =1, 2, 3= and ="xs"= under key ="name"=.
+
+Run the block below and watch the *Tables* panel. Array entries (=t[1]=, =t[2]=, ...) appear first, followed by hash entries, with =Δ= marking rows changed by the last step. The length operator =#= counts consecutive integer keys starting from 1 (and ignores hash keys). Note: this teaching kernel never garbage-collects tables, so the panel keeps a full history of allocations.
 
 #+NAME: tables-101
 #+BEGIN_SRC lua
@@ -27,10 +20,10 @@ print(#t, t[1], t.name, t.lang)
 #+RESULTS:
 : 4	10	xs	lua
 
-Because tables are just tables, /pairs()/ walks both parts: the array
-rows in order, then the remaining hash keys. =ipairs()= stops at the
-first missing integer — =#t= and =ipairs= agree on where the array
-ends.
+Two iterators match the two parts of a table:
+
+- =ipairs(t)= walks integer keys =1, 2, 3, ...= and stops at the first =nil= gap (matching =#t=).
+- =pairs(t)= walks *every* key in the table — array entries first, then hash keys.
 
 #+NAME: tables-pairs
 #+BEGIN_SRC lua
@@ -46,16 +39,15 @@ for k, v in pairs(t) do print(k, v) end
 : 2	20
 : name	xs
 
-* Multiple returns, one rule
+* Multiple returns and parallel assignment
 
-A Lua function can return several values — but they only /expand/ in
-the last position of a list. In =local x, y = f()= the call is last on
-the right, so it expands. In =local z = f()= there is nowhere to
-expand: the extra values are silently dropped. Parentheses are the
-explicit truncate: =(f())= is always exactly one value. That is the
-whole rule, and it is what makes the classic swap one line:
-= a, b = b, a = evaluates both right-hand sides before either
-assignment lands.
+Lua functions can return multiple values without wrapping them in a tuple or array. The rule for how they expand is simple:
+
+- A call expands to all its return values only when it is the *last* expression in a list (such as =local lo, hi = minmax(xs)=).
+- Extra values are silently dropped if there are fewer targets (=local only = minmax(xs)=).
+- Wrapping a call in parentheses =(minmax(xs))= forces it to a single value.
+
+Because Lua evaluates the entire right-hand side before assigning the left-hand side, swapping two variables is just =a, b = b, a=.
 
 #+NAME: multiple-returns
 #+BEGIN_SRC lua
@@ -80,12 +72,12 @@ print(a, b)
 : 1	5	1	1
 : 2	1
 
-* Truthiness and 1: the two habits to unlearn
+* Two defaults that trip up Python and C devs
 
-Coming from C or Python, two Lua defaults bite everyone. First, /only
-=nil= and =false= are falsy/ — the number 0 and the empty string are
-/truthy/. Second, /indices start at 1=, and =#t= counts from the first
-slot. The block below prints exactly what Lua thinks.
+Two Lua rules catch almost everyone at first:
+
+- *Only =nil= and =false= are falsy.* Both =0= and =""= are truthy!
+- *Arrays are 1-indexed.* =t[1]= is the first element, =t[0]= is =nil= unless you explicitly set it, and =#t= counts starting at 1.
 
 #+NAME: truth-and-one
 #+BEGIN_SRC lua
@@ -102,19 +94,16 @@ print(t[1], t[0], #t)
 : only nil and false are falsy
 : a	nil	3
 
-* Integers and floats are different numbers
+* Integers vs floats
 
-Lua 5.4 has two numeric types, and they print differently: =1= is an
-integer, =1.0= is a float. Division =/= always produces a float;
-floor division =//= stays integer when both operands are — and floors
-toward minus infinity, so =-7 // 2= is =-4=, not =-3=. The modulo
-follows the /divisor's/ sign, because Lua defines =a % b= as
-= a - floor(a / b) * b =: =5 % -3= is =-1=. They still compare equal
-numerically: =1 == 1.0= is =true=.
+Lua 5.4 distinguishes integers (=1=) from floats (=1.0=):
 
-One honesty note: real Lua integers are 64-bit, but this kernel stores
-them in JavaScript numbers, so an integer literal beyond =2^53= is
-refused at load time with a clean error instead of silently rounding.
+- =/= always returns a float (=7 / 2= is =3.5=).
+- =//= is floor division (toward negative infinity, like Python): =-7 // 2= is =-4=, not =-3=. It returns an integer when both operands are integers.
+- =%= follows the sign of the divisor (=5 % -3= is =-1=).
+- Equal numeric values compare equal across subtypes: =1 == 1.0= is =true=.
+
+Note: real Lua uses 64-bit integers, whereas this browser kernel stores numbers as JavaScript doubles and rejects integer literals past =2^53= at load time instead of silently losing precision.
 
 #+NAME: ints-and-floats
 #+BEGIN_SRC lua
@@ -130,17 +119,14 @@ print(1 == 1.0)
 : 2	-1	1
 : true
 
-* Metatables: __index is inheritance
+* Metatables: how Lua builds inheritance
 
-A table's /metatable/ can carry an =__index= entry. When a read misses,
-Lua consults =__index=: if it is a table, the lookup continues there —
-which chains, so a two-level =__index= chain gives you a grandparent
-lookup. If it is a function, Lua calls it with the table and the
-missing key. That single hook is inheritance in Lua: define methods on
-a prototype, set it as =__index=, and instances find them. The colon
-sugar keeps it tidy: =obj:greet()= passes =obj= itself as the hidden
-first argument =self=, and =function Proto:greet()= declares that
-parameter for you.
+Lua has no =class= keyword. Instead, any table can have a *metatable* with an =__index= fallback that runs whenever a key lookup misses:
+
+- If =__index= is another table, Lua keeps looking up the key there (and chains through *its* metatable too).
+- If =__index= is a function, Lua calls =fn(table, key)= and returns the result.
+
+The colon syntax is just shorthand for passing =self=: =rex:greet()= calls =rex.greet(rex)=, and =function Animal:greet()= automatically declares =self= as the first parameter.
 
 #+NAME: metatables
 #+BEGIN_SRC lua

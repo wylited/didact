@@ -1,24 +1,11 @@
-#+TITLE: SQL: You Describe, It Decides
-#+SUBTITLE: A query engine small enough to single-step — every row it scans, every pair it probes, every group it folds, in the panels
+#+TITLE: SQL: How a Query Engine Actually Runs
+#+SUBTITLE: Single-step through table scans, nested-loop joins, grouping, sorting, and three-valued NULL logic
 
-* You describe; the engine decides how
+* Declarative queries, imperative execution
 
-SQL is the famous /declarative/ language: you say =WHERE age >= 30=, not
-"loop over the rows and test each one". But underneath every declarative
-promise sits an imperative machine that /does/ loop — and this page runs one
-you can watch. It is a hand-written tokenizer, statement parser and
-row-at-a-time interpreter in pure TypeScript: no database, no wasm, just
-code you could read in an afternoon.
+In SQL you describe /what/ you want (=WHERE age >= 30=), not how to loop over rows. Underneath, though, the query engine builds a pipeline of concrete operators that do the looping for you. This page runs a small, steppable SQL engine in TypeScript supporting =CREATE TABLE=, =INSERT=, and =SELECT= over =INTEGER= and =TEXT= columns (keywords are case-insensitive; text values are case-sensitive).
 
-The deal it offers: statements are =CREATE TABLE=, =INSERT= and =SELECT=,
-each closed by a semicolon. Tables are typed (=INTEGER= and =TEXT= are the
-whole type system), =INSERT= checks every value against its column's type,
-and keywords are case-insensitive while =text values= keep their case.
-Single-step the block below and the *Plan* panel shows the pipeline the
-engine chose for your =SELECT= — =Scan=, =Filter=, =Project= — with three
-live counters each: rows *seen*, rows *passed*, rows *emitted*. Each press
-of the step button is exactly **one row operation**: one scanned row, or
-one filter test, or one projected output row.
+Single-step the block below and watch the *Plan* panel: each step is *one row operation* (scanning a row, testing a filter, or emitting an output row). Each operator tracks three live counters: *seen / passed / emitted*.
 
 #+NAME: select-where
 #+BEGIN_SRC sql
@@ -35,31 +22,13 @@ SELECT name, age FROM users WHERE age >= 30;
 :  alice | 34  
 :  carol | 41  
 
-The counters tell the story: =Scan users= ends at =5/5/5= (it reads every
-row), =Filter age >= 30= ends at =5/2/2= (five tested, two passed), and
-=Project= at =2/2/2=. The result prints as a psql-style table — columns
-padded to their widest value, a header, a rule of dashes. The
-acknowledgement =INSERT 0 5= is psql's too: the =0= is a legacy table-id
-slot, the =5= is the number of rows inserted. And notice who is missing:
-/eve/, whose age is =NULL=, failed =age >= 30= — unknown, not true — long
-before section five makes a lesson of it.
+Look at the final counters: =Scan users= reads all 5 rows (=5/5/5=), =Filter age >= 30= tests 5 and keeps 2 (=5/2/2=), and =Project= outputs 2 (=2/2/2=). Notice that =eve= (whose age is =NULL=) is excluded because =NULL >= 30= evaluates to /unknown/, not true.
 
-* A JOIN is a loop over row pairs
+* A =JOIN= is a nested loop over row pairs
 
-Real engines have hash joins and merge joins and statistics. This engine
-has the truth: a /nested loop/. For every row that arrives from the left
-side, it probes /every/ row of the right table and evaluates the =ON=
-condition on the pair — one pair, one step, one tick of the =seen= counter.
-Step through the block below with the Plan open: =Scan users= runs first
-(3 rows), then =NestedLoop join orders= — and its =seen= counter climbs
-to =9=, because 3 × 3 = 9 probes. Two pairs make =users.id =
-orders.user_id= true, so the join ends at =9/2/2=.
+Production databases choose between hash joins, merge joins, and nested loops depending on table size and indexes. This teaching engine uses a *nested-loop join* so you can see the exact cost: for every row from the left table, it checks every row from the right table against the =ON= condition.
 
-Order 12 — =user_id= 9 — matches nobody, and that is the whole story of
-inner joins: rows without a partner simply do not appear. In this dialect
-you qualify same-named columns as =users.id= and =orders.user_id= (one
-=JOIN= per =SELECT= is the v1 limit), and an unqualified =id= would be
-rejected as /ambiguous/, with both spellings suggested.
+Step through the query below with *Plan* open: 3 users times 3 orders means =NestedLoop join orders= probes =9= pairs, and 2 match (=9/2/2=). Order 12 (=user_id = 9=) has no matching user, so an inner join drops it. When both tables share a column name (=id=), qualify it as =users.id= or =orders.id= (unqualified =id= fails as ambiguous).
 
 #+NAME: nested-loop-join
 #+BEGIN_SRC sql
@@ -80,24 +49,11 @@ SELECT users.name, orders.total FROM users JOIN orders ON users.id = orders.user
 :  alice | 100   
 :  carol | 60    
 
-Now the famous caveat makes sense: a cross join of two 200-row tables is
-40 000 probes — visible, countable work — and this engine /stops/ after
-100 000 row operations in a run, with a clean error naming the line,
-rather than grind your browser to a halt. Big joins need smarter plans;
-that is what "the engine decides" is really about.
+That O(N * M) growth is why query planners matter: joining two 200-row tables takes 40,000 probes. To prevent accidental browser freezes, this kernel caps runs at 100,000 row operations and stops with a line-numbered error.
 
-* GROUP BY folds rows into groups
+* =GROUP BY= folds rows into buckets
 
-=GROUP BY city= partitions the rows, and the =GroupBy= operator does it in
-the open: one step /folds/ one row into its group, updating every
-aggregate's running state as it goes. =COUNT(*)= counts rows;
-=COUNT(col)=, =SUM=, =AVG=, =MIN= and =MAX= skip =NULL=s — watch the
-*Current row* panel flip through the source rows as the counters climb.
-When the folding ends, each group is /finalized/ in its own step: =HAVING=
-runs first (on the group, not on rows — that is why it may use
-aggregates), then the select list is computed. =AVG= of an =INTEGER=
-column always prints with a decimal, because the mean of integers usually
-is not one.
+=GROUP BY city= buckets rows by city and updates each aggregate (=COUNT=, =SUM=, =AVG=, =MIN=, =MAX=) one row at a time. Watch the *Current row* panel as rows fold in. Once all rows are folded, each group is finalized: =HAVING= filters the finished groups (unlike =WHERE=, which filters raw rows *before* grouping), and =AVG= always prints with a decimal.
 
 #+NAME: group-by
 #+BEGIN_SRC sql
@@ -119,10 +75,7 @@ SELECT city, COUNT(*) FROM users GROUP BY city HAVING COUNT(*) > 1 AND AVG(age) 
 : ------+----------
 :  HK   | 2        
 
-One rule guards the whole idea: a group collapses many rows into one, so
-a /bare/ column in the select list must be a grouping column — otherwise
-/which/ =alice= would =name= show? The engine refuses, before touching a
-row, naming the column and its line:
+Every unaggregated column in =SELECT= must appear in =GROUP BY=. Otherwise, if a city has two users, SQL has no well-defined way to pick which =name= to show. The engine rejects this query before scanning a single row:
 
 #+NAME: grouping-rule
 #+BEGIN_SRC sql
@@ -134,22 +87,11 @@ SELECT name, COUNT(*) FROM users GROUP BY city;
 #+RESULTS:
 : INSERT 0 2
 
-The run stops with =line 3: column 'name' must appear in GROUP BY or
-inside an aggregate= — everything before it (the =INSERT=) already
-happened; statements run in order. Put =name= inside an aggregate
-(=MIN(name)=) or add it to =GROUP BY= and the query runs.
+Line 3 fails with =column 'name' must appear in GROUP BY or inside an aggregate= (the earlier =INSERT= still ran because statements execute in order). Wrap it in =MIN(name)= or add =name= to =GROUP BY= to make it valid.
 
-* ORDER BY and LIMIT: work you can count
+* =ORDER BY= and =LIMIT=
 
-Sorting is another operator with visible work: a merge sort whose every
-/comparison/ is one step, stable (equal keys keep input order), =NULL=s
-sorting last because they are unknown rather than small. =ORDER BY= names
-a column /of the result/ — the select list — and =TEXT= columns sort
-lexicographically (capitals first, byte order) while =INTEGER= columns
-sort numerically: =12 > 7 > 3=, not dictionary order. =LIMIT n= then lets
-the first =n= rows through and stops reading. Below, =points DESC=
-puts both 12s on top and the tie-break =player= keeps =Bob= before
-=carol=; the sort's counters end at the number of comparisons it made.
+Sorting uses a stable merge sort where each comparison counts as one step. =INTEGER= columns sort numerically (=12 > 7 > 3=), =TEXT= columns sort in ASCII/byte order (uppercase before lowercase), and =NULL=s sort last. =LIMIT n= forwards the first =n= rows and stops. Below, =points DESC= puts both 12-point players first, and the tie-breaker =player= puts =Bob= ahead of =carol=.
 
 #+NAME: order-limit
 #+BEGIN_SRC sql
@@ -167,17 +109,13 @@ SELECT player, points FROM scores ORDER BY points DESC, player LIMIT 3;
 :  carol  | 12     
 :  alice  | 7      
 
-* NULL is not a value
+* =NULL= is unknown, not false
 
-=NULL= is not zero and not =''= — it is the marker for /unknown/, and it
-poisons every comparison it touches: =NULL >= 30= is not false, it is
-*unknown*, and =WHERE= keeps a row only when its condition is true. So
-Bob, whose age is =NULL=, is invisible to =age > 25= — and equally
-invisible to =NOT age > 25=, because =NOT unknown= is still unknown. The
-only tests that can /see/ a =NULL= are the two-valued =IS NULL= and
-=IS NOT NULL=. Aggregates handle
-the same truth their own way: they simply skip =NULL=s (=COUNT(*)= counts
-rows, =COUNT(age)= counts known ages).
+=NULL= means "missing or unknown", not =0= or =''=. Any normal comparison with =NULL= (=NULL > 25=, =NULL = NULL=, or even =NOT (NULL > 25)=) produces *unknown*, and =WHERE= only keeps rows that evaluate to *true*.
+
+- Use =IS NULL= or =IS NOT NULL= to test for missing values.
+- Aggregates ignore =NULL= values (=COUNT(*)= counts all rows; =COUNT(age)= counts only non-null ages).
+- =LIKE= matches case-sensitive patterns using =%= (any sequence of characters) and =_= (any single character).
 
 #+NAME: null-and-like
 #+BEGIN_SRC sql
@@ -204,14 +142,3 @@ SELECT name FROM users WHERE name LIKE '%o%';
 : -------
 :  Bob   
 :  carol 
-
-The last query adds =LIKE=, the pattern operator: =%= matches any run of
-characters (including none), =_= matches exactly one, and there is /no/
-escape syntax in this dialect — a plain =%= in a pattern is always a
-wildcard, never a literal percent sign. Matching is case-sensitive, like
-everything about values here: ='Alice'= would not have found =alice=.
-
-That is the whole engine: a plan of row-at-a-time operators, three-valued
-logic, aggregates folded in the open, and a budget that refuses to hang.
-You describe the result; it decides — and now you have watched every
-decision it makes.
