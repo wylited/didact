@@ -1,19 +1,13 @@
 #+TITLE: C in the Browser
-#+SUBTITLE: Real clang compiling to WebAssembly right in this tab
+#+SUBTITLE: Real clang compiling to wasm32-wasi right in this tab
 
-Every block on this page is real, editable C compiled by *clang* (LLVM 22 via =@yowasp/clang=, ~105 MB downloaded once on first run and cached by your browser). When you click *Run*, clang compiles your code to =wasm32-wasi=, links it with =wasm-ld=, and runs the resulting WebAssembly module in this tab. Compiler errors point to the exact line in the editor.
+These blocks compile with actual clang (LLVM 22 via =@yowasp/clang=) and run in your browser's WebAssembly engine. The first run pulls down the ~105 MB toolchain once and caches it locally. After that, hitting Run compiles, links with =wasm-ld=, and executes the binary in the same tab.
 
-Because WebAssembly has no direct OS access, a small WASI shim handles the basics:
+WebAssembly cannot talk to your OS directly, so a small WASI shim handles stdout/stderr, exit codes, random bytes, and wall-clock time. Anything else (files, sleep, spawning processes) stops with an explicit unsupported-call error. Keep an eye on the panel on the right: it shows the compiler output, exit code, binary size, compile time, and the first 256 bytes of the linked =.wasm= file. One catch: a tight infinite loop with no I/O will freeze the tab because raw WebAssembly cannot be preempted.
 
-- *Supported:* =stdout=/=stderr= (=fd_write=), exit codes (=proc_exit=), browser crypto (=random_get=), and a wall clock (=clock_time_get=).
-- *Unsupported:* File I/O, =nanosleep=, and process spawning fail cleanly with an explicit "unsupported WASI call" error instead of silently doing nothing.
-- *Isolation:* Each block compiles and runs in its own session. A tight infinite loop with no I/O cannot be interrupted by WebAssembly and will freeze the tab.
+* =puts= and =printf=
 
-Open the right-hand panel after running a block to inspect the compile log, exit code, binary size, compile time, and a hex dump of the first 256 bytes of the linked =.wasm= module.
-
-* Printing with =puts= and =printf=
-
-=puts= prints a string and automatically adds a newline. =printf= gives you format specifiers like =%d= for signed integers, without adding a newline unless you include =\n=.
+=puts= writes a string and tacks on a newline for you. =printf= gives you format strings like =%d= and leaves the newline up to you. Try deleting a semicolon and hitting Run to see clang report the exact line.
 
 #+NAME: hello
 #+BEGIN_SRC c
@@ -30,9 +24,9 @@ int main(void) {
 : Hello, world!
 : 2 + 3 = 5
 
-* Summing with a =for= loop
+* Summing 1 through 10
 
-A standard C =for= loop initializes =i = 1=, checks =i <= 10= before each iteration, and increments =i= afterward. Try changing the upper bound or introducing a syntax error (like dropping a semicolon) to see clang's diagnostics on the exact line.
+A basic =for= loop summing the first ten integers into =sum=.
 
 #+NAME: sum-loop
 #+BEGIN_SRC c
@@ -49,9 +43,9 @@ int main(void) {
 #+RESULTS:
 : 55
 
-* Recursion: =factorial(10)=
+* Recursive =factorial(10)=
 
-=factorial= uses a ternary expression to stop at =n <= 1= and otherwise multiply =n= by =factorial(n - 1)=. Using =long= (and =%ld= in =printf=) gives room for larger products, though =factorial(13)= will still overflow a 32-bit =long= on =wasm32=. Try bumping =10= up to see where overflow kicks in.
+Standard recursive factorial using =long=. Because =wasm32= has 32-bit =long=s, =10!= fits fine (=3628800=), but changing =10= to =13= will overflow.
 
 #+NAME: factorial
 #+BEGIN_SRC c

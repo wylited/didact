@@ -1,11 +1,11 @@
-#+TITLE: Prolog: State the Facts, Watch It Search
+#+TITLE: Prolog, Search Exposed
 #+SUBTITLE: Unification, SLD resolution, backtracking, and cut on a steppable Prolog engine
 
-* Facts, variables, and queries
+* Facts and queries
 
-A Prolog program is a set of logical facts and rules rather than step-by-step instructions. A fact like =likes(ada, prolog).= states a relationship. A query like =?- likes(ada, X).= asks Prolog to find a value for the capitalized variable =X= that makes the statement true.
+In Prolog you write facts and rules instead of imperative steps. =likes(ada, prolog).= states a fact, and =?- likes(ada, X).= asks Prolog to find a binding for the capitalized variable =X= that makes it true.
 
-Run the block below and check the *Bindings* panel: Prolog finds the first match (=X = prolog=) and stops. Running again backtracks to find the next answer (=X = lisp=), and eventually prints =No.= when no matches remain. The unifier also enforces the *occurs check*, so cyclic terms like =?- X = f(X).= fail cleanly instead of hanging.
+Run the block and look at *Bindings*: it finds =X = prolog= and stops. Run it again to backtrack to the next match (=X = lisp=), and a third time to get =No.=. The unifier checks for cycles (occurs check), so =?- X = f(X).= fails cleanly instead of looping forever.
 
 #+NAME: facts-and-queries
 #+BEGIN_SRC prolog
@@ -19,13 +19,9 @@ likes(bob, prolog).
 : Yes.
 : X = prolog
 
-* Rules and the Goal stack
+* Rules and the goal stack
 
-A rule uses =:-= ("if") to define a relationship in terms of others:
-
-=grandparent(X, Z) :- parent(X, Y), parent(Y, Z).=
-
-Single-step the block below and watch the *Goal stack* panel. Prolog always works on the leftmost goal first: it replaces =grandparent(tom, G)= with the two subgoals =parent(tom, Y)= and =parent(Y, G)=, unifies =Y = mary=, and then proves =parent(mary, ann)=. When the goal stack empties, you have a solution.
+=:-= means "if", so =grandparent(X, Z) :- parent(X, Y), parent(Y, Z).= breaks one goal into two subgoals. Step through the block with *Goal stack* open: Prolog always resolves the leftmost goal first, unifying =Y = mary= and then proving =parent(mary, ann)=. When the goal stack empties, you have an answer.
 
 #+NAME: rules-and-conjunction
 #+BEGIN_SRC prolog
@@ -40,11 +36,9 @@ grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
 : Yes.
 : G = ann
 
-* Recursion and collecting all answers with =findall=
+* Recursive =member= and =findall=
 
-=member/2= is not built in here, so we write it in two clauses: =E= is in a list if it matches the head =[E|_]= (where =_= is a throwaway wildcard), or if it is a member of the tail =T=.
-
-To collect *every* solution at once instead of stopping at the first, use =findall(Template, Goal, ResultList)=. Below, =findall= runs =member(E, [ada, bob, cy])= to exhaustion and binds =Es= to all matches in clause order. (=E = E= just means the query variable =E= stays unbound outside =findall=.)
+=member/2= is not built into this kernel, so we define it in two clauses: =E= is in a list if it matches the head =[E|_]=, or if it is in the tail =T=. =findall/3= runs a goal through every possible backtrack and collects all matches into a list (=Es=) in clause order. (=E = E= just shows the template variable stayed unbound outside =findall=.)
 
 #+NAME: member-by-recursion
 #+BEGIN_SRC prolog
@@ -58,11 +52,9 @@ member(E, [_|T]) :- member(E, T).
 : E = E
 : Es = [ada, bob, cy]
 
-* Backtracking: running =append= in reverse
+* Running =append= backwards
 
-Because Prolog predicates are relations, not one-way functions, =append/3= works both forward (joining two lists) and backward (splitting one list into every possible prefix/suffix pair).
-
-Step through the query below with the *Choice points* panel open: each recursive call pushes a saved decision point onto the stack, and backtracking pops them one by one to generate all three splits of =[1, 2]=.
+Because predicates are relations rather than one-way functions, =append/3= can split a list just as easily as it joins two lists. Step through the query below with *Choice points* open: every recursive step saves an alternative on the choice-point stack, and backtracking unwinds them one by one to produce all three splits of =[1, 2]=.
 
 #+NAME: append-generates
 #+BEGIN_SRC prolog
@@ -77,14 +69,9 @@ append([X|Xs], Ys, [X|Zs]) :- append(Xs, Ys, Zs).
 : Ys = Ys
 : Ps = [p([], [1, 2]), p([1], [2]), p([1, 2], [])]
 
-* Cut (=!=): pruning unnecessary backtracking
+* Pruning search with cut (=!=)
 
-The *cut* operator (=!=) always succeeds and discards all pending choice points created since the current predicate was entered — committing Prolog to the clause it already chose.
-
-Compare =max3= (with cut) and =maxu= (without cut) below:
-
-- =max3(5, 3, M)= matches the first clause, hits =!=, and commits — returning only =[5]=.
-- =maxu(5, 3, M)= finds =5=, then backtracks into the second clause and also returns =3=, producing =[5, 3]=.
+The cut operator =!= always succeeds and immediately drops every choice point created since the current predicate started. In =max3=, once =X >= Y= succeeds and hits =!=, Prolog commits to that clause and never tries the fallback, so =WithCut= is =[5]=. Without the cut, =maxu= backtracks into the second clause too and returns =[5, 3]=.
 
 #+NAME: cut-prunes
 #+BEGIN_SRC prolog

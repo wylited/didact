@@ -1,17 +1,13 @@
 #+TITLE: Python in the Browser
-#+SUBTITLE: Real CPython 3.14 running locally via Pyodide WebAssembly
+#+SUBTITLE: Real CPython 3.14 running locally on Pyodide
 
-Every code block on this page runs on *real CPython* compiled to WebAssembly (Pyodide, ~13 MB fetched once on first run and cached locally). Nothing is sent to a server.
+Hit Run on any block and it executes on real CPython compiled to WebAssembly (Pyodide, ~13 MB fetched once and cached). Nothing leaves your browser.
 
-A few quick things to know about how blocks behave:
+Each block gets its own clean global namespace, so variables do not leak from one block to another, and re-running starts fresh. There is no single-stepping here; blocks run straight through and dump their globals (with =repr= and type) into the Variables panel on the right.
 
-- *Fresh namespace per block:* Variables and functions defined in one block are not shared with other blocks, and clicking *Run* resets the namespace from scratch.
-- *Run to completion:* There is no single-stepping here. Output appears under the block and in the right-hand panel's console.
-- *Live globals panel:* After a run finishes, the *Variables* panel lists every global created by your block along with its =repr()= and type. Syntax errors and uncaught exceptions show CPython's exact line number and traceback.
+* Basic output and precedence
 
-* Hello and operator precedence
-
-=print= separates multiple arguments with a space by default, and standard CPython operator precedence evaluates multiplication before addition (=2 + 3 * 4 = 14=).
+Standard CPython =print= and arithmetic precedence (=3 * 4= binds tighter than =+=).
 
 #+NAME: hello
 #+BEGIN_SRC python
@@ -23,9 +19,9 @@ print("2 + 3 * 4 =", 2 + 3 * 4)
 : Hello, Python!
 : 2 + 3 * 4 = 14
 
-* Loops and block globals
+* Loops leave their variable in scope
 
-This loop builds a list of squares from 1 to 5. After running it, check the *Variables* panel: you will see both =squares= (=list=) and =n= (=int=, value =5=), because Python's =for= loop variable stays bound in the enclosing scope after the loop finishes.
+Run this loop and look at the Variables panel afterward. You will see both =squares= and =n= (=5=), because a Python =for= loop does not create a separate block scope for its loop variable.
 
 #+NAME: squares
 #+BEGIN_SRC python
@@ -38,9 +34,9 @@ print("squares:", squares)
 #+RESULTS:
 : squares: [1, 4, 9, 16, 25]
 
-* Functions: iterative Fibonacci
+* Functions live in the same globals dict
 
-=fib= computes the nth Fibonacci number in O(n) time and O(1) space using tuple unpacking (=a, b = b, a + b=). In the *Variables* panel, =fib= shows up as a =function= object living in the block's global dictionary.
+Iterative Fibonacci in two rolling variables. After running, =fib= shows up in the Variables panel as a =function= object, right alongside any other global.
 
 #+NAME: fib
 #+BEGIN_SRC python
@@ -56,4 +52,4 @@ print("fib(10) =", fib(10))
 #+RESULTS:
 : fib(10) = 55
 
-Try breaking it on purpose: remove the closing parenthesis on =print= to see a line-mapped =SyntaxError=, or add =1 / 0= to inspect a full CPython traceback in the console panel.
+Try dropping a closing parenthesis or adding =1 / 0= to see real CPython syntax errors and tracebacks in the console panel.

@@ -1,16 +1,11 @@
-#+TITLE: WebAssembly: The Stack Machine Underneath
-#+SUBTITLE: Single-step through the i32 core of WebAssembly (WAT) — stack ops, locals, structured control flow, and linear memory
+#+TITLE: WebAssembly, Stepped Live
+#+SUBTITLE: The i32 core of WAT: operand stack, locals, structured control flow, and linear memory
 
-* No registers — just an operand stack
+* Arithmetic on an operand stack
 
-WebAssembly is a *stack machine*. Instead of naming registers, instructions push values onto an operand stack and pop them back off: =i32.const= pushes a 32-bit integer, and =i32.add= pops two and pushes their sum.
+WebAssembly has no registers. Instructions push values onto an operand stack and pop them back off: =i32.const= pushes a 32-bit integer, and =i32.add= pops two and pushes their sum. The nested syntax =(i32.add (i32.const 20) (i32.const 22))= flattens to pushing =20=, pushing =22=, then running =i32.add=.
 
-The nested S-expression syntax =(i32.add (i32.const 20) (i32.const 22))= is just syntactic sugar for pushing =20=, pushing =22=, then running =i32.add=. Step through the block below and watch the *Instructions* panel (which shows the real binary opcodes: =0x41= for =i32.const=, =0x6a= for =i32.add=) alongside the *Operand stack* panel.
-
-Two =i32= arithmetic rules to notice:
-
-- Overflow wraps silently modulo =2^32= (=65536 * 65536 = 0=).
-- Signed division =i32.div_s= truncates toward zero (=-7 / 2 = -3=).
+Step through the block below and watch *Instructions* (which shows the real binary opcodes: =0x41= for =i32.const=, =0x6a= for =i32.add=) alongside *Operand stack*. Overflow wraps modulo =2^32= (=65536 * 65536 = 0=), and signed division =i32.div_s= truncates toward zero (=-7 / 2 = -3=).
 
 #+NAME: stack-arith
 #+BEGIN_SRC wasm
@@ -29,9 +24,7 @@ Two =i32= arithmetic rules to notice:
 
 * Locals and recursive calls
 
-Values that need to live across expressions go in *locals* (parameters first, then =(local ...)= declarations, all zero-initialized). =local.get= pushes a local onto the stack; =local.set= pops the top of the stack into it.
-
-Every =call= creates a fresh call frame with its own locals and operand stack slice. Step into =$fact= below and watch the *Call stack* panel grow one frame per recursive call, then unwind as each frame returns its product.
+Function parameters and =(local ...)= declarations give you named per-call variables (zero-initialized). =local.get= pushes a local onto the stack and =local.set= pops the top value into it. Each =call= pushes a fresh frame onto the *Call stack* panel; step into =$fact= below to watch ten frames stack up and then unwind as each multiply finishes.
 
 #+NAME: factorial
 #+BEGIN_SRC wasm
@@ -48,15 +41,9 @@ Every =call= creates a fresh call frame with its own locals and operand stack sl
 #+RESULTS:
 : 3628800
 
-* Structured control flow: =block=, =loop=, and =br=
+* =block=, =loop=, and =br=
 
-WebAssembly has no arbitrary =goto=. Instead, control flow uses nested =block= and =loop= labels, and =br= behaves differently depending on which one you target:
-
-- =br $done= (targeting a =block=) jumps to the *end* of the block — like =break=.
-- =br $again= (targeting a =loop=) jumps to the *start* of the loop — like =continue=.
-- =br_if= branches only when the top of the stack is nonzero.
-
-Putting a =loop= inside a =block= gives you a standard counted loop: =br_if $done= exits when =$i > 5=, and =br $again= repeats otherwise.
+WebAssembly has no arbitrary jumps. Control flow is built from nested =block= and =loop= labels, and =br= means opposite things depending on which one you name: =br $done= (a =block=) jumps to the end like =break=, while =br $again= (a =loop=) jumps back to the top like =continue=. =br_if= branches only when the top of the stack is nonzero.
 
 #+NAME: counted-loop
 #+BEGIN_SRC wasm
@@ -77,11 +64,9 @@ Putting a =loop= inside a =block= gives you a standard counted loop: =br_if $don
 #+RESULTS:
 : 15
 
-* Linear memory: just a flat byte array
+* Linear memory is just bytes
 
-=(memory 1)= allocates one 64 KiB page of flat, byte-addressed memory. =i32.store8= writes the low byte of a value; =i32.load8_u= reads it back unsigned (=0..255=), while =i32.load8_s= sign-extends it. Four-byte =i32.store=/=i32.load= are little-endian.
-
-Below, we store =0x2A= (42, ASCII =*=) at address =0= and read it back twice — once as a character and once as an integer. Check the *Memory* panel to see byte =2a= appear at offset =0x0000=.
+=(memory 1)= allocates one 64 KiB page of flat byte-addressed memory. =i32.store8= writes the low byte, =i32.load8_u= reads it back unsigned (=0..255=), and =i32.load8_s= sign-extends it. Four-byte loads and stores are little-endian. Here =0x2A= (42, ASCII =*=) is stored at address =0= and printed once as a char and once as an integer. Check the *Memory* panel to see byte =2a= at =0x0000=.
 
 #+NAME: memory-bytes
 #+BEGIN_SRC wasm
@@ -98,8 +83,4 @@ Below, we store =0x2A= (42, ASCII =*=) at address =0= and read it back twice —
 #+RESULTS:
 : *42
 
-* Scope of this kernel
-
-This interpreter implements WebAssembly's *32-bit integer core*: operand stack, locals, globals, function calls, structured branches, linear memory, wrapping =i32= math, and real traps (divide by zero, =unreachable=, out-of-bounds memory access — all mapped to your source line). Types outside that core (=i64=, =f32=, =f64=) are rejected cleanly at load time.
-
-The opcode bytes shown in the *Instructions* panel are real WebAssembly binary encodings — the exact same instruction format clang emits in the C and C++ lessons.
+This kernel implements the =i32= core (stack, locals, globals, calls, structured branches, linear memory, and traps for divide-by-zero, =unreachable=, and out-of-bounds memory). =i64=, =f32=, and =f64= fail cleanly at load time. The opcode bytes in *Instructions* are the real binary spec encodings emitted by clang in the C and C++ lessons.

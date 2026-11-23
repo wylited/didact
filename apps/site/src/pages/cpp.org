@@ -1,18 +1,15 @@
-#+TITLE: C++: The Parts That Actually Bite
-#+SUBTITLE: Real clang++ (C++20, libc++) compiling to WebAssembly in your browser
+#+TITLE: C++ in the Browser
+#+SUBTITLE: Real clang++ (C++20, libc++) compiling to wasm32-wasi
 
-Every block below is real C++20 compiled in your browser by *clang++* (LLVM 22 via YoWASP, downloaded once and cached) and linked with =wasm-ld= against =libc++=. The exact compiler command is:
+Hit Run on any block and clang++ compiles it against =libc++= with this exact command:
 
 =clang++ -std=c++20 -fno-exceptions lesson.cpp -o lesson.wasm=
 
-Two practical notes about this environment:
+The bundled =libc++abi= is built without exception support, so =-fno-exceptions= is on. If you write =throw=, clang rejects it at compile time on that line. Everything else is real C++20 running on WebAssembly via a minimal WASI shim (stdout and exit codes work; filesystem calls fail cleanly). The right-hand panel shows the build log, exit status, binary size, compile time, and the first 256 bytes of the linked =.wasm= output.
 
-- *No exceptions:* The bundled =libc++abi= is built without =__cxa_throw=, so the kernel passes =-fno-exceptions=. Writing =throw= produces a clean compile-time error on that line. Resource cleanup relies on RAII instead of =try=/=catch=.
-- *WASI sandbox:* Standard output and exit codes work normally, while filesystem calls fail with an explicit "unsupported WASI call" error. Open the right-hand panel to see the compile log, exit code, module size, compile time, and the first 256 bytes of the linked =.wasm= binary.
+* RAII and destructor order
 
-* RAII: scope is your cleanup
-
-In C++, destructors run automatically when a local variable leaves scope — and always in *reverse order of construction*. Below, =outer= is built first and =inner= second, so =inner= is destroyed the moment the inner ={ ... }= block ends, before =outer= is touched. That deterministic lifetime is how C++ manages files, locks, and memory without a garbage collector or =finally= blocks.
+C++ does not need =finally= blocks because local objects run their destructors automatically the moment they leave scope, always in reverse order of construction. Here =inner= is destroyed at the closing brace before execution even reaches the next =printf=, and =outer= cleans up when =main= returns.
 
 #+NAME: raii
 #+BEGIN_SRC cpp
@@ -45,9 +42,9 @@ int main() {
 : --- inner already gone ---
 : destroy outer
 
-* =std::vector= doubles its capacity
+* How =std::vector= grows
 
-When =push_back= runs out of room, =std::vector= allocates a new buffer (typically 2x larger), moves the existing elements over, and frees the old buffer. Watch =capacity= jump =1 -> 2 -> 4 -> 8= while =size= grows by 1 each step. On the fourth push, =capacity= stays at 4 because there is already room — that geometric growth is why =push_back= is *O(1) amortized*.
+When =push_back= runs out of space, =std::vector= allocates a new buffer twice as big, moves the existing elements across, and frees the old one. Watch =capacity= jump =1, 2, 4, 8= while =size= ticks up by one. Push 4 does not reallocate because slot 4 was already reserved.
 
 #+NAME: vector-growth
 #+BEGIN_SRC cpp
@@ -75,9 +72,9 @@ int main() {
 : push 25: size=5 capacity=8
 : 1 4 9 16 25
 
-* Templates: compile-time code generation
+* Templates generate real functions per type
 
-A C++ template is not a runtime generic with boxing or dynamic dispatch. Each time you call =max= with a new type (=int=, =double=, =char=), the compiler stamps out a separate, specialized machine-code function for that exact type.
+=max<T>= is not erased at runtime. Calling it with =int=, =double=, and =char= makes clang emit three separate compiled functions, one per type, with zero boxing or virtual dispatch.
 
 #+NAME: templates
 #+BEGIN_SRC cpp
@@ -103,10 +100,7 @@ int main() {
 
 * References vs pointers
 
-Both functions below swap two integers, but they express different contracts:
-
-- =int&= (reference): must bind to a real variable, cannot be null, and cannot be rebound later. Callers pass =x, y= directly.
-- =int*= (pointer): holds an explicit memory address, can be null, and requires =&= at the call site and =*= inside the function.
+Both swaps mutate =x= and =y= in place. The reference version (=int&=) cannot be null and cannot be rebound to another variable, so you pass =x, y= directly. The pointer version (=int*=) makes the indirection explicit with =&= at the call site and =*= inside the body.
 
 #+NAME: refs-vs-pointers
 #+BEGIN_SRC cpp
@@ -134,12 +128,9 @@ int main() {
 : after swapRef(x, y): x=2 y=1
 : after swapPtr(&x, &y): x=1 y=2
 
-* Lambdas: value capture vs reference capture
+* Lambda captures: copy vs reference
 
-A lambda's capture list =[...]= decides whether it copies a variable or points to the original:
-
-- =[base]= snapshots =base= (10) when the lambda is created. Changing =base = 100= later has zero effect on =addBase=.
-- =[&counter]= captures a reference to =counter=, so every call to =bump()= mutates the live variable.
+=[base]= copies =10= into =addBase= at the moment the lambda is created, so setting =base = 100= later does nothing to it. =[&counter]= grabs a live reference instead, so calling =bump()= actually increments =counter=.
 
 #+NAME: lambdas
 #+BEGIN_SRC cpp

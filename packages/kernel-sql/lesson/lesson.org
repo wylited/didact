@@ -1,11 +1,11 @@
-#+TITLE: SQL: How a Query Engine Actually Runs
-#+SUBTITLE: Single-step through table scans, nested-loop joins, grouping, sorting, and three-valued NULL logic
+#+TITLE: SQL, Row by Row
+#+SUBTITLE: Watch table scans, nested-loop joins, grouping, sorting, and NULL logic run one row at a time
 
-* Declarative queries, imperative execution
+SQL lets you write what you want (=WHERE age >= 30=) instead of writing a loop, but the database still runs a loop under the covers. This page runs a small TypeScript SQL engine (=CREATE TABLE=, =INSERT=, =SELECT= over =INTEGER= and =TEXT=) where every Step is literally one row operation.
 
-In SQL you describe /what/ you want (=WHERE age >= 30=), not how to loop over rows. Underneath, though, the query engine builds a pipeline of concrete operators that do the looping for you. This page runs a small, steppable SQL engine in TypeScript supporting =CREATE TABLE=, =INSERT=, and =SELECT= over =INTEGER= and =TEXT= columns (keywords are case-insensitive; text values are case-sensitive).
+* Scans, filters, and projections
 
-Single-step the block below and watch the *Plan* panel: each step is *one row operation* (scanning a row, testing a filter, or emitting an output row). Each operator tracks three live counters: *seen / passed / emitted*.
+Step through the query below with the *Plan* panel open. Each operator shows *seen / passed / emitted* counters: =Scan users= reads all 5 rows (=5/5/5=), =Filter age >= 30= keeps 2 (=5/2/2=), and =Project= outputs 2 (=2/2/2=). Notice =eve= is left out because her age is =NULL=, and =NULL >= 30= is unknown, not true.
 
 #+NAME: select-where
 #+BEGIN_SRC sql
@@ -22,13 +22,9 @@ SELECT name, age FROM users WHERE age >= 30;
 :  alice | 34  
 :  carol | 41  
 
-Look at the final counters: =Scan users= reads all 5 rows (=5/5/5=), =Filter age >= 30= tests 5 and keeps 2 (=5/2/2=), and =Project= outputs 2 (=2/2/2=). Notice that =eve= (whose age is =NULL=) is excluded because =NULL >= 30= evaluates to /unknown/, not true.
+* Nested-loop joins
 
-* A =JOIN= is a nested loop over row pairs
-
-Production databases choose between hash joins, merge joins, and nested loops depending on table size and indexes. This teaching engine uses a *nested-loop join* so you can see the exact cost: for every row from the left table, it checks every row from the right table against the =ON= condition.
-
-Step through the query below with *Plan* open: 3 users times 3 orders means =NestedLoop join orders= probes =9= pairs, and 2 match (=9/2/2=). Order 12 (=user_id = 9=) has no matching user, so an inner join drops it. When both tables share a column name (=id=), qualify it as =users.id= or =orders.id= (unqualified =id= fails as ambiguous).
+This engine joins tables with a plain nested loop so the cost is visible: for every row from =users=, it scans every row of =orders= and tests the =ON= condition. With 3 users and 3 orders, =NestedLoop join orders= checks 9 pairs and emits 2 matches (=9/2/2=). Order 12 (=user_id = 9=) matches nobody and gets dropped. When both tables have an =id= column, qualify it as =users.id= or =orders.id= (bare =id= fails as ambiguous).
 
 #+NAME: nested-loop-join
 #+BEGIN_SRC sql
@@ -49,11 +45,11 @@ SELECT users.name, orders.total FROM users JOIN orders ON users.id = orders.user
 :  alice | 100   
 :  carol | 60    
 
-That O(N * M) growth is why query planners matter: joining two 200-row tables takes 40,000 probes. To prevent accidental browser freezes, this kernel caps runs at 100,000 row operations and stops with a line-numbered error.
+Because nested loops scale as =N * M= (two 200-row tables take 40,000 probes), runs cap out at 100,000 row operations and stop with a line-numbered error instead of freezing your tab.
 
-* =GROUP BY= folds rows into buckets
+* =GROUP BY= and =HAVING=
 
-=GROUP BY city= buckets rows by city and updates each aggregate (=COUNT=, =SUM=, =AVG=, =MIN=, =MAX=) one row at a time. Watch the *Current row* panel as rows fold in. Once all rows are folded, each group is finalized: =HAVING= filters the finished groups (unlike =WHERE=, which filters raw rows *before* grouping), and =AVG= always prints with a decimal.
+=GROUP BY city= folds rows into per-city buckets one step at a time while updating =COUNT=, =SUM=, =AVG=, =MIN=, and =MAX=. Watch *Current row* as each row gets folded in. Once folding finishes, =HAVING= filters the finished groups (while =WHERE= filters raw rows before grouping).
 
 #+NAME: group-by
 #+BEGIN_SRC sql
@@ -75,7 +71,7 @@ SELECT city, COUNT(*) FROM users GROUP BY city HAVING COUNT(*) > 1 AND AVG(age) 
 : ------+----------
 :  HK   | 2        
 
-Every unaggregated column in =SELECT= must appear in =GROUP BY=. Otherwise, if a city has two users, SQL has no well-defined way to pick which =name= to show. The engine rejects this query before scanning a single row:
+Any non-aggregated column in =SELECT= must also be in =GROUP BY=. Otherwise SQL would have to guess which =name= to pick out of a multi-row group. Line 3 below fails before reading a single row (the =INSERT= on line 2 still ran first):
 
 #+NAME: grouping-rule
 #+BEGIN_SRC sql
@@ -87,11 +83,11 @@ SELECT name, COUNT(*) FROM users GROUP BY city;
 #+RESULTS:
 : INSERT 0 2
 
-Line 3 fails with =column 'name' must appear in GROUP BY or inside an aggregate= (the earlier =INSERT= still ran because statements execute in order). Wrap it in =MIN(name)= or add =name= to =GROUP BY= to make it valid.
+Wrap =name= in =MIN(name)= or add it to =GROUP BY= to fix it.
 
 * =ORDER BY= and =LIMIT=
 
-Sorting uses a stable merge sort where each comparison counts as one step. =INTEGER= columns sort numerically (=12 > 7 > 3=), =TEXT= columns sort in ASCII/byte order (uppercase before lowercase), and =NULL=s sort last. =LIMIT n= forwards the first =n= rows and stops. Below, =points DESC= puts both 12-point players first, and the tie-breaker =player= puts =Bob= ahead of =carol=.
+Sorting runs a stable merge sort where each comparison is one step. =INTEGER= columns sort numerically, =TEXT= columns sort in ASCII order (uppercase before lowercase), and =NULL=s sort last. =LIMIT 3= stops after emitting three rows.
 
 #+NAME: order-limit
 #+BEGIN_SRC sql
@@ -109,13 +105,11 @@ SELECT player, points FROM scores ORDER BY points DESC, player LIMIT 3;
 :  carol  | 12     
 :  alice  | 7      
 
-* =NULL= is unknown, not false
+* =NULL= and =LIKE=
 
-=NULL= means "missing or unknown", not =0= or =''=. Any normal comparison with =NULL= (=NULL > 25=, =NULL = NULL=, or even =NOT (NULL > 25)=) produces *unknown*, and =WHERE= only keeps rows that evaluate to *true*.
+=NULL= means unknown, not zero or empty string. Comparing =NULL= with =>=, ===, or =!= gives unknown, and =WHERE= drops anything that is not true (even =NOT (age > 25)= drops Bob). Use =IS NULL= or =IS NOT NULL= to match missing values. Aggregates skip =NULL=s (=COUNT(*)= counts rows; =COUNT(age)= counts non-null ages).
 
-- Use =IS NULL= or =IS NOT NULL= to test for missing values.
-- Aggregates ignore =NULL= values (=COUNT(*)= counts all rows; =COUNT(age)= counts only non-null ages).
-- =LIKE= matches case-sensitive patterns using =%= (any sequence of characters) and =_= (any single character).
+The last query uses =LIKE=: =%= matches any run of characters, =_= matches one character, and matching is case-sensitive.
 
 #+NAME: null-and-like
 #+BEGIN_SRC sql

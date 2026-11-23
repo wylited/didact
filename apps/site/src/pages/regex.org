@@ -1,17 +1,13 @@
-#+TITLE: Regular Expressions, Without Backtracking
-#+SUBTITLE: Compile patterns to a Thompson NFA and simulate every active state in parallel — guaranteed linear time
+#+TITLE: Regex Without Backtracking
+#+SUBTITLE: Compile patterns to a Thompson NFA and advance every active state together, one character per step
 
-* Block format and how the engine works
+* How blocks work
 
-Each block starts with a regex between slashes (=/a(b|c)+d/=, no flags), followed by one test input per line. Lines starting with =#= are comments, and input lines interpret six escapes (=\n=, =\t=, =\r=, =\f=, =\v=, =\\=).
+The first non-comment line is a pattern between slashes (=/a(b|c)+d/=, no flags), and each line after it is a test input (=#= lines are comments; inputs decode =\n=, =\t=, =\r=, =\f=, =\v=, and =\\=).
 
-Instead of backtracking like JavaScript or Python's =re=, this kernel compiles the pattern into a *Thompson NFA* and advances a *set* of all active states together, one character per step:
+Instead of backtracking like JS or Python's =re=, this engine compiles the regex into a Thompson NFA and tracks the full *set* of active states at every character. Open *The machine* to see the compiled graph, *NFA states* to see which states are currently alive, and *Input* to watch the scan cursor move.
 
-- *The machine* panel shows the compiled NFA graph.
-- *NFA states* highlights every state currently active (and marks newly entered states).
-- *Input* shows the current start offset and scan position.
-
-Basic syntax: literals match themselves, =.= matches any character except =\n=, character classes like =[a-z]= and =[^0-9]= match listed/ranged characters (no escapes inside classes), and =^=/=$= anchor to the start and end of the whole string (no multiline mode).
+Literals match themselves, =.= matches anything except =\n=, character classes like =[a-z]= and =[^0-9]= take no escapes inside =[...]=, and =^=/=$= anchor to the start and end of the whole string.
 
 #+NAME: regex-classes
 #+BEGIN_SRC regex
@@ -25,7 +21,7 @@ zzz
 : match [2,6)
 : no match
 
-For unanchored patterns, the engine tries start offsets =0, 1, 2, ...= until one matches, and keeps the *longest* match from that earliest start (POSIX leftmost-longest semantics).
+Unanchored searches try start positions =0, 1, 2, ...= until one succeeds, keeping the longest match from that earliest start (POSIX leftmost-longest).
 
 #+NAME: regex-anchors
 #+BEGIN_SRC regex
@@ -40,7 +36,7 @@ xbcd
 : no match
 : no match
 
-Because =.= does not match newlines, =a\nb= fails =/a.b/= while =axb= matches:
+Since =.= refuses newlines, =a\nb= fails =/a.b/= while =axb= matches:
 
 #+NAME: regex-dot
 #+BEGIN_SRC regex
@@ -53,9 +49,9 @@ axb
 : no match
 : match [0,3)
 
-* Alternation and quantifiers: leftmost-longest
+* Alternation and quantifiers
 
-In backtracking engines like JS or Python, =/a|ab/= stops at the first matching branch (="a"=). A Thompson NFA tracks *both* branches at once and picks the longest match, so =/a|ab/= and =/ab|a/= return the exact same span.
+In JS or Python, =/a|ab/= stops at ="a"= because the first branch matched. Here both branches stay alive in the same state set and the longest span wins, so =/a|ab/= and =/ab|a/= always agree.
 
 #+NAME: regex-alt
 #+BEGIN_SRC regex
@@ -70,7 +66,7 @@ xab
 : match [0,1)
 : match [1,3)
 
-Supported quantifiers are =*= (0+), =+= (1+), =?= (0 or 1), and counted ranges ={n}=, ={n,}=, ={n,m}=. Counted quantifiers expand into repeated NFA states (=a{2,3}= becomes =a a a?=), visible in *The machine* panel. Escape literal braces as =\{=.
+Quantifiers include =*=, =+=, =?=, and counted ranges ={n}=, ={n,}=, ={n,m}=. Counted ranges expand into repeated states when compiled (=a{2,3}= becomes =a a a?=), which you can see directly in *The machine* panel. Escape literal braces with =\{=.
 
 #+NAME: regex-quant
 #+BEGIN_SRC regex
@@ -84,8 +80,6 @@ a
 : match [0,3)
 : match [0,2)
 : no match
-
-Optional characters use =?=:
 
 #+NAME: regex-optional
 #+BEGIN_SRC regex
@@ -102,7 +96,7 @@ colr
 
 * Capturing groups
 
-Parentheses =(...)= capture half-open =[start, end)= spans numbered by opening parenthesis; =(?:...)= groups without capturing. When a group repeats (like =(ab)+=), it reports the final iteration's span — matching standard regex behavior without backtracking.
+=(...)= captures half-open =[start, end)= spans numbered by opening paren; =(?:...)= groups without capturing. Repeated groups like =(ab)+= report their final iteration's span. Step through =regex-groups= with *Captures* open to watch the zero-width open and close marker states fire.
 
 #+NAME: regex-groups
 #+BEGIN_SRC regex
@@ -124,17 +118,9 @@ ab
 : match [0,4) groups: 1=[2,4)
 : match [0,2) groups: 1=[0,2)
 
-Step through =regex-groups= with the *Captures* panel open to see the zero-width open and close marker states fire as characters are consumed.
+* ASCII shorthands
 
-* Shorthand classes: =\d=, =\w=, =\s=
-
-This engine uses strict ASCII definitions (and uppercase =\D=, =\W=, =\S= for their complements):
-
-- =\d= is =[0-9]=
-- =\w= is =[A-Za-z0-9_]=
-- =\s= is =[ \t\r\n\f\v]=
-
-Note: shorthands cannot be placed inside =[...]= classes in this subset.
+=\d= is =[0-9]=, =\w= is =[A-Za-z0-9_]=, and =\s= is =[ \t\r\n\f\v]= (strict ASCII, with =\D=, =\W=, =\S= as their complements). Shorthands are not allowed inside =[...]= classes.
 
 #+NAME: regex-words
 #+BEGIN_SRC regex
@@ -158,20 +144,13 @@ hi\tthere
 : match [2,8)
 : match [2,8)
 
-* Features intentionally rejected (and why)
+* What gets rejected at load time
 
-Everything outside pure regular languages or one-pass NFA simulation fails at load time with a line-numbered error:
+Anything outside pure one-pass regular matching fails up front with its line number: backreferences (=\1=, =\k<name>=, because matching =ww= is not regular and needs unbounded memory), lookaround (=(?=...)=, =(?<=...)=), lazy quantifiers (=*?=), named groups, Unicode classes (=\p{L}=), and =\b=/=\B= word boundaries. Syntax errors like dangling =*=, reversed =[z-a]=, or bad ={2,1}= also point to the exact line.
 
-- *Backreferences (=\1=, =\k<name>=):* Matching an arbitrary repeated string (=ww=) is provably non-regular — a finite-state machine has no unbounded memory to store earlier substrings.
-- *Lookaround (=(?=...)=, =(?<=...)=):* Excluded to keep simulation strictly single-pass left-to-right.
-- *Lazy quantifiers (=*?=, =+?=):* Not applicable under POSIX leftmost-longest matching.
-- *Named groups, Unicode properties (=\p{L}=), and word boundaries (=\b=):* Use numbered groups, ASCII classes, and explicit anchors instead.
+* Why =/(a*)*/= stays linear
 
-Syntax mistakes (dangling =*=, unclosed =(= or =[=, invalid ={2,1}=, empty =[]=, reversed =[z-a]=) also report their exact line.
-
-* Why =/(a*)*/= never blows up here
-
-On a backtracking engine, nested quantifiers like =/(a*)*/= against 1,000 =a=s followed by =b= explode into exponential O(2^n) backtracking paths (ReDoS). A Thompson NFA deduplicates active states at every character, so it never visits more states per character than exist in the compiled graph.
+A backtracking engine chokes in O(2^n) time on =/(a*)*/= against 1,000 =a=s followed by =b=. A Thompson NFA merges duplicate states at every step, so each character does at most one pass over the state graph. All 1,001 characters finish in 1,001 steps (runs cap at 4,096 NFA states, 100,000 character steps, and 5,000,000 state visits).
 
 #+NAME: regex-linear
 #+BEGIN_SRC regex
@@ -181,5 +160,3 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 #+RESULTS:
 : match [0,1000) groups: 1=[0,1000)
-
-All 1,001 characters finish in 1,001 steps: one per =a=, plus one step where =b= drops every live state. Safety caps (4,096 NFA states max, 100,000 character steps, 5,000,000 state visits) ensure pathological patterns fail fast with a clean error instead of hanging your browser.

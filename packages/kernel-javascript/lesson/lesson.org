@@ -1,26 +1,22 @@
-#+TITLE: JavaScript's Weird Parts, Step by Step
-#+SUBTITLE: Coercion, closures, hoisting, and the event loop on a single-steppable interpreter
+#+TITLE: JavaScript, Stepped Live
+#+SUBTITLE: Coercion, closures, hoisting, and the event loop on a small steppable JS interpreter
 
-* What this interpreter runs
+This page runs a hand-written JavaScript interpreter instead of your browser's engine, so you can single-step through statements and watch *Scopes*, *Call stack*, and *Event loop* update live. It supports =var=/=let=/=const=, functions, arrows, loops, =Math=, =console=, and basic array/string methods. Classes, =this=, and =async=/=await= are rejected up front with a line number.
 
-This page runs a small, steppable JavaScript interpreter written in TypeScript rather than your browser's JS engine. It covers the core mechanics — =var=/=let=/=const=, functions, arrow functions, loops, =Math=, =console=, and basic array/string methods — and leaves out classes, =this=, and =async=/=await=. Anything outside the subset fails cleanly at load time with the exact line number.
+* Why =[]= == =false=
 
-As you step through a block, watch the three right-hand panels: *Scopes* (live variable bindings), *Call stack* (active function frames), and *Event loop* (microtask and macrotask queues).
+=== checks type and value without converting anything. == coerces operands until their types match, which is how an empty array ends up equal to =false=: =[]= turns into =''=, =''= turns into =0=, and =false= turns into =0=.
 
-* Loose (= == =) vs strict (= === =) equality
+| Expression          | What == actually does               | Result |
+|---------------------+-------------------------------------+--------|
+| ='' == 0=           | =''= becomes =0=                    | true   |
+| ='1' == 1=          | ='1'= becomes =1=                   | true   |
+| =[] == false=       | =[]= -> =''= -> =0=, =false= -> =0= | true   |
+| =null == undefined= | special case in the spec            | true   |
+| =NaN == NaN=        | =NaN= never equals anything         | false  |
+| =[] === false=      | different types, no coercion        | false  |
 
-Strict equality (===) never converts types: if the types differ, the answer is =false=. Loose equality (==) converts operands using the spec's =ToPrimitive= and =ToNumber= rules until both sides have the same type:
-
-| Comparison          | Coercion                                 | Result |
-|---------------------+------------------------------------------+--------|
-| ='' == 0=           | =''= becomes =0=                         | true   |
-| ='1' == 1=          | ='1'= becomes =1=                        | true   |
-| =[] == false=       | =[]= -> =''= -> =0=, and =false= -> =0= | true   |
-| =null == undefined= | special case (equal only to each other)  | true   |
-| =NaN == NaN=        | =NaN= is never equal to anything         | false  |
-| =[] === false=      | none (different types)                   | false  |
-
-That third row is the classic JS gotcha: =[]= converts to =''=, which converts to =0=, and =false= also converts to =0=. Step through the block below to see each comparison evaluate.
+Step through the calls below to see each row in action.
 
 #+BEGIN_SRC javascript
 console.log('' == 0, '1' == 1);
@@ -37,14 +33,9 @@ console.log([] === false, '1' === 1);
 : false false
 : false false
 
-Practical rule: default to === unless you deliberately want =x == null= (to match both =null= and =undefined=).
+* Closures hold bindings, not copies
 
-* Closures capture bindings, not snapshots
-
-A closure holds a live reference to the variable binding in its enclosing scope — not a copy of its value at the moment the function was created:
-
-- In the =var i= loop, there is only *one* function-scoped =i=. All three closures point to that same slot, which holds =3= once the loop ends.
-- In the =let j= loop, each iteration creates a *fresh* block-scoped =j=, so each closure remembers its own number (=0=, =1=, =2=).
+A function remembers the scope slot a variable lives in, not the value it happened to hold when the function was defined. In the =var i= loop there is only one =i= for the whole scope, so all three functions read =3= after the loop finishes. With =let j=, each iteration gets its own slot, so they return =0=, =1=, =2=.
 
 #+BEGIN_SRC javascript
 var withVar = [];
@@ -63,15 +54,11 @@ console.log(withLet[0](), withLet[1](), withLet[2]());
 : 3 3 3
 : 0 1 2
 
-Set a breakpoint on the =console.log= lines and inspect *Scopes*: all three =withVar= functions share a single =i=, while each =withLet= function has its own =j=.
+Put a breakpoint on line 9 and look at *Scopes*: the =withVar= functions all point to the same =i=, while each =withLet= function has a separate =j=.
 
-* Hoisting and the Temporal Dead Zone
+* Hoisting and the temporal dead zone
 
-Before running the first line of a scope, JavaScript scans ahead and registers every declaration:
-
-- =var= declarations are initialized immediately to =undefined= (their assignments stay in place).
-- =function= declarations are hoisted completely and can be called before they appear.
-- =let= and =const= are also hoisted, but stay uninitialized until their declaration line runs — reading them early throws a =ReferenceError= (the *Temporal Dead Zone*).
+Before executing line 1 of a scope, the interpreter registers every declaration in that scope. =var= bindings start out as =undefined=, and =function= declarations are immediately callable. =let= and =const= are registered too, but stay unreadable until their declaration line runs; touching =later= on line 5 throws =Cannot access 'later' before initialization= and halts the block.
 
 #+BEGIN_SRC javascript
 console.log(hoistedVar, typeof hoistedFn);
@@ -86,15 +73,11 @@ let later = 'never reached';
 : undefined function
 : now set callable before its line
 
-Line 5 throws =Cannot access 'later' before initialization= and stops execution. Step from line 1 and watch =hoistedVar= appear in *Scopes* as =undefined= before line 1 even runs.
+Step from the very first line and watch =hoistedVar= show up in *Scopes* before line 1 executes.
 
-* The event loop: sync, microtasks, macrotasks
+* Event loop order: sync, microtasks, macrotasks
 
-JavaScript executes one turn at a time in strict priority order:
-
-- *Synchronous code* runs to completion first.
-- *Microtasks* (=Promise.resolve().then(...)=) drain completely right after synchronous code finishes.
-- *Macrotasks* (=setTimeout(..., 0)=) run one at a time *after* the microtask queue is empty (and any new microtasks queued by a macrotask drain before the next macrotask).
+Top-level synchronous code runs to completion first. Once it finishes, the engine drains the entire microtask queue (=Promise.resolve().then(...)=) before taking a single macrotask (=setTimeout(..., 0)=). That is why =3 microtask= always beats =4 macrotask= even when the timeout is =0=.
 
 #+BEGIN_SRC javascript
 console.log('1 sync');
@@ -109,11 +92,11 @@ console.log('2 still sync');
 : 3 microtask
 : 4 macrotask
 
-Put a breakpoint on line 4 and check the *Event loop* panel: even with a =0= ms timeout, the microtask always runs before the macrotask.
+Set a breakpoint on line 4 and check the *Event loop* panel to see both queues lined up before the body finishes.
 
-* Array pipelines: =filter= and =map=
+* Stepping inside =filter= and =map=
 
-=filter= and =map= take regular closures and call them once per element. Set a breakpoint inside either callback to watch a new frame push onto the *Call stack* for each element.
+Array methods here run inside the interpreter itself, so you can drop a breakpoint inside a callback and watch the *Call stack* push a frame for every element.
 
 #+BEGIN_SRC javascript
 var numbers = [1, 2, 3, 4, 5, 6];

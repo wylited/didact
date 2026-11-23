@@ -1,45 +1,38 @@
-#+TITLE: MIPS32 Assembly, Step by Step
+#+TITLE: MIPS32 Assembly, Stepped Live
 #+SUBTITLE: SPIM/MARS-style MIPS32 assembler and fetch-decode-execute simulator in your browser
 
-Every block on this page is assembled into real 32-bit MIPS32 machine words and run by a steppable fetch-decode-execute interpreter in TypeScript. The *Program* listing shows the exact encoded bytes at each address.
-
-One standard teaching simplification (matching SPIM and MARS defaults): *there are no branch delay slots*. Branches take effect immediately, and =jal=/=jalr= store =pc + 4= into =$ra=.
+Every block here assembles to real 32-bit MIPS32 words and runs on a steppable fetch-decode-execute interpreter. Check the *Program* listing to see the actual encoded bytes at each PC address. Like SPIM and MARS in default mode, there are no branch delay slots: branches jump immediately, and =jal=/=jalr= save =pc + 4= into =$ra=.
 
 * Registers, =hi=/=lo=, and no flags
-
-MIPS32 has 32 general-purpose registers with standard ABI roles:
 
 | Registers                  | Role                                                         |
 |----------------------------+--------------------------------------------------------------|
 | =$zero=                    | hardwired 0 (writes are ignored)                             |
 | =$at=                      | assembler temporary (reserved for pseudo-instructions)       |
-| =$v0=, =$v1=               | return values; =$v0= also picks the syscall                  |
-| =$a0=–=$a3=                | first four function/syscall arguments                        |
-| =$t0=–=$t9=                | caller-saved scratch registers                               |
-| =$s0=–=$s7=                | callee-saved registers                                       |
+| =$v0=, =$v1=               | return values; =$v0= also selects the syscall                |
+| =$a0=–=$a3=                | first four arguments                                         |
+| =$t0=–=$t9=                | caller-saved scratch                                         |
+| =$s0=–=$s7=                | callee-saved                                                 |
 | =$gp=, =$sp=, =$fp=, =$ra= | global pointer, stack pointer, frame pointer, return address |
 
-Two quirks distinguish MIPS from x86:
-
-- *Separate =hi= and =lo= registers:* =mult= writes a 64-bit product across =hi:lo=, and =div= puts the quotient in =lo= and remainder in =hi=. Use =mflo= and =mfhi= to copy those values back into normal registers.
-- *No condition flags:* Instead of setting ZF/CF flags, comparisons write =0= or =1= into a register (=slt=), and branches test registers directly (=beq=, =bne=, =blez=, etc.). Pseudo-instructions like =ble $t1, 10, loop= expand into real instructions (=addiu= + =slt= + =beq=) that you can see in the listing.
+Two things feel different if you come from x86. First, =mult= writes a 64-bit product across two special registers (=hi:lo=), and =div= puts the quotient in =lo= and remainder in =hi=; you pull them back with =mflo= and =mfhi=. Second, MIPS has no condition flags: comparisons write =0= or =1= into a register (=slt=), and branches compare registers directly. Pseudo-instructions like =ble $t1, 10, loop= expand into real machine instructions (=addiu=, =slt=, =beq=) that you can watch in the listing.
 
 * Syscalls
 
-Put the service number in =$v0=, put the argument in =$a0=, and run =syscall=:
+Load the service number into =$v0=, put the argument in =$a0=, and execute =syscall=:
 
 | =$v0= | Service      | Argument in =$a0=                  |
 |-------+--------------+------------------------------------|
 | 1     | print int    | signed 32-bit integer              |
 | 4     | print string | address of a NUL-terminated string |
 | 11    | print char   | ASCII code                         |
-| 10    | exit         | none (halts execution)             |
+| 10    | exit         | none                               |
 
-Memory is little-endian (=.text= at =0x00400000=, =.data= at =0x10010000=, =$sp= at =0x7fffeffc=), and runs are capped at 1,000,000 instructions so infinite loops stop cleanly.
+Memory is little-endian (=.text= at =0x00400000=, =.data= at =0x10010000=, =$sp= at =0x7fffeffc=), with a 1,000,000-instruction run cap.
 
 * Hello, MIPS
 
-Step through this program and notice that =la $a0, msg= expands into *two* machine instructions (=lui= + =ori=), because the 32-bit address =0x10010000= does not fit in a 16-bit immediate. Hover any listing row to read the source comment.
+Step through this block and watch =la $a0, msg= expand into two instructions (=lui= + =ori=), since the 32-bit address =0x10010000= does not fit in a 16-bit immediate. Hover any row in the listing to see its =#= comment.
 
 #+NAME: hello
 #+BEGIN_SRC mips
@@ -57,9 +50,9 @@ main:   li      $v0, 4                  # syscall 4: print string at $a0
 #+RESULTS:
 :Hello, MIPS!
 
-* Counting loop: sum 1..10
+* Summing 1 through 10
 
-This loop accumulates =1..10= in =$t0= using =$t1= as the counter. It uses =addu= and =addiu= (the non-trapping unsigned forms) because MIPS's signed =add=/=addi= trap on signed overflow.
+This loop adds =1..10= into =$t0= using =addu= and =addiu=. Compilers prefer the =u= forms because signed =add=/=addi= trap on signed overflow.
 
 #+NAME: sum
 #+BEGIN_SRC mips
@@ -83,9 +76,9 @@ loop:   addu    $t0, $t0, $t1           # sum += i
 #+RESULTS:
 :55
 
-* Function calls and =mult=/=mflo=: =factorial(10)=
+* Calls and =mult=/=mflo=: =factorial(10)=
 
-=jal fact= jumps to =fact= and saves the return address in =$ra=; =jr $ra= returns. Inside the loop, =mult= writes the 64-bit product to =hi:lo= and =mflo= pulls out the low 32 bits. For =10!=, =lo= reaches =3628800= while =hi= stays =0= (try bumping =10= to =13= to see =hi= become nonzero).
+=jal fact= saves the return address in =$ra= and jumps; =jr $ra= jumps back. Each =mult= writes a 64-bit product to =hi:lo= and =mflo= reads the low 32 bits. For =10!=, =lo= ends at =3628800= and =hi= stays =0=. Bump =10= to =13= to see =hi= go nonzero.
 
 #+NAME: factorial
 #+BEGIN_SRC mips
@@ -114,13 +107,13 @@ loop:   mult    $v0, $t0                # hi:lo = result * i (a full 64 bits)
 #+RESULTS:
 :3628800
 
-* Supported syntax quick reference
+* Syntax reference
 
-- SPIM/MARS syntax, destination first: =add $t0, $t1, $t2=, with =#= comments
-- Registers by ABI name (=$t0=) or number (=$8=); =$fp= and =$s8= are aliases
+- SPIM/MARS syntax, destination first (=add $t0, $t1, $t2=), =#= comments
+- Registers by ABI name (=$t0=) or number (=$8=); =$fp= and =$s8= are the same register
 - Sections and data: =.data=, =.text=, =.word=, =.half=, =.byte=, =.asciiz=, =.ascii=, =.space=, =.align=
-- Addressing: =offset($reg)=, =($reg)=, =label=, =label+4=, absolute constants
+- Memory operands: =offset($reg)=, =($reg)=, =label=, =label+4=, constants
 - Pseudo-ops: =li=, =la=, =move=, =nop=, =not=, =neg=, =mul=, =rem=, 3-operand =div=, =beqz=, =bnez=, =b=, =blt=, =bgt=, =ble=, =bge=
-- Core ISA: =add/addu/sub/subu/addi/addiu=, =and/or/xor/nor= (+ immediate forms), =sll/srl/sra= (+ variable forms), =slt/sltu/slti/sltiu=, =mult/multu/div/divu=, =mfhi/mflo/mthi/mtlo=, =lb/lbu/lh/lhu/lw/sb/sh/sw=, =beq/bne/blez/bgtz/bltz/bgez=, =j/jal/jr/jalr=, =syscall=
+- Core ISA: =add/addu/sub/subu/addi/addiu=, =and/or/xor/nor= (+ =i=), =sll/srl/sra= (+ =v=), =slt/sltu/slti/sltiu=, =mult/multu/div/divu=, =mfhi/mflo/mthi/mtlo=, =lb/lbu/lh/lhu/lw/sb/sh/sw=, =beq/bne/blez/bgtz/bltz/bgez=, =j/jal/jr/jalr=, =syscall=
 
-Assembly and runtime errors (bad registers, signed overflow on =add=, divide by zero, unaligned =lw=, or writing to =.text=) always report the exact source line.
+Assembly and runtime errors (bad registers, overflow on =add=, divide by zero, unaligned =lw=, stores to =.text=) report the exact source line.

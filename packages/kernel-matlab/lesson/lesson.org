@@ -1,21 +1,13 @@
-#+TITLE: MATLAB: Everything Is a Column-Major Matrix
-#+SUBTITLE: Matrix ops, linear indexing, backslash solving, workspaces, and vectorization — step by step
+#+TITLE: MATLAB, Column-Major
+#+SUBTITLE: Matrices, linear indexing, backslash solving, workspaces, and vectorization on a steppable interpreter
 
-* What this interpreter supports
+This is a small MATLAB-flavored interpreter written in TypeScript. Every value is a 2D matrix of IEEE 754 doubles stored column-major in a flat array, just like real MATLAB. It covers matrix literals, ranges, matrix and elementwise operators, =end= indexing, control flow, top-level functions, and core builtins (=zeros=, =sum=, =sort=, =det=, =inv=). Cells, structs, function handles, =try/catch=, and string variables are rejected with their line number.
 
-This page runs a steppable MATLAB-style teaching interpreter in TypeScript. Every value is a 2D matrix stored *column-major* in a flat array of IEEE 754 doubles — the exact memory layout real MATLAB uses.
+A few small quirks of this subset: there is no =rand= (everything is deterministic), numbers trim trailing zeros (=0.5= instead of =0.5000=), and inside =[ ]= a minus sign starts a new element, so write =[(1 - 2)]= for subtraction.
 
-Supported features include matrix literals, ranges, matrix vs elementwise operators (=+ - * / \ .=), indexing with =end=, =if=/=for=/=while=, top-level functions, and core builtins (=zeros=, =sum=, =sort=, =det=, =inv=). Unsupported constructs (cell arrays ={}=, structs, =@= function handles, =try/catch=, and strings as variables) fail cleanly with the line number.
+* Column-major storage and linear indexing
 
-Three small differences from desktop MATLAB:
-
-- Columns print separated by two spaces, and decimals trim trailing zeros (=0.5= instead of =0.5000=).
-- There is no =rand=, so every run is 100% deterministic.
-- Inside =[ ]=, a minus sign always starts a new element, so write =[(1 - 2)]= when you mean subtraction.
-
-* Matrix literals, ranges, and column-major layout
-
-Inside =[ ... ]=, spaces or commas separate columns, and semicolons (or newlines) separate rows.
+Inside =[ ... ]=, spaces or commas separate columns and semicolons start new rows.
 
 #+BEGIN_SRC matlab
 A = [1 2; 3 4]
@@ -33,9 +25,9 @@ disp(A(3))
 : 3
 : 2
 
-Look at why =A(2)= is =3= and =A(3)= is =2=: MATLAB stores =[1 2; 3 4]= *column by column* as =[1, 3, 2, 4]=. Single-step the block and check the *Matrices* panel: each row shows a stored element, its 0-based flat address (=(col - 1) * rows + row - 1=), and its 64-bit IEEE 754 hex pattern.
+Notice =A(2)= is =3= and =A(3)= is =2=. That happens because MATLAB lays =[1 2; 3 4]= out down the first column and then down the second: =[1, 3, 2, 4]=. Hit Step and open the *Matrices* panel to see every element at its flat 0-based address (=(col - 1) * rows + row - 1=) along with its raw 64-bit IEEE 754 hex bytes.
 
-Ranges (=start:step:stop=) build row vectors:
+Ranges (=start:step:stop=) build row vectors, and a trailing semicolon suppresses printing:
 
 #+BEGIN_SRC matlab
 v = 1:0.5:3
@@ -51,15 +43,9 @@ disp(w)
 :   1  1.5    2  2.5    3
 : 5  3  1
 
-Watch the *Workspace* panel for every variable's shape and preview (changed values highlight after each step), and note that a trailing semicolon suppresses printing.
-
 * Matrix math vs elementwise math
 
-In MATLAB, bare operators do linear algebra and dotted operators work element by element:
-
-- =A * B= is matrix multiplication; =A .* B= multiplies matching entries.
-- =/= and =\= solve linear systems; =./= and =.\= divide elementwise (broadcasting scalars).
-- =^= is matrix power; =.^= is elementwise power; ='= transposes.
+Bare =*= does matrix multiplication; dotted =.*= multiplies element by element. The same split applies to =/= and =\= (linear solves) vs =./= and =.\= (elementwise division), and =^= vs =.^=. ='= transposes.
 
 #+BEGIN_SRC matlab
 A = [1 2; 3 4];
@@ -74,9 +60,9 @@ disp(A .* B)
 :  5  12
 : 21  32
 
-* Solving linear systems with =\=
+* Solving =Mx = b= with =\=
 
-=M \ b= solves =Mx = b= using Gaussian elimination with partial pivoting — faster and more accurate than computing =inv(M) * b=. Below, we fit a quadratic =p(x) = a + bx + cx^2= through =(1, 6)=, =(2, 14)=, and =(3, 36)= in one line:
+Backslash (=M \ b=) runs Gaussian elimination with partial pivoting instead of explicitly inverting =M=. Here one backslash fits a quadratic =p(x) = a + bx + cx^2= through =(1, 6)=, =(2, 14)=, and =(3, 36)=, giving =12 - 13x + 7x^2=. If =M= is singular, both =\= and =inv= stop with an error on that line.
 
 #+BEGIN_SRC matlab
 M = [1 1 1; 1 2 4; 1 3 9];
@@ -88,11 +74,9 @@ disp(c')
 #+RESULTS:
 :  12  -13    7
 
-That gives =p(x) = 12 - 13x + 7x^2=. If =M= is singular, both =M \ b= and =inv(M)= stop with a line-numbered singularity error.
+* Slicing and deleting rows or columns
 
-* Slicing, =end=, and deleting slices
-
-MATLAB indexing is 1-based, =:= selects an entire row or column, and =end= evaluates to the size of that dimension. Assigning =[]= to a full row or column deletes it and compacts the matrix in memory.
+Indexing starts at 1, =:= means the whole row or column, and =end= is the length of that dimension. Assigning =[]= to a full row or column deletes it; watch the remaining elements slide to new addresses in the *Matrices* panel when =A(:, 2) = []= runs. Out-of-bounds writes are rejected (preallocate with =zeros=).
 
 #+BEGIN_SRC matlab
 A = [1 2 3; 4 5 6];
@@ -113,11 +97,9 @@ disp(A)
 : 10  30
 :  4   6
 
-Watch the *Matrices* panel when =A(:, 2) = []= runs: the surviving elements shift to new contiguous addresses. Out-of-bounds writes fail with a line-numbered error (preallocate with =zeros= instead of growing matrices dynamically).
+* Functions get their own workspace
 
-* Functions have isolated workspaces
-
-Every function call gets its own private workspace, and arguments are passed by value (copied). Assigning =y= inside =twice= never touches or shows up in the script's base *Workspace* panel. Set a breakpoint on line 3 to see =twice='s local variables in the *Call stack* panel. Functions can also return multiple values, like =function [q, r] = divmod(a, b)=.
+Arguments are passed by value, and local variables inside a function never leak into the script's workspace. Here =y= lives inside =twice= and never shows up next to =v= in the *Workspace* panel. Put a breakpoint on line 3 to see =twice='s private workspace in the *Call stack* panel. Functions can also return multiple outputs (=function [q, r] = divmod(a, b)=).
 
 #+BEGIN_SRC matlab
 function t = twice(x)
@@ -134,11 +116,11 @@ fprintf('w is      %d %d %d\n', w(1), w(2), w(3));
 : v is still 1 2 3
 : w is      2 4 6
 
-Note: =fprintf= supports literal format strings with =%d=, =%.Nf=, =%%=, and =\n=. Strings are display-only in this subset (=disp=, =fprintf=, =error=).
+=fprintf= accepts literal format strings with =%d=, =%.Nf=, =%%=, and =\n= (strings are display-only in this dialect).
 
-* Vectorization: same result, fewer steps
+* Loops vs vectorization
 
-In MATLAB, =for c = A= iterates over the *columns* of =A= (=[1; 4]=, then =[2; 5]=, then =[3; 6]=). Both the loop and =sum(sum(A))= print =21=, but watch the step counter: the vectorized call pushes the looping into a single builtin instead of stepping through every iteration in the interpreter. (=sum(A)= sums down each column into a row; =sum(A, 2)= sums across each row into a column.)
+In MATLAB, =for c = A= loops over the *columns* of =A= (=[1; 4]=, then =[2; 5]=, then =[3; 6]=). Both approaches below print =21=, but =sum(sum(A))= pushes the whole walk into builtins instead of stepping through every loop iteration in the interpreter. (=sum(A)= sums down columns; =sum(A, 2)= sums across rows.)
 
 #+BEGIN_SRC matlab
 A = [1 2 3; 4 5 6];

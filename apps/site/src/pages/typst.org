@@ -1,16 +1,11 @@
 #+TITLE: Typst in the Browser
-#+SUBTITLE: Real Typst 0.15 compiled to WebAssembly — edit markup, render vector pages locally
+#+SUBTITLE: Real Typst 0.15 compiled to WebAssembly, rendering vector pages locally
 
-Typst is a modern, compiled typesetting language — like LaTeX, but with clean syntax and fast compilation. Every block on this page compiles locally in your browser using the real *Typst 0.15* WebAssembly engine, with nothing sent to a server.
+Each block on this page compiles locally with the real Typst 0.15 compiler running as WebAssembly. Click Run and the right-hand panel renders the vector page along with page count, compile time, and any compiler warnings. Each block compiles independently with =width: auto, height: auto= so the page fits tightly around the output.
 
-How blocks work here:
+* Math inline with prose
 
-- *Compile & render:* Clicking *Run* compiles the block and shows the rendered vector page, page count, compile time, and any warnings in the right-hand panel. (There is no single-stepping because typesetting is a single compile pass.)
-- *Independent blocks:* Each block compiles on its own and sets =width: auto, height: auto= so the rendered page hugs its content. Syntax errors highlight the exact line in red.
-
-* Inline math in prose
-
-Wrap math in =$...$= to place formulas right inside a sentence. Typst handles roots, exponents, and baseline alignment automatically without verbose backslash commands.
+Wrap formulas in =$...$= to embed math directly in a sentence without LaTeX's backslash noise.
 
 #+NAME: pythagoras
 #+BEGIN_SRC typst
@@ -24,9 +19,9 @@ Euclid gives us $x^2 + y^2 = z^2$.
 #+RESULTS:
 : one page: the sentence with $sqrt(x^2+y^2)$ and $x^2 + y^2 = z^2$ typeset
 
-* Styled tables with code
+* Tables styled with functions
 
-Layout elements in Typst are ordinary functions. Here =#table= accepts =columns=, =inset=, and a small alignment function =(x, y) => ...= that centers row 0 (the header) and right-aligns every data cell.
+=#table= is a normal Typst function call. Here =align: (x, y) => if y == 0 { center } else { right }= centers the header row and right-aligns the numeric cells below it.
 
 #+NAME: primes
 #+BEGIN_SRC typst
@@ -46,9 +41,9 @@ Layout elements in Typst are ordinary functions. Here =#table= accepts =columns=
 #+RESULTS:
 : one page: a 4-row table, centered bold header, right-aligned cells
 
-* Headings, rules, and numbered proofs
+* Document rules and numbered proofs
 
-=#set= rules configure styling globally for the rest of the document — below, =#set enum(numbering: "i.")= switches =+= numbered lists to lowercase Roman numerals, while === creates a heading and =*...*= marks bold text.
+=#set= rules apply formatting across the rest of the block. Here =#set enum(numbering: "i.")= turns the =+= list into lowercase Roman numerals, while === marks a heading and =*...*= makes text bold.
 
 #+NAME: euclid
 #+BEGIN_SRC typst
@@ -68,4 +63,4 @@ Layout elements in Typst are ordinary functions. Here =#table= accepts =columns=
 #+RESULTS:
 : one page: heading, theorem statement, roman-numbered four-step proof
 
-Try deleting one closing =$= above and clicking *Run*: Typst reports an /unclosed delimiter/ on the exact line while leaving the other blocks unaffected.
+Try deleting a closing =$= and running again: Typst pins the /unclosed delimiter/ error to the exact line while leaving the other blocks alone.

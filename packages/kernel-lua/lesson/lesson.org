@@ -1,13 +1,11 @@
-#+TITLE: Lua: Small Enough to Hold in Your Head
-#+SUBTITLE: Tables, multiple returns, 1-based indexing, and metatables — step by step
+#+TITLE: Lua, Stepped Live
+#+SUBTITLE: Tables, multiple returns, 1-based arrays, and metatables in a steppable Lua 5.4 subset
 
-This page runs a steppable Lua 5.4 teaching interpreter. You can single-step through any block and watch live table allocations and mutations in the right-hand panel.
+* Everything is a table
 
-* Tables do everything
+Lua has no separate list, dict, or object type. Everything is a /table/: an associative map that also stores consecutive integer keys starting at =1= as an array. A single table like ={10, 20, 30, name = "xs"}= holds both at the same time.
 
-Lua has only one compound data structure: the *table*. A table is a hash map that also acts as an array when you use consecutive integer keys starting at 1. You can even mix both in the same table: ={10, 20, 30, name = "xs"}= stores =10, 20, 30= under keys =1, 2, 3= and ="xs"= under key ="name"=.
-
-Run the block below and watch the *Tables* panel. Array entries (=t[1]=, =t[2]=, ...) appear first, followed by hash entries, with =Δ= marking rows changed by the last step. The length operator =#= counts consecutive integer keys starting from 1 (and ignores hash keys). Note: this teaching kernel never garbage-collects tables, so the panel keeps a full history of allocations.
+Step through the block below with the *Tables* panel open. Array slots appear first (=t[1]=, =t[2]=, ...), hash entries below them, and =Δ= marks whatever the last step wrote. (There is no garbage collector in this interpreter, so allocated tables stay visible in the panel.) The =#= operator counts consecutive integer keys from =1= and ignores the hash part.
 
 #+NAME: tables-101
 #+BEGIN_SRC lua
@@ -20,10 +18,7 @@ print(#t, t[1], t.name, t.lang)
 #+RESULTS:
 : 4	10	xs	lua
 
-Two iterators match the two parts of a table:
-
-- =ipairs(t)= walks integer keys =1, 2, 3, ...= and stops at the first =nil= gap (matching =#t=).
-- =pairs(t)= walks *every* key in the table — array entries first, then hash keys.
+=ipairs(t)= walks integer keys =1, 2, 3, ...= until the first =nil=. =pairs(t)= walks everything in the table, array entries first and hash keys after.
 
 #+NAME: tables-pairs
 #+BEGIN_SRC lua
@@ -41,13 +36,9 @@ for k, v in pairs(t) do print(k, v) end
 
 * Multiple returns and parallel assignment
 
-Lua functions can return multiple values without wrapping them in a tuple or array. The rule for how they expand is simple:
+Functions in Lua can return several values directly. If a call is the last thing on the right side of an assignment (=local lo, hi = minmax(xs)=), it expands to all its return values. If there is only one variable on the left (=local only = minmax(xs)=), the extra return values are dropped. Wrapping a call in parentheses =(minmax(xs))= forces it down to one value even in a list like =print(...)=.
 
-- A call expands to all its return values only when it is the *last* expression in a list (such as =local lo, hi = minmax(xs)=).
-- Extra values are silently dropped if there are fewer targets (=local only = minmax(xs)=).
-- Wrapping a call in parentheses =(minmax(xs))= forces it to a single value.
-
-Because Lua evaluates the entire right-hand side before assigning the left-hand side, swapping two variables is just =a, b = b, a=.
+Since Lua evaluates the entire right-hand side before writing anything on the left, swapping two variables is just =a, b = b, a=.
 
 #+NAME: multiple-returns
 #+BEGIN_SRC lua
@@ -72,12 +63,9 @@ print(a, b)
 : 1	5	1	1
 : 2	1
 
-* Two defaults that trip up Python and C devs
+* Truthiness and 1-based indexing
 
-Two Lua rules catch almost everyone at first:
-
-- *Only =nil= and =false= are falsy.* Both =0= and =""= are truthy!
-- *Arrays are 1-indexed.* =t[1]= is the first element, =t[0]= is =nil= unless you explicitly set it, and =#t= counts starting at 1.
+If you mostly write Python, C, or JS, two things in Lua will catch you off guard: =0= and =""= are both truthy (only =nil= and =false= are falsy), and arrays start at index =1= (=t[0]= is just =nil=).
 
 #+NAME: truth-and-one
 #+BEGIN_SRC lua
@@ -96,14 +84,9 @@ print(t[1], t[0], #t)
 
 * Integers vs floats
 
-Lua 5.4 distinguishes integers (=1=) from floats (=1.0=):
+Lua 5.4 tracks integers (=1=) and floats (=1.0=) separately. =/= always gives a float (=7 / 2 = 3.5=). =//= is floor division toward negative infinity, so =-7 // 2= is =-4=, not =-3=. Modulo =%= takes the sign of the divisor (=5 % -3 = -1=). Numerically equal values still compare equal (=1 == 1.0= is =true=).
 
-- =/= always returns a float (=7 / 2= is =3.5=).
-- =//= is floor division (toward negative infinity, like Python): =-7 // 2= is =-4=, not =-3=. It returns an integer when both operands are integers.
-- =%= follows the sign of the divisor (=5 % -3= is =-1=).
-- Equal numeric values compare equal across subtypes: =1 == 1.0= is =true=.
-
-Note: real Lua uses 64-bit integers, whereas this browser kernel stores numbers as JavaScript doubles and rejects integer literals past =2^53= at load time instead of silently losing precision.
+Because this interpreter runs on JavaScript numbers instead of 64-bit C integers, literals past =2^53= are rejected at load time rather than silently rounded.
 
 #+NAME: ints-and-floats
 #+BEGIN_SRC lua
@@ -119,14 +102,11 @@ print(1 == 1.0)
 : 2	-1	1
 : true
 
-* Metatables: how Lua builds inheritance
+* Inheritance with metatables
 
-Lua has no =class= keyword. Instead, any table can have a *metatable* with an =__index= fallback that runs whenever a key lookup misses:
+Lua has no =class= keyword. Instead, you attach a metatable with an =__index= field. When a key lookup misses on a table, Lua checks =__index=: if it is another table, lookup continues there (and can chain multiple levels up); if it is a function, Lua calls it with =(table, key)=.
 
-- If =__index= is another table, Lua keeps looking up the key there (and chains through *its* metatable too).
-- If =__index= is a function, Lua calls =fn(table, key)= and returns the result.
-
-The colon syntax is just shorthand for passing =self=: =rex:greet()= calls =rex.greet(rex)=, and =function Animal:greet()= automatically declares =self= as the first parameter.
+The colon syntax just hides =self=: =rex:greet()= is identical to =rex.greet(rex)=, and =function Animal:greet()= implicitly adds =self= as the first argument.
 
 #+NAME: metatables
 #+BEGIN_SRC lua

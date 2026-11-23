@@ -1,32 +1,20 @@
-#+TITLE: x86-64 Assembly, Step by Step
-#+SUBTITLE: Real x86-64 emulation in your browser — Keystone assembler, Unicorn CPU, Capstone disassembler
+#+TITLE: x86-64 Assembly, Stepped Live
+#+SUBTITLE: Keystone assembler, Unicorn CPU emulator, and Capstone disassembler running in your browser
 
-Every code block on this page is real, editable x86-64 assembly. Clicking *Run* assembles your code with Keystone, executes it on the Unicorn CPU emulator, and displays live state in the right-hand panel: all 16 general-purpose registers (changed values highlight in blue), CPU flags, a Capstone disassembly listing, a hex dump of =.data=, and console output.
-
-Hover any row in the disassembly listing to see the =;= comment from your source line. Use *Step* to execute one instruction at a time and *Reset* to rewind the machine.
+Hit Run or Step on any block to assemble real x86-64 code and run it on the Unicorn emulator right in this tab. The panel on the right shows all 16 general-purpose registers (changes light up in blue), CPU flags, a Capstone disassembly listing, a hex dump of =.data=, and console output. Hover any row in the disassembly to read the =;= comment from that source line.
 
 * Registers and Linux syscalls
 
-x86-64 provides sixteen 64-bit general-purpose registers. On Linux, syscalls follow a fixed register convention:
+On Linux x86-64, =rax= holds the syscall number before =syscall= and the return value afterward. =rdi=, =rsi=, and =rdx= carry the first three arguments, and =rsp= points to the top of a 1 MiB stack.
 
-- =rax=: syscall number before =syscall=, and its return value afterward
-- =rdi=, =rsi=, =rdx=: first three syscall arguments
-- =rsp=: stack pointer (starts near the top of a 1 MiB stack)
-
-The two syscalls used on this page:
-
-| Syscall | =rax= | Arguments                     |
-|---------+-------+-------------------------------|
+| Syscall | =rax= | Arguments                      |
+|---------+-------+--------------------------------|
 | =write= | 1     | =rdi= fd, =rsi= buf, =rdx= len |
-| =exit=  | 60    | =rdi= exit code               |
+| =exit=  | 60    | =rdi= exit code                |
 
-=write= copies =rdx= bytes from =rsi= to file descriptor =rdi= (=1= is stdout) and returns the byte count in =rax=. =exit= halts the CPU.
+* Writing to stdout
 
-* Your first syscall: =write=
-
-=section .data= puts the message string in the data segment (mapped at =0x601000=), and =msg_len equ $ - msg= calculates its length at assembly time using the current location counter =$=.
-
-Step through the block and watch =rax=, =rsi=, and =rdx= load before =syscall=. Right after =syscall= runs, notice =rip= advances by 2 bytes and =rax= becomes =14= (the number of bytes written).
+=section .data= places =msg= at =0x601000=, and =msg_len equ $ - msg= computes the byte length at assembly time. Step up to =syscall= and watch =rax=, =rsi=, and =rdx= get loaded; one step past =syscall=, =rip= moves 2 bytes forward and =rax= becomes =14= (the byte count returned by =write=).
 
 #+NAME: hello
 #+BEGIN_SRC asm
@@ -53,11 +41,9 @@ msg_len  equ $ - msg
 #+RESULTS:
 : Hello, world!
 
-* Loops, flags, and ASCII conversion
+* Loops, flags, and turning numbers into ASCII
 
-Assembly has no built-in integer printer — to print =55=, you convert each digit to its ASCII byte (=5 + '0' = 0x35=) and pass the buffer to =write=.
-
-Below, =rax= sums =1..10= while =rbx= counts up. Watch the CPU flags panel as =cmp rbx, 10= updates =ZF= and =CF=, and =jbe next= jumps back while =rbx <= 10=. Then =div rcx= divides =rdx:rax= by =10= (putting the tens digit in =rax= and ones digit in =rdx=), adds ='0'= to each, and writes them into =digits=.
+To print =55= without libc, you divide by =10= and add ='0'= (=0x30=) to each digit. Here =rax= sums =1..10= while =rbx= counts up; watch =ZF= and =CF= update on =cmp rbx, 10= before =jbe next= branches. Then =div rcx= splits =rdx:rax= into quotient (=rax = 5=) and remainder (=rdx = 5=) and writes both ASCII digits into =digits=.
 
 #+NAME: sum-loop
 #+BEGIN_SRC asm
@@ -101,16 +87,16 @@ digits:  db "00", 10      ; scratch buffer, overwritten at run time
 #+RESULTS:
 : 55
 
-After running, check *Memory · .data* at =0x601000=: the initial bytes =30 30 0a= (="00\n"=) have been overwritten with =35 35 0a= (="55\n"=). Click *Reset* to watch them snap back.
+After running, look at *Memory · .data* at =0x601000=: =30 30 0a= (="00\n"=) turned into =35 35 0a= (="55\n"=). Hit Reset to watch it revert.
 
-* Supported syntax quick reference
+* Syntax reference
 
-- Intel syntax only (destination first): =mov rax, 42=
-- Labels: =name:= and NASM-style =.local= labels
+- Intel syntax, destination first (=mov rax, 42=)
+- Labels (=name:=) and NASM-style =.local= labels
 - Sections: =section .text= / =section .data= (or =.text= / =.data=)
-- Data directives: =db=, =dw=, =dd=, =dq= with numbers, chars, and strings
-- Constants & expressions: =name equ expr= (or =name = expr=), =+ - * /=, hex =0x=, binary =0b=, chars ='a'=
+- Data: =db=, =dw=, =dd=, =dq= with numbers, chars, and strings
+- Constants & math: =name equ expr= (or =name = expr=), =+ - * /=, =0x=, =0b=, ='a'=
 - Memory operands: =[digits+1]=, =byte [digits+2]=, =[rax]=, =[rsp+8]=
-- Comments: =;= to end of line
+- Comments start with =;=
 
-Assembly errors highlight the exact line in red.
+Assembler errors highlight the exact line in red.
