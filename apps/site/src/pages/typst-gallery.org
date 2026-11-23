@@ -1,0 +1,436 @@
+#+TITLE: Typst Diagram Gallery
+#+SUBTITLE: Every figure on this page is one build-time Typst block, compiled to inline SVG
+
+This page is the review surface for the build-time diagram layer: one block per
+supported pattern, each caption naming the mechanism it exercises. Nothing here
+runs in the browser — the build compiles each block once, the quality gate in
+=apps/site/typst/check.ts= inspects the SVG, and the page receives the vector
+result. If a block stops compiling, =pnpm build= fails with the page and line.
+
+Open =apps/site/src/pages/typst-gallery.org= next to this page. Every figure is
+the source directly above it.
+
+* Flowcharts (fletcher)
+
+A rounded-rect pipeline with a labelled arrow and a dashed retry edge. Expect
+four boxes, solid forward arrowheads, and a labelled dashed return path.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 10pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let box(pos, body) = node(
+  pos, body,
+  shape: rect, corner-radius: 3pt, inset: 6pt, width: 62pt, outset: 2pt,
+  stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"),
+)
+#let arrow(from, to, label: none, dash: none) = edge(
+  from, to, "->",
+  stroke: (paint: rgb("#1A9988"), thickness: 0.9pt, dash: dash),
+  label: label, label-pos: 50%, label-sep: 3pt, label-fill: white,
+)
+
+#diagram(
+  box((0, 0), [parse]),
+  box((1, 0), [check]),
+  box((2, 0), [emit]),
+  arrow((0, 0), (1, 0)),
+  arrow((1, 0), (2, 0), label: [ok]),
+  arrow((2, 0), (2, 1), dash: "dashed"),
+  arrow((2, 1), (0, 1), label: [retry], dash: "dashed"),
+  arrow((0, 1), (0, 0)),
+)
+#+END_SRC
+
+A decision node from =fletcher.shapes= with two labelled exits and a merge.
+Expect a diamond, one arrow per branch, and labels above the edges.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 10pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge, shapes
+
+#let step(pos, body) = node(
+  pos, body, shape: rect, inset: 6pt, width: 58pt, outset: 3pt,
+  stroke: 0.8pt + rgb("#1A9988"), fill: white,
+)
+#let choice(pos, body) = node(
+  pos, body, shape: shapes.diamond, inset: 8pt, width: 76pt, outset: 3pt,
+  stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"),
+)
+#let wire(from, to, label: none) = edge(
+  from, to, "->",
+  stroke: 0.9pt + rgb("#1A9988"), mark-scale: 75%,
+  label: label, label-fill: white, label-sep: 3pt,
+)
+
+#diagram(
+  step((0, 0), [read]),
+  choice((2, 0), [valid?]),
+  step((3.8, -1), [reject]),
+  step((3.8, 1), [store]),
+  wire((0, 0), (2, 0)),
+  wire((2, 0), (3.8, -1), label: [no]),
+  wire((2, 0), (3.8, 1), label: [yes]),
+)
+#+END_SRC
+
+Shape vocabulary from the same package: pill, hexagon, parallelogram, circle.
+Expect four distinct outlines; labels sit inside each shape.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge, shapes
+
+#let cell(pos, body, shape) = node(
+  pos, body, shape: shape, inset: 5pt, width: 44pt, outset: 3pt,
+  stroke: 0.8pt + rgb("#1A9988"), fill: white,
+)
+#let link(from, to) = edge(from, to, "->", stroke: 0.8pt + rgb("#1A9988"))
+
+#diagram(
+  cell((0, 0), [start], shapes.pill),
+  cell((1.8, 0), [stage], shapes.hexagon),
+  cell((3.6, 0), [data], shapes.parallelogram),
+  cell((5.4, 0), [done], circle),
+  link((0, 0), (1.8, 0)),
+  link((1.8, 0), (3.6, 0)),
+  link((3.6, 0), (5.4, 0)),
+)
+#+END_SRC
+
+* Plots (lilaq)
+
+Two series, one legend, dashed comparison line. Expect a boxed legend, a solid
+teal curve, and a dashed brown curve sharing one axis pair.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 9pt)
+#import "@preview/lilaq:0.6.0" as lq
+
+#let xs = lq.linspace(0, 2 * calc.pi, num: 61)
+#let a = xs.map(t => calc.sin(t))
+#let b = xs.map(t => 0.7 * calc.cos(2 * t))
+
+#lq.diagram(
+  width: 9cm, height: 4.2cm,
+  xlabel: [$t$], ylabel: [$y$],
+  legend: (position: top + right),
+  lq.plot(xs, a, mark: none, stroke: rgb("#1A9988"), label: [sin]),
+  lq.plot(xs, b, mark: none, stroke: (paint: rgb("#8A5A44"), thickness: 0.8pt, dash: "dashed"), label: [cos]),
+)
+#+END_SRC
+
+Scatter with a per-point size array. Expect markers whose area grows with the
+size list while positions stay on a rising slope.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 9pt)
+#import "@preview/lilaq:0.6.0" as lq
+
+#let xs = (1, 2, 3, 4, 5, 6, 7)
+#let ys = (1.2, 1.8, 1.4, 2.6, 3.4, 3.1, 4.2)
+#let sizes = (9, 16, 12, 25, 49, 30, 64)
+
+#lq.diagram(
+  width: 8cm, height: 3.8cm,
+  xlabel: [sample], ylabel: [value],
+  lq.scatter(xs, ys, size: sizes, color: rgb("#1A9988"), alpha: 55%),
+)
+#+END_SRC
+
+Bars with a reference line. Expect four filled bars and a dashed target line
+that sits above the third bar and below the first.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 9pt)
+#import "@preview/lilaq:0.6.0" as lq
+
+#lq.diagram(
+  width: 7cm, height: 3.6cm,
+  ylabel: [count],
+  lq.bar((1, 2, 3, 4), (3, 5, 2, 6), fill: rgb("#1A9988").transparentize(35%), label: [runs]),
+  lq.hlines(4, stroke: (paint: rgb("#C2553F"), thickness: 0.8pt, dash: "dashed"), label: [budget]),
+  legend: (position: top + right),
+)
+#+END_SRC
+
+Stem plot for discrete samples. Expect vertical stems from a baseline with a
+marker at each tip.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 9pt)
+#import "@preview/lilaq:0.6.0" as lq
+
+#let xs = (0, 1, 2, 3, 4, 5, 6)
+#let ys = (0, 1, 3, 2, 4, 2, 1)
+
+#lq.diagram(
+  width: 7cm, height: 3.4cm,
+  xlabel: [$n$], ylabel: [$a_n$],
+  lq.stem(xs, ys, stroke: rgb("#1A9988")),
+)
+#+END_SRC
+
+Filled confidence band with a centre line. Expect a translucent band between
+the two bounds and a solid line through the middle.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 9pt)
+#import "@preview/lilaq:0.6.0" as lq
+
+#let xs = lq.linspace(0, 5, num: 41)
+#let mid = xs.map(x => 2 + 0.6 * calc.sin(x))
+#let half = xs.map(x => 0.35 + 0.1 * x / 5)
+#let lo = range(xs.len()).map(i => mid.at(i) - half.at(i))
+#let hi = range(xs.len()).map(i => mid.at(i) + half.at(i))
+
+#lq.diagram(
+  width: 8.4cm, height: 3.6cm,
+  xlabel: [$t$], ylabel: [estimate],
+  lq.fill-between(xs, lo, y2: hi, fill: rgb("#1A9988").transparentize(78%)),
+  lq.plot(xs, mid, mark: none, stroke: rgb("#1A9988")),
+)
+#+END_SRC
+
+Box plots for two small samples. Expect two boxes with median lines, whiskers,
+and one plotted outlier.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 9pt)
+#import "@preview/lilaq:0.6.0" as lq
+
+#lq.diagram(
+  width: 6cm, height: 3.4cm,
+  xlabel: [group],
+  lq.boxplot((1, 2, 2, 3, 3, 4, 9), x: 1),
+  lq.boxplot((2, 3, 3, 4, 5, 5, 6), x: 2),
+)
+#+END_SRC
+
+A 20 cm figure, above the 680 px responsive threshold. Expect the same rendering
+as the others, but `width="100%"` on the `<svg>` so it shrinks with the column.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 10pt)
+#import "@preview/lilaq:0.6.0" as lq
+
+#let xs = lq.linspace(0, 10, num: 101)
+#let ys = xs.map(x => 1.5 + calc.sin(x) * calc.exp(-x / 6))
+
+#lq.diagram(
+  width: 20cm, height: 4cm,
+  xlabel: [time], ylabel: [signal],
+  lq.plot(xs, ys, mark: none, stroke: rgb("#1A9988")),
+)
+#+END_SRC
+
+* Geometry (cetz)
+
+A right triangle on a unit grid, with a right-angle marker and vertex labels.
+Expect grid lines, three sides, and the square marker at the right angle.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 10pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1.5cm, {
+  import draw: *
+  grid((0, 0), (3, 2), step: 1, stroke: 0.3pt + luma(215))
+  line((0, 0), (3, 0), (3, 2), close: true, stroke: 0.9pt + rgb("#1A9988"))
+  line((2.75, 0), (2.75, 0.25), (3, 0.25), stroke: 0.6pt + rgb("#1A9988"))
+  content((0, 0), [$A$], anchor: "north-east")
+  content((3, 0), [$B$], anchor: "north-west")
+  content((3.08, 2.06), [$C$], anchor: "south-west")
+  content((1.5, -0.16), [$3$], anchor: "north")
+})
+#+END_SRC
+
+A circle, radius, tangent, and central angle. Expect one circle, a dashed
+radius, a tangent line touching at the top, and an angle arc at the centre.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 11pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1.7cm, {
+  import draw: *
+  circle((0, 0), radius: 1, stroke: 0.9pt + rgb("#1A9988"))
+  line((0, 0), (0.72, 0.69), stroke: (paint: rgb("#8A5A44"), thickness: 0.7pt, dash: "dashed"))
+  line((-1.35, 1), (1.35, 1), stroke: 0.9pt + rgb("#1A9988"))
+  arc((0, 0), start: 0deg, stop: 44deg, radius: 0.5, stroke: 0.7pt + rgb("#1A9988"))
+  content((0.36, 0.12), [$theta$], anchor: "west")
+  content((0.42, 0.52), [$r$], anchor: "south-east")
+  content((0, 0), [$O$], anchor: "south-west")
+})
+#+END_SRC
+
+A cubic Bézier with its control polygon. Expect a smooth curve and two dashed
+guide segments meeting the control points.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 11pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1.6cm, {
+  import draw: *
+  line((0, 0), (1, 1.4), (3, -0.4), (4, 1), stroke: (paint: luma(160), thickness: 0.6pt, dash: "dashed"))
+  bezier((0, 0), (4, 1), (1, 1.4), (3, -0.4), stroke: 1pt + rgb("#1A9988"))
+  circle((0, 0), radius: 0.05, fill: rgb("#1A9988"))
+  circle((4, 1), radius: 0.05, fill: rgb("#1A9988"))
+  circle((1, 1.4), radius: 0.05, fill: rgb("#C2553F"))
+  circle((3, -0.4), radius: 0.05, fill: rgb("#C2553F"))
+  content((1, 1.55), [$P_1$], anchor: "south")
+  content((3, -0.55), [$P_2$], anchor: "north")
+})
+#+END_SRC
+
+A closed polygon with a translucent fill over a grid. Expect the fill to sit
+under the outline and the grid to show through it.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 11pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1.4cm, {
+  import draw: *
+  grid((0, 0), (4, 3), step: 1, stroke: 0.3pt + luma(220))
+  line((0, 0), (3, 0), (4, 2), (1.5, 2.8), close: true,
+    fill: rgb("#1A9988").transparentize(80%),
+    stroke: 0.9pt + rgb("#1A9988"))
+  content((2, 1.2), [area])
+})
+#+END_SRC
+
+* Math inside figures
+
+Display math compiled to SVG on a diagram page. Expect a selectable-looking
+matrix equation, but as outlines: this is the SVG path, not MathML.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 11pt)
+
+$ mat(1, 2; 3, 4) vec(x, y) = vec(5, 11) $
+#+END_SRC
+
+The same fletcher mechanism with math labels on every node and arrow. Expect
+four formula nodes and four diagonal arrows, one per side.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 8pt)
+#set text(size: 10pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let obj(pos, body) = node(
+  pos, body, shape: rect, inset: 5pt, width: 34pt,
+  stroke: 0.8pt + rgb("#1A9988"), fill: white,
+)
+#let map(from, to, body) = edge(
+  from, to, "->", stroke: 0.8pt + rgb("#1A9988"),
+  label: body, label-fill: white, label-sep: 2pt,
+)
+
+#diagram(
+  obj((0, 0), [$A$]), obj((2, 0), [$B$]),
+  obj((0, 1.4), [$C$]), obj((2, 1.4), [$D$]),
+  map((0, 0), (2, 0), [$f$]),
+  map((0, 1.4), (2, 1.4), [$g$]),
+  map((0, 0), (0, 1.4), [$h$]),
+  map((2, 0), (2, 1.4), [$k$]),
+)
+#+END_SRC
+
+* Edge cases
+
+No `#set page` line: the pipeline prepends a 6 pt margin, so the figure is
+tightly cropped with a small uniform gutter.
+
+#+BEGIN_SRC typst :results svg
+#import "@preview/cetz:0.5.2": canvas, draw
+#canvas(length: 1cm, {
+  import draw: *
+  circle((0, 0), radius: 0.6, stroke: 0.9pt + rgb("#1A9988"))
+  line((-1, 0), (1, 0), stroke: 0.5pt + luma(150))
+})
+#+END_SRC
+
+A block that overrides the page margin and text size. Expect a visibly wider
+gutter than the default case above.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 18pt)
+#set text(size: 8pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+#canvas(length: 1cm, {
+  import draw: *
+  rect((0, 0), (2.4, 1.2), fill: rgb("#F2F8F6"), stroke: 0.8pt + rgb("#1A9988"))
+  content((1.2, 0.6), [wide gutter])
+})
+#+END_SRC
+
+Text-only output. The gate treats real text as ink, so this should render the
+words without any shapes.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 6pt)
+#set text(size: 10pt)
+#text(fill: rgb("#1A9988"))[a diagram may be entirely text]
+#+END_SRC
+
+A tall, narrow figure. Expect a vertical stack that keeps its 3 cm width and
+does not collapse into the responsive rule.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 6pt)
+#set text(size: 8pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let step(pos, body) = node(
+  pos, body, shape: rect, inset: 4pt, width: 58pt,
+  stroke: 0.7pt + rgb("#1A9988"), fill: white,
+)
+#diagram(
+  step((0, 0), [ingest]), step((0, 1), [clean]),
+  step((0, 2), [score]), step((0, 3), [publish]),
+  edge((0, 0), (0, 1), "->", stroke: 0.7pt + rgb("#1A9988")),
+  edge((0, 1), (0, 2), "->", stroke: 0.7pt + rgb("#1A9988")),
+  edge((0, 2), (0, 3), "->", stroke: 0.7pt + rgb("#1A9988")),
+)
+#+END_SRC
+
+A gradient fill. Expect a smooth teal-to-white ramp inside the shape, not a
+flat colour — this checks that Typst gradients survive the SVG path.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 6pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+#canvas(length: 1cm, {
+  import draw: *
+  rect((0, 0), (3, 1.4),
+    fill: gradient.linear(rgb("#1A9988"), rgb("#F2F8F6")),
+    stroke: 0.7pt + rgb("#1A9988"))
+})
+#+END_SRC
+
+Non-ASCII labels and math. Expect Greek, subscripts, and arrows to render with
+the bundled fonts, with no fallback boxes.
+
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 6pt)
+#set text(size: 10pt)
+$ alpha -> beta, quad x_i >= 0, quad sum_(i=1)^n x_i = 1 $
+#+END_SRC

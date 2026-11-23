@@ -87,6 +87,33 @@ loader is `fetch: () => Promise.reject(...)`, so an executable block that
 imports `@preview/*` fails offline. Package imports are a content-layer
 feature.
 
+## Build cache and mirrors
+
+Package archives are cached on disk at `apps/site/.typst-cache/` (git-ignored).
+One file per archive URL, named from the URL path, so
+`https://packages.typst.org/preview/fletcher-0.5.8.tar.gz` becomes
+`preview_fletcher-0.5.8.tar.gz`. A hit is served as an in-memory gzip response;
+a miss is fetched, written, and returned. Only `res.ok` responses are stored, a
+file without gzip magic counts as a miss, and a failing read/write logs one
+warning instead of failing the build. Concurrent requests for the same URL
+share one download.
+
+| variable | effect |
+|---|---|
+| `TYPST_PACKAGE_BASE_URL` | mirror base for archives and `packageBaseUrl` (default `https://packages.typst.org`) |
+| `TYPST_NO_PACKAGE_CACHE=1` | skip cache reads and writes; the fetch wrapper and in-flight dedupe stay |
+
+Delete the directory to force a refetch. The cache is keyed by URL, not by
+version constraint: bumping `#import "@preview/foo:0.2.0"` to `0.3.0` fetches a
+new archive, while replaying `0.2.0` never touches the network. Formula and
+diagram memoization is separate and lives only in the process (see
+`prerender.ts`); it is not persisted.
+
+Measured on this page set (22 gallery diagrams + 3 demo diagrams, 4 formulas):
+cold **5.2 s**, warm **4.5 s**. The difference is the package downloads; the
+rest is 25 sequential document compiles, so a larger page set scales with
+compiles, not with the cache.
+
 ## Authoring rules
 
 | syntax | meaning |
@@ -115,6 +142,52 @@ SVG width in points is converted at 96 dpi (`pt * 4/3`); above **680 px** the
 `width`/`height` attributes are replaced with `width="100%"` and
 `style="height:auto"`. Narrow diagrams keep their intrinsic size.
 
+## Diagram gallery (review surface)
+
+`apps/site/src/pages/typst-gallery.org` holds one figure per supported pattern.
+Open the page after `pnpm build` (or in `pnpm dev`) and check each row; the
+source is directly above its figure. The build compiles all of them on every
+build, so the page is also a regression suite: a broken block fails with
+`typst diagram in typst-gallery.org:<line> (source line):` and Typst's own
+`file:line` diagnostic.
+
+| # | figure | expected result |
+|---|---|---|
+| 1 | pipeline (fletcher) | four rounded boxes, solid arrows, labelled dashed retry loop |
+| 2 | decision branch | diamond with `no`/`yes` exits; arrowheads stop short of the box borders |
+| 3 | shape vocabulary | pill, hexagon, parallelogram, circle; four distinct outlines |
+| 4 | two series (lilaq) | boxed legend, solid curve plus dashed comparison curve |
+| 5 | scatter | seven markers whose size follows the `size:` list |
+| 6 | bars + reference line | four bars, dashed budget line between the third and first bar |
+| 7 | stem | stems from the baseline with a marker at each tip |
+| 8 | filled band | translucent band between two bounds, solid centre line |
+| 9 | box plots | two boxes with medians, whiskers, one outlier |
+| 10 | wide plot | `width="100%"` on the `<svg>`; shrinks with the column past 680 px |
+| 11 | right triangle (cetz) | grid, closed triangle, square right-angle marker, labels outside |
+| 12 | circle geometry | tangent through the top, dashed radius, angle arc, no label collisions |
+| 13 | cubic Bézier | smooth curve, dashed control polygon, control points marked |
+| 14 | filled polygon | translucent fill under the outline, grid visible through it |
+| 15 | matrix equation | display math as outlines — a diagram, not MathML |
+| 16 | commutative square | four formula nodes, four labelled arrows |
+| 17 | default margin | no `#set page` in the block; 6 pt gutter from the prepend |
+| 18 | margin override | 18 pt gutter, visibly wider than figure 17 |
+| 19 | text-only | words only, no shapes; the gate counts text as ink |
+| 20 | tall flow | vertical stack, intrinsic width, not hit by the responsive rule |
+| 21 | gradient fill | smooth teal-to-white ramp inside the shape |
+| 22 | unicode math | Greek letters, subscripts, and an arrow with no fallback boxes |
+
+The gallery is content, not a second pipeline: adding a figure is adding an org
+block. Keep new figures deterministic (no `datetime.today()`, no `random`) so
+two builds agree and the memoized SVG stays valid.
+
+The structural gate (`apps/site/typst/check.ts`, unit tests in
+`apps/site/typst/check.test.ts`) runs on every compiled diagram before it is
+cached. It rejects a missing `<svg>` root, a non-finite `viewBox`, zero
+drawables, and zero real geometry — while ignoring Typst's white page
+background, which is a `path` from the origin or a full-canvas `rect`. A
+`text` element alone counts as ink, which is why figure 19 passes. It only
+warns (never throws) when the intrinsic width falls outside 20–1400 px.
+
 ## Would HTML export be better?
 
 Per `~/research/typst/html-pdf-dual-target.md` §3–4 (ignore census and
@@ -133,16 +206,18 @@ lose diagrams.
 
 | symptom | cause | what you see |
 |---|---|---|
-| build/module load fails | unknown package, invalid Typst | `file:line: message` plus `hint:` lines from `formatDiagnostic` |
+| build/module load fails | unknown package, invalid Typst | `typst diagram in <page>.org:<line> (source line):` then `file:line: message` plus `hint:` lines |
+| diagram rejected | blank page, zero-size shapes, no drawables | `typst diagram rejected: <reason>` with the same page prefix |
 | formula renders as `$…$` | artifact missing (stale dev server, skipped build) | `span.lw-math-missing` |
 | diagram renders as source in a `pre` | artifact missing | `lw-diagram-missing` with "run pnpm build" |
-| page works but kernel block errors | browser lacks JSPI or COOP/COEP | kernel load error; content layer is unaffected |
+| page works but kernel block errors | browser lacks JSPI | kernel load error; content layer is unaffected |
 
 Checks:
 
 ```sh
-pnpm build                                      # sync vendors + Vite build (runs the plugin)
+pnpm build                                      # sync vendors + Vite build (runs the plugin + gate)
 node apps/site/typst/cli.ts apps/site/src/pages # per-page math/diagram counts + total ms
+pnpm vitest run apps/site/typst                 # gate unit tests
 ```
 
 The CLI reads every `*.org` in the directory, prints

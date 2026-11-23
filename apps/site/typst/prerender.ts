@@ -24,6 +24,50 @@ import { compileDiagram, compileMath, mathLayoutCss } from './engine.ts';
 const mathCache = new Map<string, TypstMathArtifact>();
 const diagramCache = new Map<string, string>();
 
+/**
+ * Locate a block in its page: the line number and a representative source
+ * line. Boilerplate (`#set page`, `#set text`, `#import`) is skipped so the
+ * message names the code that failed, not the prelude every block shares.
+ */
+function blockLocation(
+  org: string,
+  src: string,
+): { line: number | null; snippet: string } {
+  const lines = src.split('\n');
+  const isPrelude = (line: string): boolean =>
+    /^\s*(#set\s+(page|text)\b|#import\b)/.test(line);
+  let offset = lines.findIndex((line) => line.trim() !== '' && !isPrelude(line));
+  if (offset < 0) offset = lines.findIndex((line) => line.trim() !== '');
+  const raw = offset < 0 ? '' : (lines[offset] ?? '').trim();
+  const snippet = raw.length > 64 ? `${raw.slice(0, 61)}...` : raw;
+
+  const start = org.indexOf(src);
+  const line =
+    start < 0 || offset < 0
+      ? null
+      : org.slice(0, start).split('\n').length + offset;
+  return { line, snippet };
+}
+
+/**
+ * Prefix a compile failure with the page, block line, and a source line.
+ * The Typst diagnostic alone (`didact-build-main.typ:15`) cannot tell an author
+ * which of a page's blocks failed.
+ */
+function withPage(
+  error: unknown,
+  kind: string,
+  page: string,
+  org: string,
+  src: string,
+): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  const { line, snippet } = blockLocation(org, src);
+  const file = page.endsWith('.org') ? page : `${page}.org`;
+  const where = line === null ? file : `${file}:${line}`;
+  return new Error(`${kind} in ${where} (\`${snippet}\`):\n${message}`);
+}
+
 /** Compile every formula and diagram in one page set, in document order. */
 export async function prerenderOrgPages(
   sources: Record<string, string>,
@@ -31,19 +75,27 @@ export async function prerenderOrgPages(
   const math: Record<string, TypstMathArtifact> = {};
   const diagrams: Record<string, string> = {};
   // A page can repeat a formula; keys dedupe across the whole set.
-  const pendingMath = new Map<string, { src: string; display: boolean }>();
-  const pendingDiagrams = new Map<string, string>();
+  const pendingMath = new Map<
+    string,
+    { src: string; display: boolean; page: string; org: string }
+  >();
+  const pendingDiagrams = new Map<
+    string,
+    { src: string; page: string; org: string }
+  >();
 
-  for (const org of Object.values(sources)) {
+  for (const [page, org] of Object.entries(sources)) {
     const collected = collectTypstSources(parseOrg(org));
     for (const item of collected.math) {
       const key = mathKey(item.src, item.display);
-      if (!(key in math) && !pendingMath.has(key)) pendingMath.set(key, item);
+      if (!(key in math) && !pendingMath.has(key)) {
+        pendingMath.set(key, { ...item, page, org });
+      }
     }
     for (const src of collected.diagrams) {
       const key = diagramKey(src);
       if (!(key in diagrams) && !pendingDiagrams.has(key)) {
-        pendingDiagrams.set(key, src);
+        pendingDiagrams.set(key, { src, page, org });
       }
     }
   }
@@ -52,16 +104,24 @@ export async function prerenderOrgPages(
   for (const [key, item] of pendingMath) {
     let artifact = mathCache.get(key);
     if (artifact === undefined) {
-      artifact = await compileMath(item.src, item.display);
+      try {
+        artifact = await compileMath(item.src, item.display);
+      } catch (error) {
+        throw withPage(error, 'typst math', item.page, item.org, item.src);
+      }
       mathCache.set(key, artifact);
     }
     math[key] = artifact;
   }
-  for (const [key, src] of pendingDiagrams) {
+  for (const [key, item] of pendingDiagrams) {
     let svg = diagramCache.get(key);
     if (svg === undefined) {
-      svg = await compileDiagram(src);
-      assertDiagramQuality(svg, src);
+      try {
+        svg = await compileDiagram(item.src);
+        assertDiagramQuality(svg, item.src);
+      } catch (error) {
+        throw withPage(error, 'typst diagram', item.page, item.org, item.src);
+      }
       diagramCache.set(key, svg);
     }
     diagrams[key] = svg;

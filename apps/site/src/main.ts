@@ -23,7 +23,7 @@ import { typstKernel } from '@didact/kernel-typst';
 import typstArtifacts from 'virtual:didact-typst';
 
 // Nav order, by page file stem (not alphabetical, not glob order).
-const PAGE_ORDER = ['x86-64-assembly', 'riscv', 'mips', 'c', 'cpp', 'wasm', 'python', 'sql', 'matlab', 'lua', 'javascript', 'regex', 'lisp', 'prolog', 'typst'] as const;
+const PAGE_ORDER = ['x86-64-assembly', 'riscv', 'mips', 'c', 'cpp', 'wasm', 'python', 'sql', 'matlab', 'lua', 'javascript', 'regex', 'lisp', 'prolog', 'typst', 'typst-gallery'] as const;
 
 // Every lesson is one .org file in src/pages; the nav title comes from its
 // #+TITLE: line (the file stem is the fallback).

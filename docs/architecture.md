@@ -109,9 +109,15 @@ diagram; a plain `typst` block stays a kernel block.
   packages.typst.org during the build — no allowlist, versions pinned in the
   org source. The content browser path receives only the resulting strings:
   no content engine and no package fetch.
-- Failure: an unknown package or invalid Typst aborts the build with
-  `file:line` and hints; a missing artifact renders the literal `$src$`
-  (math) or the block source in `pre.lw-diagram-missing`, never a hole.
+- Failure: an unknown package or invalid Typst aborts the build with the
+  page, the block's first source line, then `file:line` and hints; a blank
+  diagram is rejected by `apps/site/typst/check.ts`; a missing artifact renders
+  the literal `$src$` (math) or the block source in `pre.lw-diagram-missing`,
+  never a hole.
+- Review surface: `apps/site/src/pages/typst-gallery.org` has one figure per
+  supported pattern (22 at present). The structural gate's unit tests live in
+  `apps/site/typst/check.test.ts`; `pnpm typst:check` compiles the pages and
+  runs the same gate.
 - JSPI is required by the build engine only; content pages work in browsers
   without JSPI (the interactive kernel still needs it).
 
