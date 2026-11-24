@@ -214,9 +214,104 @@
   }
 }
 
+/* ---- rail masthead: the wordmark and the lesson search sit above the
+   CONTENTS | PAGES switch, inside the 232px rail and never past it. The
+   wordmark is larger than a rail label and smaller than the document
+   title; the search is plain serif with a 1px hairline and no rounding.
+   The hairline under the block is the switch bar's top rule. */
+
+.lw-brand {
+  display: block;
+  padding: 0.85rem 0.75rem 0.4rem;
+  font-family: var(--lw-serif);
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: var(--lw-ink);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.lw-brand:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
+
+.lw-nav-search {
+  display: block;
+  width: calc(100% - 1.5rem);
+  margin: 0 0.75rem 0.6rem;
+  padding: 0.25rem 0.4rem;
+  font-family: var(--lw-serif);
+  font-size: 0.8rem;
+  line-height: 1.3;
+  color: var(--lw-ink);
+  background: var(--lw-paper);
+  border: 1px solid var(--lw-hairline);
+  appearance: none;
+  -webkit-appearance: none;
+}
+.lw-nav-search::placeholder { color: var(--lw-gray); opacity: 1; }
+.lw-nav-search:hover { border-color: var(--lw-ink); }
+.lw-nav-search:focus-visible {
+  outline: 1px solid var(--lw-ink);
+  outline-offset: 1px;
+  border-color: var(--lw-ink);
+}
+
+/* the live-search list takes the rail's one scrolling slot (the nav lists
+   are emptied while it is live). Each hit is a block link: the title in
+   ink over a muted, two-line-clamped snippet; never wider than the rail. */
+.lw-search-results {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0.35rem 0.75rem 1.5rem;
+}
+.lw-search-results[hidden] { display: none; }
+
+.lw-search-result {
+  display: block;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--lw-hairline);
+  color: var(--lw-ink);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.lw-search-result:last-child { border-bottom: none; }
+.lw-search-result-title { display: block; font-size: 0.9rem; line-height: 1.35; }
+.lw-search-result-snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  margin-top: 0.15rem;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--lw-gray);
+}
+.lw-search-result:hover .lw-search-result-title,
+.lw-search-result:focus-visible .lw-search-result-title {
+  text-decoration: underline;
+}
+.lw-search-result:hover .lw-search-result-snippet,
+.lw-search-result:focus-visible .lw-search-result-snippet { color: var(--lw-ink); }
+.lw-search-result:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
+
+/* a live search with no hits still owns the rail: say so instead of
+   blanking the column */
+.lw-search-empty {
+  margin: 0;
+  padding: 0.5rem 0.15rem;
+  font-family: var(--lw-serif);
+  font-size: 0.85rem;
+  color: var(--lw-gray);
+}
+
 /* the header bar: a segmented CONTENTS | PAGES switch plus the side
-   toggle, small-caps on a hairline */
+   toggle, small-caps on a hairline. Its top rule closes the masthead. */
 .lw-rail-head {
+  border-top: 1px solid var(--lw-hairline);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -290,6 +385,17 @@
 }
 .lw-contents[hidden], .lw-rail-pages-list[hidden] { display: none; }
 
+/* the pages slot is a flex shell around the pages list: it fills the rail
+   below the switch and lets that list be the one scroller. Empty while the
+   contents (or a live search) is showing, so it takes no space. */
+.lw-nav-slot {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.lw-nav-slot:empty { display: none; }
+
 .lw-toc-list {
   display: flex;
   flex-direction: column;
@@ -306,6 +412,24 @@
 }
 .lw-nav-link:hover { color: var(--lw-ink); }
 .lw-nav-link.lw-nav-active { color: var(--lw-ink); text-decoration: underline; }
+.lw-nav-link[data-complete='true'] { color: var(--lw-ink); }
+
+/* completion marker: appended only when a page is complete, small enough
+   that the title does not visibly shift; ink, not a color-only state */
+.lw-nav-check {
+  display: inline-block;
+  margin-left: 0.3em;
+  font-size: 0.78em;
+  line-height: 1;
+  vertical-align: 0.05em;
+  color: var(--lw-ink);
+}
+
+.lw-nav-link:focus-visible,
+.lw-toc-item:focus-visible {
+  outline: 1px solid var(--lw-ink);
+  outline-offset: 2px;
+}
 
 .lw-toc-item {
   color: var(--lw-gray);
@@ -405,9 +529,26 @@
   .lw-contents, .lw-rail-pages-list {
     flex-direction: row;
     flex-wrap: wrap;
+    gap: 0.3rem 1rem;
     overflow-y: visible;
     padding-top: 0.5rem;
   }
+  /* lesson titles are sentences, not terse section labels: wrapping them
+     into one run-on row makes the list unreadable on a phone. Keep the
+     page list one lesson per line in a bounded scroller. */
+  .lw-rail-pages-list {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0.2rem;
+    max-height: 30vh;
+    overflow-y: auto;
+  }
+  /* search results stay inside the stacked rail: one bounded scroller
+     instead of an arbitrarily tall list */
+  .lw-search-results { max-height: 50vh; }
+  .lw-brand { padding-top: 0.65rem; }
+  /* the footer fills the phone column with the document */
+  .lw-page-footer { max-width: none; }
   .lw-rail-right { display: none; }
   .lw-site.lw-panel-attached .lw-rail-right {
     display: block;
@@ -456,6 +597,7 @@
     overflow-y: visible;
     padding-top: 0.5rem;
   }
+  .lw-site.lw-panel-attached .lw-search-results { max-height: 50vh; }
   .lw-site.lw-panel-attached .lw-rail-pages-list {
     flex-direction: row;
     flex-wrap: wrap;
@@ -533,6 +675,7 @@
   text-underline-offset: 0.16em;
 }
 .lw-link:hover { text-decoration-color: var(--lw-ink); }
+.lw-link:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
 .lw-link-broken {
   color: var(--lw-error);
   text-decoration: line-through;
@@ -594,6 +737,107 @@ code.lw-inline {
   text-align: left;
 }
 .lw-table th { font-weight: 700; }
+
+/* ---- lesson footer: prev/next in page order, the progress reading, and
+   — only on pages without checked exercises — a manual completion
+   toggle. The hairline plus the top margin separate it from the article;
+   the measure matches the document's. */
+
+.lw-page-footer {
+  --lw-doc-measure: 74ch;
+  max-width: var(--lw-doc-measure);
+  margin: 3rem auto 0;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--lw-hairline);
+  /* the measure is in ch: it only resolves like .lw-doc when the same
+     serif face sets the em, so the footer column lines up with the text */
+  font-family: var(--lw-serif);
+  font-size: 1rem;
+}
+
+.lw-prevnext {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.lw-prevnext-link {
+  max-width: 46%;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  color: var(--lw-ink);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.lw-prevnext-link[rel='next'] { margin-left: auto; text-align: right; }
+.lw-prevnext-link::before {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-family: var(--lw-serif);
+  font-size: 0.7rem;
+  font-variant: small-caps;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--lw-gray);
+}
+.lw-prevnext-link[rel='prev']::before { content: 'Previous'; }
+.lw-prevnext-link[rel='next']::before { content: 'Next'; }
+.lw-prevnext-link:hover { text-decoration: underline; text-underline-offset: 0.16em; }
+.lw-prevnext-link:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
+
+.lw-page-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.lw-page-progress {
+  margin: 0;
+  font-family: var(--lw-serif);
+  font-size: 0.78rem;
+  font-variant: small-caps;
+  letter-spacing: 0.08em;
+  color: var(--lw-gray);
+}
+
+/* same hairline/mono control as the block headers; the pressed state adds
+   an ink rule and an underline, never color alone */
+.lw-page-complete {
+  font-family: var(--lw-mono);
+  font-size: 0.78rem;
+  line-height: 1.3;
+  padding: 0.15rem 0.6rem;
+  color: var(--lw-ink);
+  background: var(--lw-paper);
+  border: 1px solid var(--lw-hairline);
+  cursor: pointer;
+}
+.lw-page-complete:hover { border-color: var(--lw-ink); }
+.lw-page-complete:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
+.lw-page-complete[aria-pressed='true'] {
+  border-color: var(--lw-ink);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+@media (min-width: 1600px) {
+  .lw-page-footer { --lw-doc-measure: 82ch; font-size: 1.0625rem; }
+}
+
+@media (min-width: 2200px) {
+  .lw-page-footer { --lw-doc-measure: 90ch; font-size: 1.125rem; }
+}
+
+@media (max-width: 699px) {
+  .lw-prevnext { flex-direction: column; gap: 0.9rem; }
+  .lw-prevnext-link { max-width: none; }
+  .lw-prevnext-link[rel='next'] { margin-left: 0; text-align: left; }
+}
 
 /* ---- read-only source listings */
 
@@ -665,6 +909,43 @@ code.lw-inline {
   text-underline-offset: 2px;
 }
 
+/* `#+EXERCISE` / `#+CHECK` badge: compact small-caps like the session
+   label, but its own state styling. The state word is always in the text,
+   so color, weight, and rules only reinforce it — never carry it alone. */
+.lw-block-exercise {
+  font-family: var(--lw-mono);
+  font-size: 0.7rem;
+  font-variant: small-caps;
+  letter-spacing: 0.08em;
+  color: var(--lw-gray);
+  border: 1px solid var(--lw-hairline);
+  padding: 0 0.3rem;
+  white-space: nowrap;
+}
+.lw-block-exercise[data-state='pending'] { color: var(--lw-gray); }
+.lw-block-exercise[data-state='running'] {
+  color: var(--lw-gray);
+  border-style: dashed;
+}
+.lw-block-exercise[data-state='passed'] {
+  color: var(--lw-ink);
+  border-color: var(--lw-ink);
+  font-weight: 700;
+}
+.lw-block-exercise[data-state='failed'] {
+  color: var(--lw-error);
+  border-color: var(--lw-error);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.lw-block-exercise[data-state='unchecked'] {
+  color: var(--lw-gray);
+  border-color: var(--lw-gray);
+  border-style: dotted;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
 .lw-block-head button {
   font-family: var(--lw-mono);
   font-size: 0.78rem;
@@ -675,6 +956,10 @@ code.lw-inline {
   cursor: pointer;
 }
 .lw-block-head button:hover { border-color: var(--lw-ink); }
+.lw-block-head button:focus-visible {
+  outline: 1px solid var(--lw-ink);
+  outline-offset: 1px;
+}
 
 .lw-status {
   margin-left: auto;
@@ -703,16 +988,6 @@ code.lw-inline {
   background: var(--lw-ink);
 }
 
-.lw-restore {
-  display: inline-block;
-  font-family: var(--lw-mono);
-  font-size: 0.7rem;
-  padding: 0.25rem 0.6rem;
-  color: var(--lw-ink);
-  text-decoration: underline;
-}
-.lw-restore:hover { color: var(--lw-ink); text-decoration: none; }
-
 .lw-error {
   font-family: var(--lw-mono);
   font-size: 0.78rem;
@@ -722,6 +997,46 @@ code.lw-inline {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* ---- hint/solution folds: native <details>, closed by default, in the
+   same hairline box as a block. The summary is the only control (native
+   disclosure triangle, keyboard-operable); hint and solution differ only
+   in their label and the solution's weight, never in accent color. Bodies
+   recurse, so nested blocks and result slots keep their full width. */
+
+.lw-fold {
+  border: 1px solid var(--lw-hairline);
+  margin: 0 0 1rem;
+  background: var(--lw-paper);
+}
+
+.lw-fold > summary {
+  display: list-item;
+  padding: 0.4rem 0.6rem;
+  font-family: var(--lw-serif);
+  font-size: 0.82rem;
+  font-variant: small-caps;
+  letter-spacing: 0.08em;
+  line-height: 1.3;
+  color: var(--lw-ink);
+  cursor: pointer;
+}
+.lw-fold > summary::marker { color: var(--lw-gray); }
+.lw-fold.lw-solution > summary { font-weight: 700; }
+.lw-fold > summary:hover { background: var(--lw-hover); }
+.lw-fold > summary:focus-visible {
+  outline: 1px solid var(--lw-ink);
+  outline-offset: -2px;
+}
+.lw-fold[open] > summary { border-bottom: 1px solid var(--lw-hairline); }
+
+.lw-fold-body { padding: 0.65rem 0.75rem 0.75rem; }
+.lw-fold-body > :last-child { margin-bottom: 0; }
+/* nested content is sized by the body, never squeezed by it */
+.lw-fold-body .lw-block,
+.lw-fold-body .lw-results,
+.lw-fold-body .lw-src,
+.lw-fold-body .lw-fold { max-width: 100%; }
 
 /* ---- results slot */
 

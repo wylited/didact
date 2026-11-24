@@ -46,14 +46,15 @@
 // keeps exactly one contents entry active; it never writes the hash.
 
 import { parseBabelHeaders } from './babel';
-import { BlockRuntime } from './block';
+import { BlockRuntime, type SharedSession } from './block';
 import type { Kernel, Session } from './kernel';
 import { parseOrgChecked } from './org';
 import type { OrgDiagnostic, OrgDoc } from './org';
-import { renderDocument } from './render';
+import { renderDocument, renderInline } from './render';
 import { PanelHost } from './panel';
+import type { BlockRuntimeOptions, ExerciseOutcome } from './teaching';
 import { installTooltips } from './tooltip';
-import type { TypstRenderOptions } from './typst-source';
+import { isTypstDiagram, type TypstRenderOptions } from './typst-source';
 import './theme.css';
 
 /** Navigator side: the grid column the navigation rail occupies. */
@@ -91,6 +92,8 @@ export interface MountOptions {
   /** Initial navigator view (default 'contents'). Not persisted: the
    *  example site opens on the page list. */
   navView?: NavView;
+  /** Site wordmark in the navigator rail (default 'Didact'). */
+  brand?: string;
   /** Build-time Typst artifacts for prose math and static diagrams.
    *  Absent → `$…$` stays literal and a `:results svg` block becomes an
    *  ordinary kernel block. */
@@ -138,6 +141,17 @@ function writeStoredNavSide(side: NavSide): void {
   }
 }
 
+/** Typst math styles are per document, not per mount: live mounts that
+ *  need the sheet share one `<style>` reference, and the last owner to
+ *  dispose removes it. `owned` is false when the mount adopted a sheet it
+ *  did not create (an externally supplied one), so dispose leaves it. */
+interface MathStyleEntry {
+  style: HTMLStyleElement;
+  owners: number;
+  owned: boolean;
+}
+const mathStyles = new WeakMap<Document, MathStyleEntry>();
+
 export function mountSite(opts: MountOptions): SiteHandle {
   const { root, kernels, pages } = opts;
   if (pages.length === 0) throw new Error('mountSite: at least one page is required');
@@ -147,26 +161,52 @@ export function mountSite(opts: MountOptions): SiteHandle {
   // insertBefore/replaceChildren across documents silently drop nodes
   const doc = root.ownerDocument ?? document;
 
+  // URL slugs are needed by the brand link before the first page is built.
+  const slugs = pageSlugs(pages);
+  // Storage/completion identity: the source file when one is named (a
+  // rename or slug collision must not move a learner's progress), else
+  // the URL slug. Block ids and progress keys both use this.
+  const pageKeys = pages.map((page, i) => page.file ?? slugs[i]!);
+  // Heading slugs must match what the rendered TOC sees: org inline markup
+  // (links, emphasis, math) can change the visible text.
+  const headingText = (text: string): string => {
+    const holder = doc.createElement('div');
+    renderInline(text, holder, { typst: opts.typst });
+    return holder.textContent ?? '';
+  };
+
   root.classList.add('lw-site');
   if (opts.fonts === false) root.classList.add('lw-no-fonts');
 
   // Typst emits its MathML layout rules with each HTML compile; the build
-  // pipeline keeps one copy, injected once per mounted document.
+  // pipeline keeps one copy per mounted document, shared by every live
+  // mount that needs it.
   const mathCss = opts.typst?.artifacts.mathCss ?? '';
-  let mathStyle: HTMLStyleElement | null = null;
+  /** This mount's reference to the document's math sheet, or null when it
+   *  needs none. Released (and the sheet removed with its last owner) in
+   *  `dispose()`. */
+  let mathStyle: MathStyleEntry | null = null;
   if (mathCss !== '') {
-    const existing = doc.head?.querySelector<HTMLStyleElement>(
-      'style[data-test="typst-math-css"]',
-    );
-    if (existing != null) {
-      existing.textContent = mathCss;
-      mathStyle = existing;
+    const tracked = mathStyles.get(doc);
+    if (tracked !== undefined) {
+      tracked.style.textContent = mathCss;
+      tracked.owners++;
+      mathStyle = tracked;
     } else {
-      const style = doc.createElement('style');
-      style.dataset.test = 'typst-math-css';
+      // an untracked sheet (supplied from outside this module) is adopted,
+      // never removed by the mount that did not create it
+      const found = doc.head?.querySelector<HTMLStyleElement>(
+        'style[data-test="typst-math-css"]',
+      ) ?? null;
+      const style = found ?? doc.createElement('style');
+      if (found === null) {
+        style.dataset.test = 'typst-math-css';
+        (doc.head ?? root).appendChild(style);
+      }
       style.textContent = mathCss;
-      (doc.head ?? root).appendChild(style);
-      mathStyle = style;
+      const entry: MathStyleEntry = { style, owners: 1, owned: found === null };
+      mathStyles.set(doc, entry);
+      mathStyle = entry;
     }
   }
 
@@ -178,6 +218,27 @@ export function mountSite(opts: MountOptions): SiteHandle {
   const rail = doc.createElement('nav');
   rail.className = 'lw-rail lw-rail-nav';
   rail.dataset.test = 'nav';
+
+  // Wordmark: the first thing in the rail, a real link home.
+  const brand = doc.createElement('a');
+  brand.className = 'lw-brand';
+  brand.dataset.test = 'brand';
+  brand.href = `#/${slugs[0]}`;
+  brand.textContent = opts.brand ?? 'Didact';
+
+  // Lesson search sits above the CONTENTS | PAGES switch; results replace
+  // whichever nav list was showing (see renderSearch).
+  const searchInput = doc.createElement('input');
+  searchInput.type = 'search';
+  searchInput.className = 'lw-nav-search';
+  searchInput.dataset.test = 'search';
+  searchInput.setAttribute('aria-label', 'Search lessons');
+  searchInput.placeholder = 'Search lessons';
+
+  const searchResults = doc.createElement('div');
+  searchResults.className = 'lw-search-results';
+  searchResults.dataset.test = 'search-results';
+  searchResults.hidden = true;
 
   const railHead = doc.createElement('div');
   railHead.className = 'lw-rail-head lw-nav-head';
@@ -222,7 +283,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
   const pageSlot = doc.createElement('div');
   pageSlot.className = 'lw-nav-slot';
 
-  rail.append(railHead, contents, pageSlot);
+  rail.append(brand, searchInput, railHead, contents, pageSlot, searchResults);
 
   // ---- document column
   const docPane = doc.createElement('div');
@@ -268,20 +329,106 @@ export function mountSite(opts: MountOptions): SiteHandle {
     setNavSide(navSide === 'left' ? 'right' : 'left');
   });
 
-  /** ALWAYS-ONE-LIST: exactly ONE list paints in the rail.
-   *  Contents view: the contents container (`data-test="toc"`, built per
-   *  page) shows, and the pages slot holds nothing. Pages view: the
-   *  contents container is hidden and the pages slot holds a freshly
-   *  mounted `data-test="nav-list"` with one link per page. Called on
-   *  mount, every view change and every page build. */
+  /** ALWAYS-ONE-LIST, or the search results: exactly ONE list paints in
+   *  the rail. Contents view: the contents container (`data-test="toc"`,
+   *  built per page) shows, and the pages slot holds nothing. Pages view:
+   *  the contents container is hidden and the pages slot holds a freshly
+   *  mounted `data-test="nav-list"` with one link per page. A live search
+   *  (≥2 trimmed characters) paints `data-test="search-results"` instead
+   *  and leaves both nav lists empty. Called on mount, every view change,
+   *  every search edit and every page build. */
   function renderNav(): void {
-    const showContents = navView === 'contents';
-    (contents as HTMLElement).hidden = !showContents;
-    pageSlot.replaceChildren(...(showContents ? [] : [pageListView()]));
+    if (renderSearch()) {
+      (contents as HTMLElement).hidden = true;
+      pageSlot.replaceChildren();
+    } else {
+      const showContents = navView === 'contents';
+      (contents as HTMLElement).hidden = !showContents;
+      pageSlot.replaceChildren(...(showContents ? [] : [pageListView()]));
+    }
     if (tocList.childElementCount !== tocEntries.length) {
       tocList.replaceChildren(...tocEntries.map((e) => e.link));
     }
   }
+
+  /** Paint the search results for the current input; true when a live
+   *  search owns the rail. Every entry is built with textContent, so org
+   *  prose can never inject markup. */
+  function renderSearch(): boolean {
+    const query = searchInput.value.trim();
+    if (query.length < 2) {
+      searchResults.replaceChildren();
+      searchResults.hidden = true;
+      return false;
+    }
+    const tokens = query.toLowerCase().split(/\s+/).filter((token) => token !== '');
+    const found: SearchChunk[] = [];
+    for (const chunk of searchIndex) {
+      const haystack = `${chunk.title} ${chunk.text}`.toLowerCase();
+      if (!tokens.every((token) => haystack.includes(token))) continue;
+      found.push(chunk);
+      if (found.length === SEARCH_RESULT_LIMIT) break;
+    }
+    searchResults.replaceChildren(
+      ...(found.length === 0
+        ? [searchEmptyState()]
+        : found.map((chunk) => searchResultLink(chunk, tokens[0]!))));
+    searchResults.hidden = false;
+    return true;
+  }
+
+  /** A live search that matched nothing: the rail keeps saying what it is
+   *  (an empty column reads as a rendering bug). */
+  function searchEmptyState(): HTMLElement {
+    const empty = doc.createElement('p');
+    empty.className = 'lw-search-empty';
+    empty.dataset.test = 'search-empty';
+    empty.textContent = 'No lessons match';
+    return empty;
+  }
+
+  function searchResultLink(chunk: SearchChunk, token: string): HTMLAnchorElement {
+    const link = doc.createElement('a');
+    link.className = 'lw-search-result';
+    link.href = chunk.href;
+    const title = doc.createElement('span');
+    title.className = 'lw-search-result-title';
+    title.textContent = chunk.title;
+    const snippet = doc.createElement('span');
+    snippet.className = 'lw-search-result-snippet';
+    snippet.textContent = searchSnippet(chunk.text, token);
+    link.append(title, snippet);
+    // Following a result ends the search: the rail returns to the nav view
+    // the learner had before typing, so the destination page is not hidden
+    // behind stale results.
+    link.addEventListener('click', () => {
+      // A hit for the fragment already in the URL fires no hashchange, so
+      // route it explicitly: the query clear must not swallow the jump.
+      const sameHash = location.hash === chunk.href;
+      searchInput.value = '';
+      renderNav();
+      if (sameHash) routeAndScroll(false);
+    });
+    return link;
+  }
+
+  searchInput.addEventListener('input', () => renderNav());
+  // the native clear affordance of <input type=search> fires `search`
+  searchInput.addEventListener('search', () => renderNav());
+  searchInput.addEventListener('keydown', (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      if (searchInput.value === '') return;
+      searchInput.value = '';
+      renderNav();
+      event.preventDefault();
+      return;
+    }
+    if (event.key !== 'Enter') return;
+    const first = searchResults.querySelector<HTMLAnchorElement>('a');
+    if (first === null) return;
+    event.preventDefault();
+    first.click(); // the fragment href routes like any other link
+  });
 
   function syncViewButtons(): void {
     contentsBtn.setAttribute('aria-pressed', String(navView === 'contents'));
@@ -308,6 +455,9 @@ export function mountSite(opts: MountOptions): SiteHandle {
 
   let active = -1;
   let blocks: BlockRuntime[] = [];
+  /** Repaints the visible page's footer (progress + nav markers) after an
+   *  exercise pass or a manual completion toggle. Null between pages. */
+  let refreshActiveFooter: (() => void) | null = null;
   // Page-scoped sessions: every `:session <name>` group's instance (plus
   // the isolated instances handed to blocks whose kernel cannot resume).
   // Host-owned — BlockRuntime never disposes these; the page switch and
@@ -319,7 +469,6 @@ export function mountSite(opts: MountOptions): SiteHandle {
     for (const session of pageSessions) session.dispose();
     pageSessions = [];
   };
-  const slugs = pageSlugs(pages);
   // Parsed once: the rendered page and the link index read the same doc.
   // Diagnostics are unsupported-construct reports, surfaced per page in
   // the document column (and logged here, once per page build).
@@ -335,7 +484,23 @@ export function mountSite(opts: MountOptions): SiteHandle {
     return parsed;
   });
   const linkIndex = pages.map(
-    (page, i) => buildPageLinkIndex(page, parsedPages[i]!.doc, slugs[i]!));
+    (page, i) => buildPageLinkIndex(
+      page, parsedPages[i]!.doc, slugs[i]!, headingText));
+  // Stable page-scoped block ids plus the checked exercises each page
+  // carries, computed eagerly: the page list marks completion for every
+  // page, not only the rendered one. Fold bodies are walked in place, in
+  // document order, matching the renderer's flattened block numbering.
+  // Exactly renderDocument's rule: a registered language, and not a static
+  // Typst diagram (those are build-time SVG, never an editor or a kernel).
+  const pageBlockList = parsedPages.map((parsed, i) =>
+    pageBlockIds(parsed.doc, pageKeys[i]!, (node) =>
+      byLang.has(node.lang)
+      && !(opts.typst !== undefined && isTypstDiagram(node))));
+  // One flat index for lesson search: page titles, headings, prose, list
+  // items and table cells, with fold children folded into their section.
+  const searchIndex = pages.flatMap(
+    (page, i) => searchChunksForPage(
+      page, parsedPages[i]!.doc, slugs[i]!, headingText));
   const links = pages.map((page, i) => {
     const a = doc.createElement('a');
     a.className = 'lw-nav-link';
@@ -346,8 +511,71 @@ export function mountSite(opts: MountOptions): SiteHandle {
     a.textContent = page.title;
     return a;
   });
+  // Completion state per page identity, read from storage on first use.
+  const progressCache = new Map<string, PageProgress>();
+  const progressFor = (pageSlug: string): PageProgress => {
+    let progress = progressCache.get(pageSlug);
+    if (progress === undefined) {
+      progress = readProgress(pageSlug);
+      progressCache.set(pageSlug, progress);
+    }
+    return progress;
+  };
 
-  /** A fresh pages list (the pages view's list) with one link per page. */
+  interface PageState {
+    /** The page carries checked exercises (their passes decide completion). */
+    hasExercises: boolean;
+    passed: number;
+    total: number;
+    complete: boolean;
+  }
+
+  function pageState(index: number): PageState {
+    const exerciseIds = pageBlockList[index]!.exerciseIds;
+    const progress = progressFor(pageKeys[index]!);
+    if (exerciseIds.length === 0) {
+      return {
+        hasExercises: false,
+        passed: 0,
+        total: 0,
+        complete: progress.manual,
+      };
+    }
+    let passed = 0;
+    for (const id of exerciseIds) if (progress.passed.has(id)) passed++;
+    return {
+      hasExercises: true,
+      passed,
+      total: exerciseIds.length,
+      complete: passed === exerciseIds.length,
+    };
+  }
+
+  /** Mirror completion onto the page links (`data-complete="true"`, a ✓
+   *  marker, and an accessible "(complete)" suffix — the ✓ alone is
+   *  aria-hidden). Links exist whether or not the pages view is mounted. */
+  function refreshNavCompletion(): void {
+    for (const [i, link] of links.entries()) {
+      const complete = pageState(i).complete;
+      let marker = link.querySelector<HTMLElement>('.lw-nav-check');
+      if (complete) {
+        link.dataset.complete = 'true';
+        link.setAttribute('aria-label', `${pages[i]!.title} (complete)`);
+        if (marker === null) {
+          marker = doc.createElement('span');
+          marker.className = 'lw-nav-check';
+          marker.setAttribute('aria-hidden', 'true');
+          marker.textContent = '✓';
+          link.appendChild(marker);
+        }
+      } else {
+        delete link.dataset.complete;
+        link.removeAttribute('aria-label');
+        marker?.remove();
+      }
+    }
+  }
+
   /** The pages view's list: one `data-test="nav-item"` link per page. */
   function pageListView(): HTMLElement {
     const view = doc.createElement('div');
@@ -399,18 +627,29 @@ export function mountSite(opts: MountOptions): SiteHandle {
    *  whose top edge crossed the threshold line (the section currently
    *  being read); above the first heading → the first entry. At the
    *  bottom of the page the last entry wins — a short final section
-   *  can never cross the line on its own. */
+   *  can never cross the line on its own. Headings folded away (a closed
+   *  `<details>`) have no rendered box and are skipped: a zero rect at
+   *  the top must not outrank the section actually being read. */
   function spyUpdate(): void {
-    let best = 0;
-    for (let i = 0; i < tocEntries.length; i++) {
-      if (tocEntries[i]!.heading.getBoundingClientRect().top <= 96) best = i;
-      else break;
-    }
+    const rects = tocEntries.map((entry) => entry.heading.getBoundingClientRect());
+    // a real layout gives at least one heading a box; in a layout-less
+    // DOM every rect is zero, so zero means nothing there
+    const laidOut = rects.some((rect) => rect.width !== 0 || rect.height !== 0);
+    const samples = tocEntries.map((entry, i) => {
+      const rect = rects[i]!;
+      return {
+        top: rect.top,
+        hidden: isInClosedFold(entry.heading)
+          || (laidOut && rect.width === 0 && rect.height === 0),
+      };
+    });
     const docEl = doc.documentElement;
-    if (window.scrollY + window.innerHeight >= docEl.scrollHeight - 2) {
-      best = tocEntries.length - 1;
-    }
-    setActiveToc(best);
+    // a document that cannot scroll is never "at the bottom": every
+    // heading is visible, so the first (not the last) owns the spotlight
+    const atBottom = docEl.scrollHeight > window.innerHeight + 2
+      && window.scrollY + window.innerHeight >= docEl.scrollHeight - 2;
+    const best = selectActiveHeading(samples, atBottom);
+    if (best !== -1) setActiveToc(best);
   }
 
   /** Clear the contents and its spy: on every page switch and dispose. */
@@ -479,11 +718,82 @@ export function mountSite(opts: MountOptions): SiteHandle {
     return box;
   }
 
+  /** Per-page footer after the article: previous/next lesson links in
+   *  PAGE order (omitted at the ends), the completion reading, and — on
+   *  pages with no checked exercises — a manual completion toggle. */
+  function buildFooter(index: number): HTMLElement {
+    const footer = doc.createElement('footer');
+    footer.className = 'lw-page-footer';
+    footer.dataset.test = 'page-footer';
+
+    if (index > 0 || index < pages.length - 1) {
+      const prevnext = doc.createElement('nav');
+      prevnext.className = 'lw-prevnext';
+      prevnext.dataset.test = 'prevnext';
+      prevnext.setAttribute('aria-label', 'Lesson navigation');
+      const lessonLink = (target: number, rel: 'prev' | 'next'): HTMLAnchorElement => {
+        const link = doc.createElement('a');
+        link.className = 'lw-prevnext-link';
+        link.rel = rel;
+        link.href = `#/${slugs[target]}`;
+        link.textContent = pages[target]!.title;
+        link.setAttribute(
+          'aria-label',
+          `${rel === 'prev' ? 'Previous' : 'Next'} lesson: ${pages[target]!.title}`);
+        return link;
+      };
+      if (index > 0) prevnext.appendChild(lessonLink(index - 1, 'prev'));
+      if (index < pages.length - 1) prevnext.appendChild(lessonLink(index + 1, 'next'));
+      footer.appendChild(prevnext);
+    }
+
+    const meta = doc.createElement('div');
+    meta.className = 'lw-page-meta';
+    const progressEl = doc.createElement('p');
+    progressEl.className = 'lw-page-progress';
+    progressEl.dataset.test = 'page-progress';
+    meta.appendChild(progressEl);
+
+    let toggle: HTMLButtonElement | null = null;
+    const pageKey = pageKeys[index]!;
+    const renderState = (): void => {
+      const state = pageState(index);
+      progressEl.textContent = state.hasExercises
+        ? `Exercises ${state.passed}/${state.total}`
+        : state.complete ? 'Page complete' : 'Not complete';
+      if (toggle !== null) {
+        toggle.textContent = state.complete ? 'Mark incomplete' : 'Mark complete';
+        toggle.setAttribute('aria-pressed', String(state.complete));
+      }
+      refreshNavCompletion();
+    };
+
+    if (!pageState(index).hasExercises) {
+      toggle = doc.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'lw-page-complete';
+      toggle.dataset.test = 'page-complete';
+      toggle.addEventListener('click', () => {
+        const progress = progressFor(pageKey);
+        progress.manual = !progress.manual;
+        writeProgress(pageKey, progress);
+        renderState();
+      });
+      meta.appendChild(toggle);
+    }
+
+    footer.appendChild(meta);
+    renderState();
+    refreshActiveFooter = renderState;
+    return footer;
+  }
+
   function show(index: number): void {
     if (index < 0 || index >= pages.length || index === active) return;
     for (const block of blocks) block.dispose();
     blocks = [];
     disposePageSessions(); // page-scoped: the previous page's sessions end here
+    refreshActiveFooter = null; // the old footer leaves with the old page
     docPane.replaceChildren();
     if (active !== -1) panel.detach(); // page switch: panel detaches
     active = index;
@@ -502,27 +812,66 @@ export function mountSite(opts: MountOptions): SiteHandle {
       docPane.appendChild(warningsBanner(parsed.diagnostics));
     }
     docPane.appendChild(rendered.root);
+    docPane.appendChild(buildFooter(index));
     buildToc(rendered.root, slugs[index]!);
+
+    const pageKey = pageKeys[index]!;
+    const blockIds = pageBlockList[index]!;
+    const progress = progressFor(pageKey);
+    const onExerciseResult = (outcome: ExerciseOutcome): void => {
+      if (!outcome.passed) return;
+      const had = progress.passed.has(outcome.id);
+      progress.passed.add(outcome.id);
+      if (!had) writeProgress(pageKey, progress);
+      refreshActiveFooter?.();
+      refreshNavCompletion();
+    };
+    const optionsFor = (blockIndex: number): BlockRuntimeOptions => {
+      // pageBlockIds numbers exactly the blocks the renderer makes
+      // executable (registered language, not a static diagram), so every
+      // rendered block has an id.
+      const id = blockIds.ids.get(blockIndex)!;
+      return {
+        id,
+        exercisePassed: progress.passed.has(id),
+        onExerciseResult,
+      };
+    };
 
     // One Session per (kernel id, `:session <name>`) on this page; a
     // session-capable kernel shares it across the group's blocks, a
     // kernel without resume() gets isolated sessions and a visible
     // unsupported badge. Normal blocks (no :session) keep their own.
-    const groups = new Map<string, { session: Session; supported: boolean; used: boolean }>();
+    // Every wrapper carries its own group state: program identity, a
+    // serialized operation queue, and its member blocks.
+    const newGroup = (
+      session: Session,
+      name: string,
+      supported: boolean,
+    ): SharedSession => ({
+      session,
+      name,
+      supported,
+      loadedSource: null,
+      queue: Promise.resolve(),
+      blocks: [],
+    });
+    const groups = new Map<string, { shared: SharedSession; used: boolean }>();
     blocks = rendered.blocks.map((b) => {
       const kernel = byLang.get(b.node.lang)!;
       const name = parseBabelHeaders(b.node.headers).session;
       const events = { onActivity: (block: BlockRuntime) => panel.attach(block) };
       if (name === undefined) {
         return new BlockRuntime(
-          b.node, b.index, kernel, b.mount, b.resultsEl, events);
+          b.node, b.index, kernel, b.mount, b.resultsEl, events,
+          undefined, optionsFor(b.index));
       }
       const key = `${b.node.lang}\0${name}`;
       let group = groups.get(key);
       if (group === undefined) {
         const session = kernel.createSession();
         const supported = typeof session.resume === 'function';
-        group = { session, supported, used: false };
+        group = { shared: newGroup(session, name, supported), used: false };
         groups.set(key, group);
         pageSessions.push(session);
         if (!supported && !warnedSessions.has(key)) {
@@ -532,18 +881,22 @@ export function mountSite(opts: MountOptions): SiteHandle {
           );
         }
       }
-      let session: Session;
-      if (group.supported || !group.used) {
-        session = group.session;
+      let shared: SharedSession;
+      if (group.shared.supported || !group.used) {
+        shared = group.shared;
         group.used = true;
       } else {
-        // unsupported kernel: every block after the first runs isolated
-        session = kernel.createSession();
+        // unsupported kernel: every block after the first runs isolated in
+        // its own fresh session, so each gets a wrapper of its own (and a
+        // reset can never invalidate another block's output).
+        const session = kernel.createSession();
         pageSessions.push(session);
+        shared = newGroup(session, name, false);
       }
       return new BlockRuntime(
         b.node, b.index, kernel, b.mount, b.resultsEl, events,
-        { session, name, supported: group.supported });
+        shared,
+        optionsFor(b.index));
     });
 
     for (const [i, a] of links.entries()) {
@@ -553,6 +906,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
       if (on) a.setAttribute('aria-current', 'page');
       else a.removeAttribute('aria-current');
     }
+    refreshNavCompletion();
     // the view is the user's choice: a page switch never changes it
   }
 
@@ -592,7 +946,9 @@ export function mountSite(opts: MountOptions): SiteHandle {
     if (changed || initial) show(page);
     const section = sectionFromHash();
     if (section >= 0) {
-      tocEntries[section]!.heading.scrollIntoView(
+      const heading = tocEntries[section]!.heading;
+      openAncestorFolds(heading);
+      heading.scrollIntoView(
         { behavior: changed || initial ? 'auto' : 'smooth' });
       setActiveToc(section);
     } else {
@@ -632,16 +988,35 @@ export function mountSite(opts: MountOptions): SiteHandle {
       window.removeEventListener('hashchange', onHashChange);
       for (const block of blocks) block.dispose();
       blocks = [];
+      refreshActiveFooter = null;
       disposePageSessions();
       disposeToc();
-      mathStyle?.remove();
-      mathStyle = null;
+      if (mathStyle !== null) {
+        const entry = mathStyles.get(doc);
+        if (entry === mathStyle) {
+          entry.owners--;
+          if (entry.owners <= 0) {
+            mathStyles.delete(doc);
+            if (entry.owned) entry.style.remove();
+          }
+        }
+        mathStyle = null;
+      }
       root.replaceChildren();
       root.classList.remove(
         'lw-site', 'lw-no-fonts', 'lw-panel-attached', 'lw-nav-left', 'lw-nav-right');
       // the persisted side is deliberately kept: the next mount restores it
     },
   };
+}
+
+/** A section heading can live inside a closed hint/solution (nested folds
+ *  too): open every ancestor `<details>` so the scroll we are about to do
+ *  lands on visible content instead of a zero-height closed region. */
+function openAncestorFolds(el: HTMLElement): void {
+  for (let parent = el.parentElement; parent !== null; parent = parent.parentElement) {
+    if (parent.localName === 'details') (parent as HTMLDetailsElement).open = true;
+  }
 }
 
 /** Heading-slug generator shared by the rendered contents and the link
@@ -658,6 +1033,263 @@ function sectionSlugger(): (text: string, index: number) => string {
   };
 }
 
+/** Stable page-scoped block ids and the checked exercises a page carries.
+ *  `ids` maps the renderer's 1-based executable-block index to
+ *  `<page-file>:n:<name>` (when `#+NAME` is unique on the page) or
+ *  `<page-file>:h:<code-hash>:<occurrence>`; duplicate names and repeated
+ *  samples therefore never collide. */
+interface PageBlockIds {
+  ids: Map<number, string>;
+  /** Distinct ids of `#+EXERCISE` blocks that carry a `#+CHECK`. */
+  exerciseIds: readonly string[];
+}
+
+/** Stable page-scoped block id for persistence: the source file (or page
+ *  slug) namespaces it; a unique `#+NAME` names it; otherwise the sample
+ *  code is hashed and an occurrence counter disambiguates identical
+ *  samples. The executable ordinal is deliberately NOT part of the id —
+ *  inserting a block above must not rewrite a learner's saved code.
+ *  `isExecutableBlock` must match renderDocument's rule exactly (registered
+ *  language, and not a static Typst diagram): both walks assign the same
+ *  ordinals. */
+function pageBlockIds(
+  doc: OrgDoc,
+  pageKey: string,
+  isExecutableBlock: (node: { lang: string; headers: string }) => boolean,
+): PageBlockIds {
+  // Pass 1: name cardinality across the whole page (folds included).
+  const names = new Map<string, number>();
+  const countNames = (nodes: OrgDoc): void => {
+    for (const node of nodes) {
+      if (node.kind === 'fold') countNames(node.doc);
+      else if (node.kind === 'src' && node.name !== null) {
+        names.set(node.name, (names.get(node.name) ?? 0) + 1);
+      }
+    }
+  };
+  countNames(doc);
+
+  // Pass 2: walk executable blocks in document order (fold bodies are
+  // flattened in place), assigning ids and collecting checked exercises.
+  const ids = new Map<number, string>();
+  const exerciseIds: string[] = [];
+  const seen = new Set<string>();
+  const occurrences = new Map<string, number>();
+  let index = 0;
+  const assign = (nodes: OrgDoc): void => {
+    for (const node of nodes) {
+      if (node.kind === 'fold') {
+        assign(node.doc);
+        continue;
+      }
+      if (node.kind !== 'src' || !isExecutableBlock(node)) continue;
+      index += 1;
+      let id: string;
+      if (node.name !== null && names.get(node.name) === 1) {
+        id = `${pageKey}:n:${node.name}`;
+      } else {
+        const hash = codeHash(node.code);
+        const occurrence = (occurrences.get(hash) ?? 0) + 1;
+        occurrences.set(hash, occurrence);
+        id = `${pageKey}:h:${hash}:${occurrence}`;
+      }
+      ids.set(index, id);
+      if (node.exercise !== null && node.exercise.expected !== null && !seen.has(id)) {
+        seen.add(id);
+        exerciseIds.push(id);
+      }
+    }
+  };
+  assign(doc);
+  return { ids, exerciseIds };
+}
+
+/** FNV-1a (32-bit) → base36: a short, stable content hash for block ids. */
+function codeHash(code: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < code.length; i++) {
+    hash ^= code.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/** One search hit: a page or section, with its own title and prose. */
+interface SearchChunk {
+  /** Fragment href: `#/<page-slug>` or `#/<page-slug>/<section-slug>`. */
+  href: string;
+  title: string;
+  text: string;
+}
+
+const SEARCH_RESULT_LIMIT = 10;
+
+/** The viewport line (px from the top) a section heading must cross to
+ *  own the contents spotlight. */
+const SPY_LINE = 96;
+
+/** One heading's scroll-spy sample. */
+export interface SpySample {
+  /** Viewport-relative top edge of the heading (`DOMRect.top`). */
+  top: number;
+  /** The heading cannot be seen: it sits in a closed `<details>`, or its
+   *  box is degenerate in a laid-out document. */
+  hidden: boolean;
+}
+
+/** The active contents entry for a scroll position: the last VISIBLE
+ *  heading whose top crossed the spotlight line, else the first visible
+ *  heading; at the document bottom the last visible heading wins (a short
+ *  final section can never cross the line). -1 when every heading is
+ *  hidden. */
+export function selectActiveHeading(
+  samples: readonly SpySample[],
+  atBottom: boolean,
+): number {
+  let first = -1;
+  let best = -1;
+  for (let i = 0; i < samples.length; i++) {
+    const sample = samples[i]!;
+    if (sample.hidden) continue;
+    if (first === -1) first = i;
+    if (sample.top > SPY_LINE) break;
+    best = i;
+  }
+  if (first === -1) return -1;
+  if (atBottom) {
+    for (let i = samples.length - 1; i >= 0; i--) {
+      if (!samples[i]!.hidden) return i;
+    }
+  }
+  return best === -1 ? first : best;
+}
+
+/** True when the element sits inside a closed `<details>`: nothing there
+ *  is rendered, so its zero rect must never win the scroll spy. */
+export function isInClosedFold(el: HTMLElement): boolean {
+  for (let parent = el.parentElement; parent !== null; parent = parent.parentElement) {
+    if (parent.localName === 'details'
+      && !(parent as HTMLDetailsElement).open) return true;
+  }
+  return false;
+}
+
+/** Flatten one page into searchable chunks: the page intro (title plus
+ *  prose before the first heading), then one chunk per h2/h3. Folds are
+ *  walked in place — their headings open sections and their prose joins
+ *  the surrounding chunk. Heading text comes through the real inline
+ *  renderer (the TOC's text), and section slugs come from the same
+ *  slugger, so a result URL always resolves. */
+function searchChunksForPage(
+  page: PageSpec,
+  doc: OrgDoc,
+  slug: string,
+  headingText: (text: string) => string,
+): SearchChunk[] {
+  const nextSlug = sectionSlugger();
+  let headingIndex = 0;
+  const chunks: SearchChunk[] = [];
+  let current: SearchChunk = { href: `#/${slug}`, title: page.title, text: page.title };
+  chunks.push(current);
+  const append = (text: string): void => {
+    const clean = text.trim();
+    if (clean !== '') current.text = `${current.text} ${clean}`;
+  };
+  const visit = (nodes: OrgDoc): void => {
+    for (const node of nodes) {
+      switch (node.kind) {
+        case 'heading':
+          if (node.level <= 2) {
+            const title = headingText(node.text).trim();
+            const section = nextSlug(title, headingIndex++);
+            current = { href: `#/${slug}/${section}`, title, text: title };
+            chunks.push(current);
+          } else {
+            append(node.text);
+          }
+          break;
+        case 'para':
+          append(node.text);
+          break;
+        case 'list':
+          for (const item of node.items) append(item);
+          break;
+        case 'table':
+          for (const cell of node.head) append(cell);
+          for (const row of node.rows) for (const cell of row) append(cell);
+          break;
+        case 'src':
+          // code is searchable too (including examples inside hints)
+          append(node.code);
+          break;
+        case 'fold':
+          visit(node.doc);
+          break;
+        default:
+          break; // title/subtitle/results carry no searchable prose
+      }
+    }
+  };
+  visit(doc);
+  return chunks;
+}
+
+/** A one-line snippet around the first token match, never over 140
+ *  characters (ellipses count). */
+function searchSnippet(text: string, token: string): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (clean.length <= 140) return clean;
+  const at = clean.toLowerCase().indexOf(token.toLowerCase());
+  const start = at <= 60 ? 0 : at - 60;
+  let out = clean.slice(start, start + 140);
+  if (start > 0) out = `…${out.slice(1)}`;
+  if (start + 140 < clean.length) out = `${out.slice(0, 139)}…`;
+  return out;
+}
+
+/** Per-page completion state persisted under
+ *  `didact:progress:<page file or slug>`. */
+interface PageProgress {
+  /** Block ids of exercises that passed. */
+  passed: Set<string>;
+  /** Manual completion flag (pages without checked exercises). */
+  manual: boolean;
+}
+
+const PROGRESS_PREFIX = 'didact:progress:';
+
+/** Read one page's stored progress; malformed JSON, a foreign shape or a
+ *  denied storage yields a clean slate. */
+function readProgress(slug: string): PageProgress {
+  const progress: PageProgress = { passed: new Set(), manual: false };
+  try {
+    const raw = globalThis.localStorage?.getItem(`${PROGRESS_PREFIX}${slug}`);
+    if (raw === null || raw === undefined) return progress;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return progress;
+    const record = parsed as { passed?: unknown; manual?: unknown };
+    if (Array.isArray(record.passed)) {
+      for (const id of record.passed) if (typeof id === 'string') progress.passed.add(id);
+    }
+    if (typeof record.manual === 'boolean') progress.manual = record.manual;
+  } catch {
+    /* malformed or storage denied: start clean */
+  }
+  return progress;
+}
+
+/** Persist one page's progress; a throwing storage is ignored. */
+function writeProgress(slug: string, progress: PageProgress): void {
+  try {
+    globalThis.localStorage?.setItem(
+      `${PROGRESS_PREFIX}${slug}`,
+      JSON.stringify({ passed: [...progress.passed], manual: progress.manual }),
+    );
+  } catch {
+    /* storage denied: the state still applies in this session */
+  }
+}
+
 /** What a link can name on one page: its file, and its h2/h3 headings. */
 interface PageLinkIndex {
   /** Source file name, lowercased (`python.org`). */
@@ -668,18 +1300,35 @@ interface PageLinkIndex {
   sections: Set<string>;
 }
 
-function buildPageLinkIndex(page: PageSpec, doc: OrgDoc, slug: string): PageLinkIndex {
+function buildPageLinkIndex(
+  page: PageSpec,
+  doc: OrgDoc,
+  slug: string,
+  headingText: (text: string) => string,
+): PageLinkIndex {
   const nextSlug = sectionSlugger();
   const byHeading = new Map<string, string>();
   const sections = new Set<string>();
   let headingIndex = 0;
-  for (const node of doc) {
-    if (node.kind !== 'heading' || node.level > 2) continue;
-    const section = nextSlug(node.text, headingIndex++);
-    sections.add(section);
-    byHeading.set(node.text.trim().replace(/\s+/g, ' ').toLowerCase(), section);
-    byHeading.set(kebab(node.text), section);
-  }
+  // Fold bodies are part of the page: a heading inside a hint/solution is
+  // a real section and must be linkable like any other.
+  const visit = (nodes: OrgDoc): void => {
+    for (const node of nodes) {
+      if (node.kind === 'fold') {
+        visit(node.doc);
+        continue;
+      }
+      if (node.kind !== 'heading' || node.level > 2) continue;
+      // `::*Heading` text is matched against the heading's RENDERED text,
+      // exactly what the TOC shows (the org source may carry links/math).
+      const text = headingText(node.text).trim();
+      const section = nextSlug(text, headingIndex++);
+      sections.add(section);
+      byHeading.set(text.replace(/\s+/g, ' ').toLowerCase(), section);
+      byHeading.set(kebab(text), section);
+    }
+  };
+  visit(doc);
   return {
     file: (page.file ?? `${slug}.org`).toLowerCase(),
     slug,

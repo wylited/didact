@@ -62,6 +62,7 @@ mountSite({
   root,
   kernels: [asm64Kernel, riscvKernel, mipsKernel, cKernel, cppKernel, wasmKernel, pythonKernel, sqlKernel, matlabKernel, jsKernel, regexKernel, lispKernel, elispKernel, prologKernel, luaKernel, typstKernel],
   pages,
+  brand: 'Didact',
   // the lesson list is the primary way around the site; the in-page
   // contents are one click away (and always reachable by scrolling)
   navView: 'pages',

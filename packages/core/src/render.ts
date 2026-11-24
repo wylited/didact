@@ -207,27 +207,32 @@ export function renderDocument(
   const blocks: RenderedBlock[] = [];
   let execIndex = 0;
   let lastBlock: RenderedBlock | null = null;
-  for (const node of doc) {
+
+  // Fold bodies append to the same document-order accumulators: executable
+  // indices stay continuous and #+RESULTS: pairs with the nearest preceding
+  // block across fold boundaries.
+  const renderNodes = (nodes: OrgDoc, parent: HTMLElement): void => {
+    for (const node of nodes) {
     switch (node.kind) {
       case 'title': {
         const h = document.createElement('h1');
         h.className = 'lw-title';
         inline(node.text, h);
-        root.appendChild(h);
+        parent.appendChild(h);
         break;
       }
       case 'subtitle': {
         const p = document.createElement('p');
         p.className = 'lw-subtitle';
         inline(node.text, p);
-        root.appendChild(p);
+        parent.appendChild(p);
         break;
       }
       case 'para': {
         const p = document.createElement('p');
         p.className = 'lw-para';
         inline(node.text, p);
-        root.appendChild(p);
+        parent.appendChild(p);
         break;
       }
       case 'heading': {
@@ -235,7 +240,7 @@ export function renderDocument(
           node.level <= 1 ? 'h2' : node.level === 2 ? 'h3' : 'h4');
         h.className = 'lw-heading';
         inline(node.text, h);
-        root.appendChild(h);
+        parent.appendChild(h);
         break;
       }
       case 'list': {
@@ -246,7 +251,7 @@ export function renderDocument(
           inline(item, li);
           ul.appendChild(li);
         }
-        root.appendChild(ul);
+        parent.appendChild(ul);
         break;
       }
       case 'table': {
@@ -274,7 +279,7 @@ export function renderDocument(
           tbody.appendChild(tr);
         }
         table.appendChild(tbody);
-        root.appendChild(table);
+        parent.appendChild(table);
         break;
       }
       case 'src': {
@@ -306,7 +311,7 @@ export function renderDocument(
             inline(node.caption, caption);
             figure.appendChild(caption);
           }
-          root.appendChild(figure);
+          parent.appendChild(figure);
           lastBlock = null;
           break;
         }
@@ -317,7 +322,7 @@ export function renderDocument(
           const mount = document.createElement('div');
           mount.className = 'lw-block-slot';
           figure.appendChild(mount);
-          root.appendChild(figure);
+          parent.appendChild(figure);
           lastBlock = { index: execIndex, node, mount, resultsEl: null };
           blocks.push(lastBlock);
         } else {
@@ -329,9 +334,25 @@ export function renderDocument(
           pre.className = 'lw-ro-code';
           pre.textContent = node.code;
           figure.appendChild(pre);
-          root.appendChild(figure);
+          parent.appendChild(figure);
           lastBlock = null;
         }
+        break;
+      }
+      case 'fold': {
+        // Native <details> gives keyboard access and a closed default; the
+        // body is marked like any other document subtree.
+        const details = document.createElement('details');
+        details.className = `lw-fold lw-${node.variant}`;
+        details.dataset.test = `fold-${node.variant}`;
+        const summary = document.createElement('summary');
+        summary.textContent = node.variant === 'hint' ? 'Show hint' : 'Show solution';
+        const body = document.createElement('div');
+        body.className = 'lw-fold-body';
+        details.appendChild(summary);
+        details.appendChild(body);
+        renderNodes(node.doc, body);
+        parent.appendChild(details);
         break;
       }
       case 'results': {
@@ -343,7 +364,7 @@ export function renderDocument(
           pre.textContent = node.canned;
           slot.appendChild(pre);
         }
-        root.appendChild(slot);
+        parent.appendChild(slot);
         const target = node.name !== null
           ? blocks.find((b) => b.node.name === node.name) ?? null
           : lastBlock;
@@ -351,6 +372,9 @@ export function renderDocument(
         break;
       }
     }
-  }
+    }
+  };
+
+  renderNodes(doc, root);
   return { root, blocks };
 }

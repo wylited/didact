@@ -60,7 +60,7 @@ never a host-supplied named session.
 
 
 - `parseOrg(src): OrgDoc` — grammar per `docs/design.md`.
-- `mountSite({ root, fonts?, kernels, pages, navSide?, navView? })` →
+- `mountSite({ root, fonts?, kernels, pages, navSide?, navView?, brand?, typst? })` →
   renders the navigation rail + active page document, block runtimes,
   panel host. Handle exposes `blocks`, `panel`, `activeIndex`, `navSide`,
   `navView`, `show(index)`, `setNavSide(side)`, `setNavView(view)`,
@@ -77,6 +77,97 @@ never a host-supplied named session.
 - Styles: the textbook-light theme (CSS custom properties, no radius,
   Atkinson Hyperlegible via @fontsource import, mono stack for code/panel,
   nav bar + detached single-column state).
+
+## Block identity, persistence, and completion
+
+**Block identity.** Every page has a storage key: `PageSpec.file` when the
+page names its source file, otherwise its URL slug. Executable blocks are
+numbered in document order with fold bodies flattened in place. A block
+whose `#+NAME:` occurs exactly once on the page (folds included) gets
+`<page-key>:n:<name>`; any other executable block gets
+`<page-key>:h:<fnv1a-base36>:<occurrence>`, where the hash is over the
+block's sample code and `occurrence` counts earlier blocks with the same
+hash. That id keys the saved draft, exercise results, and progress. Named
+blocks survive reordering; unnamed blocks are content-addressed, so
+editing their sample starts a new identity. Renaming a block also starts
+a new identity; old drafts/results are left behind rather than silently
+reused.
+
+**Saved code.** On editor changes the block writes
+`didact:code:<id>` = current source, and removes the key when the source
+matches the sample again; Revert code restores the sample and clears the
+key. On mount a saved draft beats the org sample. Reads and writes are
+wrapped: absent, denied, quota-full, or throwing storage never breaks a
+block; the text is just not persisted.
+
+**Progress.** `didact:progress:<page-key>` holds
+`{ "passed": [<block id>…], "manual": boolean }`. It is read once per page
+(per mount) and cached. Malformed JSON, a foreign shape, or denied storage
+starts from a clean slate; a failed write is ignored, so the outcome still
+applies to the live session. Only passing exercise outcomes are written —
+a failure is session-local, never stored. `manual` is used only on pages
+with no checked exercises.
+
+**Completion.** A page's checked exercises are its executable blocks with
+`#+CHECK:` expected output, deduplicated by block id. `passed` counts those
+ids present in stored progress; complete means `passed === total`. A page
+without checked exercises is complete when `manual` is true. The footer
+re-renders from this state, and page links in the rail get
+`data-complete="true"`, an `aria-hidden` ✓, and an accessible
+`aria-label` of `<title> (complete)` (removed again when incomplete) so
+the state is announced rather than only drawn.
+
+**Exercise checks.** `#+EXERCISE:` supplies a title, `#+CHECK:` the expected
+console output; a block promised only `#+EXERCISE:` is unchecked and can
+never pass or fail. Run sets the badge to running, then compares the
+console text with the expected text after the run finishes or errors: CRLF
+becomes LF, trailing spaces/tabs on each line are stripped, and trailing
+blank lines are dropped. A paused run (breakpoint or mid-step) is not
+judged. Load errors, kernel throws, and output mismatches publish `failed`;
+a match publishes `passed` and is persisted.
+
+**Folds.** `#+BEGIN_HINT`/`#+BEGIN_SOLUTION` parse into recursive fold
+nodes. Rendering uses native `<details>`, closed by default, with a
+`<summary>` and a `.lw-fold-body`; the body recurses through the same
+grammar, so folds may nest and contain executable blocks. Executable
+indices, block-id assignment, and search all flatten fold bodies in place,
+keeping document order. An unterminated fold closes at EOF.
+
+**Search index.** Built once from the parsed pages: each page contributes
+an intro chunk (title plus prose before the first h2/h3) and one chunk per
+h2/h3 section. Folds are walked in place — their headings open sections and
+their prose joins the surrounding chunk — and prose, list items, table
+cells, headings, and code are all searchable. A query of at least two
+trimmed characters is split on whitespace; every token must occur
+(case-insensitively) in a chunk, and the first ten matching chunks win.
+Each hit links to `#/<page>` or `#/<page>/<section>`, using the same
+slugger and rendered heading text as the Contents rail. A hit's snippet
+collapses whitespace and is cut to 140 characters around the first token.
+While a live search is active it replaces both nav lists; clearing it
+restores the current Contents/Pages view.
+
+**Named-session caveats.** One `Session` is created per
+`(kernel id, :session name)` on a page. Kernels exposing `resume()` share
+that instance across the group; kernels without it get the first block
+isolated on the instance and later blocks on separate instances, with the
+unsupported badge (console-warned once per mount). Sessions are
+page-scoped: a page switch or `dispose()` disposes them.
+
+A supported shared session is one mutable machine, so its member blocks
+form a serialized queue: `run()` and `step()` each take a turn on
+`SharedSession.queue`, and only one turn per shared group runs at a time —
+a sibling waits instead of interleaving loads and runs. `busy` still
+stops a block re-entering itself within its own turn. `loadedSource` is
+the group's program identity: Step/Run continues a mid-flight session
+only while it still holds this block's source, since a sibling's turn may
+have replaced it. Reset from any block in a shared group resets the
+session once and applies `applySharedReset()` to
+every member: results and the current-line mark clear, an in-flight
+exercise badge falls back to its last judged verdict, and nothing is
+loaded (`loadedSource = null`), so earlier blocks must be re-run to
+rebuild their definitions. Unsupported (resume-less) kernels never share
+a turn: every block after the first gets its own fresh session and runs
+isolated, so one reset can never invalidate another block's output.
 
 ## kernel-asm64 responsibilities
 

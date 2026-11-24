@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseOrg } from '../src/org';
 import { renderDocument } from '../src/render';
+import { diagramKey, mathKey } from '../src/typst-source';
 
 describe('renderDocument: results slots', () => {
   it('wires a #+RESULTS: <name> slot to the src block with that name, not the nearest one', () => {
@@ -212,5 +213,86 @@ describe('renderDocument: links', () => {
       parseOrg('See [[file:other.org][other]].'), () => true);
     expect(root.querySelector('a')).toBeNull();
     expect(root.querySelectorAll("[data-test='link-broken']")).toHaveLength(1);
+  });
+});
+
+describe('renderDocument: folds', () => {
+  const org = [
+    '#+BEGIN_HINT',
+    'Reach for *help* first.',
+    '#+BEGIN_SOLUTION',
+    'The answer is =42=.',
+    '#+END_SOLUTION',
+    '#+END_HINT',
+  ].join('\n');
+
+  it('renders hint and solution as closed <details> with a summary and body', () => {
+    const { root } = renderDocument(parseOrg(org), () => true);
+    const hint = root.querySelector("details[data-test='fold-hint']")!;
+    expect(hint.classList.contains('lw-fold')).toBe(true);
+    expect(hint.classList.contains('lw-hint')).toBe(true);
+    expect(hint.hasAttribute('open')).toBe(false);
+    expect(hint.querySelector('summary')!.textContent).toBe('Show hint');
+
+    const body = hint.querySelector('.lw-fold-body')!;
+    expect(body.children[0]!.textContent).toBe('Reach for help first.');
+    expect(body.querySelector('strong.lw-inline')!.textContent).toBe('help');
+
+    const solution = body.querySelector("details[data-test='fold-solution']")!;
+    expect(solution.classList.contains('lw-solution')).toBe(true);
+    expect(solution.querySelector('summary')!.textContent).toBe('Show solution');
+    expect(solution.querySelector('code.lw-inline')!.textContent).toBe('42');
+  });
+
+  it('keeps executable indices continuous and pairs results across fold boundaries', () => {
+    const src = [
+      '#+BEGIN_SRC asm',
+      'mov rax, 1',
+      '#+END_SRC',
+      '#+BEGIN_HINT',
+      '#+BEGIN_SRC asm',
+      'add rax, 2',
+      '#+END_SRC',
+      '#+RESULTS:',
+      ': 3',
+      '#+END_HINT',
+      '#+BEGIN_SRC asm',
+      'ret',
+      '#+END_SRC',
+    ].join('\n');
+    const { root, blocks } = renderDocument(parseOrg(src), () => true);
+
+    expect(blocks.map((b) => b.index)).toEqual([1, 2, 3]);
+    expect(blocks.map((b) => b.node.code)).toEqual(['mov rax, 1', 'add rax, 2', 'ret']);
+    const body = root.querySelector('.lw-fold-body')!;
+    expect(body.contains(blocks[1]!.mount)).toBe(true);
+    expect(blocks[0]!.resultsEl).toBeNull();
+    expect(blocks[1]!.resultsEl!.querySelector('pre')!.textContent).toBe('3');
+    expect(blocks[2]!.resultsEl).toBeNull();
+  });
+
+  it('renders captions and math inside a fold with the document typst options', () => {
+    const typst = {
+      math: 'svg' as const,
+      artifacts: {
+        math: { [mathKey('P', false)]: { mathml: '<math/>', svg: '<svg id="fold-math"></svg>' } },
+        diagrams: { [diagramKey('#let r = 1')]: '<svg id="fold-diagram"></svg>' },
+        mathCss: '',
+      },
+    };
+    const src = [
+      '#+BEGIN_HINT',
+      '#+CAPTION: tangent at $P$',
+      '#+BEGIN_SRC typst :results svg',
+      '#let r = 1',
+      '#+END_SRC',
+      '#+END_HINT',
+    ].join('\n');
+    const { root } = renderDocument(parseOrg(src), () => true, { typst });
+
+    const body = root.querySelector('.lw-fold-body')!;
+    expect(body.querySelector('figure.lw-diagram svg#fold-diagram')).not.toBeNull();
+    const caption = body.querySelector('figcaption.lw-caption')!;
+    expect(caption.querySelector('svg#fold-math')).not.toBeNull();
   });
 });

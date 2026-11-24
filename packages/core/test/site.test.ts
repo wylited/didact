@@ -3,9 +3,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { mountSite } from '../src/site';
+import { EditorView } from '@codemirror/view';
+import { isInClosedFold, mountSite, selectActiveHeading } from '../src/site';
 import type { MountOptions, PageSpec, SiteHandle } from '../src/site';
-import { fakeKernel, fakeResumableKernel, type FakeSession } from './fake-kernel';
+import { FakeSession, fakeKernel, fakeResumableKernel } from './fake-kernel';
 
 const PAGES = [
   { title: 'First Lesson', orgSource: '#+TITLE: First Lesson\n\nIntro to page one.\n' },
@@ -87,10 +88,18 @@ afterEach(() => {
   for (const h of handles.splice(0)) h.dispose();
   location.hash = '';
   document.body.replaceChildren();
-  // per-test isolation for the navigator-side preference (page-scoped
-  // storage in happy-dom); tests that deny storage simply store nothing
+  // per-test isolation for the navigator-side preference, learner progress
+  // and saved editor drafts (page-scoped storage in happy-dom); tests that
+  // deny storage simply store nothing
   try {
     window.localStorage.removeItem(NAV_SIDE_KEY);
+    const learnerKeys: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key !== null && (key.startsWith('didact:progress:')
+        || key.startsWith('didact:code:'))) learnerKeys.push(key);
+    }
+    for (const key of learnerKeys) window.localStorage.removeItem(key);
   } catch {
     /* storage denied: nothing was stored */
   }
@@ -784,19 +793,24 @@ describe('mountSite: navigator layout', () => {
     const narrow = text.slice(text.indexOf('@media (max-width: 899px)'));
     expect(narrow).toContain('.lw-rail-nav {');
     expect(narrow).toContain('.lw-contents, .lw-rail-pages-list {\n    flex-direction: row;');
+    // lesson titles are sentences: one per line in a bounded scroller
+    expect(narrow).toMatch(/\.lw-rail-pages-list\s*\{\s*flex-direction:\s*column;/);
     expect(narrow).toContain('.lw-rail-nav {\n    order: -1;');
   });
 
   it('small desktops stack while a panel is attached, so the document keeps its full width', () => {
     const text = stripComments(css());
-    const mid = text.slice(text.indexOf('@media (min-width: 900px) and (max-width: 1199px)'));
+    const start = text.indexOf('@media (min-width: 900px) and (max-width: 1199px)');
+    const next = text.indexOf('@media', start + 10);
+    const mid = text.slice(start, next === -1 ? undefined : next);
     // the rail becomes a header strip; doc + panel stay side by side, so
     // the panel is never pushed below the document
     expect(mid).toContain('grid-template-areas: "nav nav" "doc panel";');
     expect(mid).toContain('.lw-site.lw-panel-attached .lw-rail-nav {\n    grid-area: nav;');
     expect(mid).toContain('.lw-site.lw-panel-attached .lw-rail-right {\n    grid-area: panel;');
-    // the doc keeps its measure: only phones drop the cap
-    expect(mid).not.toContain('max-width: none');
+    // the document keeps its measure in this tier; only phones drop the
+    // cap (later mobile rules may unset other widths)
+    expect(mid).not.toMatch(/\.lw-doc[^{]*\{[^}]*max-width:\s*none/);
   });
 
   it('the navigator renders the same three zones in both modes, with no duplicated rail', () => {
@@ -810,6 +824,97 @@ describe('mountSite: navigator layout', () => {
       expect(order).toEqual(navSide === 'left'
         ? ['lw-rail lw-rail-nav', 'lw-doc-pane', 'lw-rail lw-rail-right']
         : ['lw-doc-pane', 'lw-rail lw-rail-right', 'lw-rail lw-rail-nav']);
+    }
+  });
+});
+
+describe('scroll spy: heading selection', () => {
+  it('a heading inside a closed <details> is folded away', () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<details><h2>Hidden</h2></details>';
+    const details = host.querySelector('details')!;
+    const heading = host.querySelector('h2')!;
+    expect(isInClosedFold(heading)).toBe(true);
+    details.open = true;
+    expect(isInClosedFold(heading)).toBe(false);
+    // an open inner fold does not open a closed outer one
+    host.innerHTML = '<details><details open><h2>Nested</h2></details></details>';
+    expect(isInClosedFold(host.querySelector('h2')!)).toBe(true);
+  });
+
+  it('folds do not win the spotlight: only visible headings count', () => {
+    // document order: [visible, folded, visible]; all at the top edge
+    expect(selectActiveHeading([
+      { top: 0, hidden: false },
+      { top: 0, hidden: true },
+      { top: 0, hidden: false },
+    ], false)).toBe(2);
+  });
+
+  it('picks the last visible heading above the line, else the first visible', () => {
+    expect(selectActiveHeading([
+      { top: -200, hidden: false },
+      { top: 40, hidden: true },
+      { top: 80, hidden: false },
+      { top: 300, hidden: false },
+    ], false)).toBe(2);
+    // nothing has crossed the line yet: the first visible entry is active
+    expect(selectActiveHeading([
+      { top: 10, hidden: true },
+      { top: 200, hidden: false },
+    ], false)).toBe(1);
+  });
+
+  it('at the bottom the last VISIBLE heading wins', () => {
+    expect(selectActiveHeading([
+      { top: -900, hidden: false },
+      { top: -400, hidden: false },
+      { top: 0, hidden: true },
+    ], true)).toBe(1);
+  });
+
+  it('reports no active entry when every heading is folded away', () => {
+    expect(selectActiveHeading([
+      { top: 0, hidden: true },
+      { top: 0, hidden: true },
+    ], false)).toBe(-1);
+    expect(selectActiveHeading([], true)).toBe(-1);
+  });
+
+  it('keeps the first heading active on a page that cannot scroll', () => {
+    const Original = globalThis.IntersectionObserver;
+    let fire: (() => void) | null = null;
+    class CapturingObserver {
+      constructor(callback: IntersectionObserverCallback) {
+        fire = () => callback([], this as unknown as IntersectionObserver);
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+      takeRecords(): IntersectionObserverEntry[] { return []; }
+      readonly root = null;
+      readonly rootMargin = '0px';
+      readonly thresholds: number[] = [];
+    }
+    globalThis.IntersectionObserver = CapturingObserver as unknown as typeof IntersectionObserver;
+    const { handle, root } = mount(TOC_PAGES);
+    try {
+      const headings = [...root.querySelectorAll<HTMLElement>('h2.lw-heading, h3.lw-heading')];
+      expect(headings).toHaveLength(3);
+      // every heading sits below the spotlight line: only "at the bottom"
+      // could promote the last one, and a short page never is.
+      for (const heading of headings) {
+        heading.getBoundingClientRect = (): DOMRect => ({
+          top: 200, bottom: 220, left: 0, right: 100, width: 100, height: 20,
+          x: 0, y: 200, toJSON: () => ({}),
+        }) as DOMRect;
+      }
+      expect(fire).not.toBeNull();
+      fire!();
+      expect(root.querySelector('.lw-toc-active')!.textContent).toBe('Alpha');
+    } finally {
+      handle.dispose();
+      globalThis.IntersectionObserver = Original;
     }
   });
 });
@@ -1060,6 +1165,8 @@ describe('mountSite: shared :session', () => {
     expect(badges(root)).toHaveLength(2);
     for (const el of badges(root)) {
       expect(el.classList.contains('lw-session-unsupported')).toBe(true);
+      expect(el.getAttribute('role')).toBe('note');
+      expect(el.getAttribute('aria-label')).toContain('isolated');
     }
 
     runButtons(root)[0]!.click();
@@ -1097,5 +1204,797 @@ describe('mountSite: shared :session', () => {
     await flushAsync();
     expect(session.runCalls).toBe(runs + 1);
     expect(session.loadedWith).toContain('print(x)');
+  });
+
+  it('queues a sibling Run until the first block leaves the shared session', async () => {
+    const { kernel, session } = fakeResumableKernel();
+    const { root } = mountWith(kernel);
+    await flushAsync();
+
+    const traffic: string[] = [];
+    let active = false;
+    let overlapped = false;
+    const enter = (label: string): void => {
+      if (active) overlapped = true;
+      active = true;
+      traffic.push(label);
+    };
+    const leave = (): void => { active = false; };
+    const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+    session.resume = async (src: string) => {
+      enter(`resume:${src}`);
+      try {
+        if (src === 'x = 1') await gate;
+        return { ok: true, summary: 'resumed · fake' };
+      } finally {
+        leave();
+      }
+    };
+    const run = session.run.bind(session);
+    session.run = async (breakpoints?: number[]) => {
+      enter('run');
+      try {
+        return await run(breakpoints);
+      } finally {
+        leave();
+      }
+    };
+
+    runButtons(root)[0]!.click();
+    runButtons(root)[1]!.click();
+    await flushAsync();
+
+    // A holds the one machine; B has neither loaded nor run yet.
+    expect(traffic).toEqual(['resume:x = 1']);
+    expect(session.runCalls).toBe(0);
+
+    release();
+    await flushAsync();
+
+    // B waited for A's whole turn: the turns never interleave.
+    expect(overlapped).toBe(false);
+    expect(traffic).toEqual(['resume:x = 1', 'run', 'resume:x += 1', 'run']);
+    expect(session.runCalls).toBe(2);
+  });
+
+  it('resumes A before stepping it after B ran in the shared session', async () => {
+    const { kernel, session } = fakeResumableKernel();
+    const { root } = mountWith(kernel);
+    await flushAsync();
+
+    runButtons(root)[0]!.click();
+    await flushAsync();
+    runButtons(root)[1]!.click();
+    await flushAsync();
+    expect(session.resumedWith).toEqual(['x = 1', 'x += 1']);
+
+    const steppedBefore = session.ran;
+    stepButtons(root)[0]!.click();
+    await flushAsync();
+
+    // A's own source is loaded again before the step: the instruction
+    // stepped belongs to A, not to B's still-loaded program.
+    expect(steppedBefore).toBe(false);
+    expect(session.resumedWith).toEqual(['x = 1', 'x += 1', 'x = 1']);
+    expect(session.ran).toBe(true);
+  });
+
+  it('resets a shared group once and invalidates every member without losing verdicts', async () => {
+    const page: PageSpec = {
+      title: 'Reset Group',
+      orgSource:
+        '#+TITLE: Reset Group\n\n'
+        + '#+BEGIN_SRC python :session demo\nx = 1\n#+END_SRC\n'
+        + '#+RESULTS:\n\n'
+        + '#+EXERCISE: Say hello\n'
+        + '#+CHECK: hello from fake kernel\n'
+        + '#+BEGIN_SRC python :session demo\nx += 1\n#+END_SRC\n'
+        + '#+RESULTS:\n',
+    };
+    const { kernel, session } = fakeResumableKernel();
+    let resets = 0;
+    const reset = session.reset.bind(session);
+    session.reset = () => { resets++; reset(); };
+    const { root } = mountWith(kernel, [page]);
+    await flushAsync();
+
+    const results = (): string[] =>
+      [...root.querySelectorAll("[data-test='results']")]
+        .map((el) => el.textContent ?? '');
+    const statuses = (): (string | null)[] =>
+      [...root.querySelectorAll<HTMLElement>("[data-test='block-status']")]
+        .map((el) => el.textContent);
+    const exercise = root.querySelector<HTMLElement>("[data-test='block-exercise']")!;
+
+    runButtons(root)[0]!.click();
+    await flushAsync();
+    runButtons(root)[1]!.click();
+    await flushAsync();
+    expect(results().every((text) => text.includes('hello from fake kernel'))).toBe(true);
+    expect(exercise.dataset.state).toBe('passed');
+
+    root.querySelectorAll<HTMLButtonElement>("[data-test='block-reset']")[0]!.click();
+
+    // One machine reset for the group; every member's output and program
+    // identity are gone, while B's completed verdict survives.
+    expect(resets).toBe(1);
+    expect(results()).toEqual(['', '']);
+    expect(statuses()).toEqual(['reset · shared session', 'reset · shared session']);
+    expect(exercise.dataset.state).toBe('passed');
+
+    // loadedSource was cleared: stepping B first resumes B's own source.
+    stepButtons(root)[1]!.click();
+    await flushAsync();
+    expect(session.resumedWith.at(-1)).toBe('x += 1');
+
+    // Both blocks remain usable after the group reset.
+    runButtons(root)[0]!.click();
+    await flushAsync();
+    expect(session.resumedWith.at(-1)).toBe('x = 1');
+    runButtons(root)[1]!.click();
+    await flushAsync();
+    expect(exercise.dataset.state).toBe('passed');
+    expect(results().every((text) => text.includes('hello from fake kernel'))).toBe(true);
+  });
+
+  it('drains the queue when a block is disposed before its turn', async () => {
+    const { kernel, session } = fakeResumableKernel();
+    const { handle, root } = mountWith(kernel);
+    await flushAsync();
+
+    const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+    const resume = session.resume.bind(session);
+    session.resume = async (src: string) => {
+      if (src === 'x = 1') await gate;
+      return resume(src);
+    };
+
+    runButtons(root)[0]!.click();
+    runButtons(root)[1]!.click();
+    await flushAsync();
+    handle.blocks[1]!.dispose(); // B is queued behind A; dispose it first
+    release();
+    await flushAsync();
+
+    // B's skipped turn released the chain: A completed and can run again.
+    expect(session.resumedWith).toEqual(['x = 1']);
+    const runs = session.runCalls;
+    runButtons(root)[0]!.click();
+    await flushAsync();
+    expect(session.runCalls).toBe(runs + 1);
+  });
+
+  it('resetting one isolated :session block leaves a sibling’s output alone', async () => {
+    const kernel: MountOptions['kernels'][number] = {
+      id: 'mips',
+      label: 'Fake · Isolated',
+      features: { breakpoints: true, stepping: true },
+      editorSyntax: 'asm-mips',
+      createSession: () => new FakeSession(),
+    };
+    const page: PageSpec = {
+      title: 'Isolated Resets',
+      orgSource:
+        '#+TITLE: Isolated Resets\n\n'
+        + '#+BEGIN_SRC mips :session demo\naddi $t0, $zero, 1\n#+END_SRC\n'
+        + '#+RESULTS:\n\n'
+        + '#+BEGIN_SRC mips :session demo\naddi $t1, $zero, 2\n#+END_SRC\n'
+        + '#+RESULTS:\n',
+    };
+    const { root } = mountWith(kernel, [page]);
+    await flushAsync();
+
+    runButtons(root)[0]!.click();
+    await flushAsync();
+    runButtons(root)[1]!.click();
+    await flushAsync();
+    const results = [...root.querySelectorAll("[data-test='results']")];
+    expect(results.map((el) => el.textContent))
+      .toEqual(['hello from fake kernel', 'hello from fake kernel']);
+
+    root.querySelectorAll<HTMLButtonElement>("[data-test='block-reset']")[0]!.click();
+
+    // Unsupported kernels run isolated: only the resetting block clears.
+    expect(results.map((el) => el.textContent)).toEqual(['', 'hello from fake kernel']);
+    expect(root.querySelectorAll("[data-test='block-status']")[1]!.textContent)
+      .toContain('finished');
+  });
+});
+
+describe('mountSite: branding and page footer', () => {
+  const LESSONS: PageSpec[] = [
+    { title: 'One', orgSource: '#+TITLE: One\n\nFirst lesson.\n' },
+    { title: 'Two', orgSource: '#+TITLE: Two\n\nSecond lesson.\n' },
+    { title: 'Three', orgSource: '#+TITLE: Three\n\nThird lesson.\n' },
+  ];
+
+  it('renders the brand at the top of the nav rail, linking to the first page', () => {
+    const { handle, root } = mount(LESSONS);
+    handles.push(handle);
+    const rail = root.querySelector("[data-test='nav']")!;
+    const brand = rail.firstElementChild as HTMLAnchorElement;
+    expect(brand).not.toBeNull();
+    expect(brand.dataset.test).toBe('brand');
+    expect(brand.className).toBe('lw-brand');
+    expect(brand.textContent).toBe('Didact');
+    expect(brand.getAttribute('href')).toBe('#/one');
+    expect(root.querySelectorAll("[data-test='brand']")).toHaveLength(1);
+  });
+
+  it('MountOptions.brand renames the wordmark', () => {
+    const { handle, root } = mount(LESSONS, { brand: 'Assembly Course' });
+    handles.push(handle);
+    expect(root.querySelector("[data-test='brand']")!.textContent).toBe('Assembly Course');
+  });
+
+  it('prev/next follow PAGE order, carry rel, and are omitted at the ends', () => {
+    const { handle, root } = mount(LESSONS);
+    handles.push(handle);
+    const prevnext = (): HTMLAnchorElement[] =>
+      [...root.querySelectorAll<HTMLAnchorElement>("[data-test='prevnext'] a")];
+
+    // first page: next only
+    expect(prevnext().map((a) => a.rel)).toEqual(['next']);
+    expect(prevnext()[0]!.getAttribute('href')).toBe('#/two');
+
+    location.hash = '#/two';
+    hashChanged();
+    expect(prevnext().map((a) => a.rel)).toEqual(['prev', 'next']);
+    expect(prevnext().map((a) => a.getAttribute('href')))
+      .toEqual(['#/one', '#/three']);
+
+    // last page: prev only
+    location.hash = '#/three';
+    hashChanged();
+    expect(prevnext().map((a) => a.rel)).toEqual(['prev']);
+    expect(prevnext()[0]!.getAttribute('href')).toBe('#/two');
+  });
+
+  it('a single page has no prev/next links but still has its footer', () => {
+    const { handle, root } = mount([LESSONS[0]!]);
+    handles.push(handle);
+    expect(root.querySelector("[data-test='prevnext']")).toBeNull();
+    expect(root.querySelector("[data-test='page-footer']")).not.toBeNull();
+  });
+
+  it('the footer sits after the article in the document column', () => {
+    const { handle, root } = mount(LESSONS);
+    handles.push(handle);
+    const pane = root.querySelector('.lw-doc-pane')!;
+    expect(pane.lastElementChild!.getAttribute('data-test')).toBe('page-footer');
+    expect(root.querySelector("[data-test='page-footer']")!.className)
+      .toBe('lw-page-footer');
+    // the footer follows the rendered article, never precedes it
+    const order = [...pane.children].map((el) => el.getAttribute('data-test'));
+    expect(order).toEqual(['page', 'page-footer']);
+  });
+});
+
+describe('mountSite: completion persistence', () => {
+  const STABLE: PageSpec = {
+    title: 'Stable Lesson',
+    file: 'stable.org',
+    orgSource: '#+TITLE: Stable Lesson\n\nJust prose.\n',
+  };
+
+  it('manual completion persists under the page file and survives a remount', () => {
+    const first = mount([STABLE]);
+    handles.push(first.handle);
+
+    const progress = first.root.querySelector("[data-test='page-progress']")!;
+    expect(progress.textContent).toBe('Not complete');
+    const toggle = first.root.querySelector<HTMLButtonElement>("[data-test='page-complete']")!;
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+
+    toggle.click();
+    expect(progress.textContent).toBe('Page complete');
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(JSON.parse(window.localStorage.getItem('didact:progress:stable.org')!))
+      .toEqual({ passed: [], manual: true });
+
+    // the page link carries the live marker
+    first.root.querySelector<HTMLButtonElement>("[data-test='rail-view-pages']")!.click();
+    const link = first.root.querySelector<HTMLAnchorElement>("[data-test='nav-item']")!;
+    expect(link.getAttribute('data-complete')).toBe('true');
+    expect(link.textContent).toContain('✓');
+    // the ✓ is aria-hidden, so completion must be announced by the link
+    expect(link.getAttribute('aria-label')).toBe('Stable Lesson (complete)');
+
+    first.handle.dispose();
+    // identity is the FILE: a retitled page (new slug) keeps completion
+    const renamed: PageSpec = {
+      title: 'Renamed Lesson',
+      file: 'stable.org',
+      orgSource: '#+TITLE: Renamed Lesson\n\nJust prose.\n',
+    };
+    const second = mount([renamed]);
+    handles.push(second.handle);
+    expect(second.root.querySelector("[data-test='page-progress']")!.textContent)
+      .toBe('Page complete');
+    expect(second.root.querySelector("[data-test='page-complete']")!
+      .getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('toggling back clears completion and the nav marker', () => {
+    const { handle, root } = mount([STABLE]);
+    handles.push(handle);
+    root.querySelector<HTMLButtonElement>("[data-test='rail-view-pages']")!.click();
+    const toggle = (): HTMLButtonElement =>
+      root.querySelector<HTMLButtonElement>("[data-test='page-complete']")!;
+    const link = (): HTMLAnchorElement =>
+      root.querySelector<HTMLAnchorElement>("[data-test='nav-item']")!;
+
+    toggle().click();
+    expect(link().getAttribute('data-complete')).toBe('true');
+    expect(link().getAttribute('aria-label')).toBe('Stable Lesson (complete)');
+    toggle().click();
+    expect(root.querySelector("[data-test='page-progress']")!.textContent)
+      .toBe('Not complete');
+    expect(link().getAttribute('data-complete')).toBeNull();
+    expect(link().getAttribute('aria-label')).toBeNull();
+    expect(link().textContent).toBe('Stable Lesson');
+  });
+
+  const EXERCISE: PageSpec = {
+    title: 'Drill',
+    file: 'drill.org',
+    orgSource:
+      '#+TITLE: Drill\n\n'
+      + '#+EXERCISE: Run the program\n'
+      + '#+CHECK: hello from fake kernel\n'
+      + '#+BEGIN_SRC mips\naddi $t0, $zero, 1\n#+END_SRC\n',
+  };
+
+  it('a passing exercise completes the page, persists, and survives a remount', async () => {
+    const first = mount([EXERCISE]);
+    handles.push(first.handle);
+    expect(first.root.querySelector("[data-test='page-progress']")!.textContent)
+      .toBe('Exercises 0/1');
+    // exercise pages are completed by passes, not by hand
+    expect(first.root.querySelector("[data-test='page-complete']")).toBeNull();
+
+    first.root.querySelector<HTMLButtonElement>("[data-test='block-run']")!.click();
+    await flushAsync();
+
+    expect(first.root.querySelector("[data-test='page-progress']")!.textContent)
+      .toBe('Exercises 1/1');
+    const stored = JSON.parse(window.localStorage.getItem('didact:progress:drill.org')!);
+    expect(stored.manual).toBe(false);
+    expect(stored.passed).toHaveLength(1);
+    expect(stored.passed[0]).toMatch(/^drill\.org:h:[0-9a-z]+:1$/);
+
+    first.handle.dispose();
+    const second = mount([EXERCISE]);
+    handles.push(second.handle);
+    expect(second.root.querySelector("[data-test='page-progress']")!.textContent)
+      .toBe('Exercises 1/1');
+    second.root.querySelector<HTMLButtonElement>("[data-test='rail-view-pages']")!.click();
+    expect(second.root.querySelector("[data-test='nav-item']")!
+      .getAttribute('data-complete')).toBe('true');
+  });
+
+  it('duplicate #+NAME blocks get distinct hash ids; a unique #+NAME is used verbatim', async () => {
+    const page: PageSpec = {
+      title: 'Names',
+      file: 'names.org',
+      orgSource:
+        '#+TITLE: Names\n\n'
+        + '#+NAME: dup\n#+EXERCISE: A\n#+CHECK: hello from fake kernel\n'
+        + '#+BEGIN_SRC mips\nnop\n#+END_SRC\n\n'
+        + '#+NAME: dup\n#+EXERCISE: B\n#+CHECK: hello from fake kernel\n'
+        + '#+BEGIN_SRC mips\nnop\n#+END_SRC\n\n'
+        + '#+NAME: solo\n#+EXERCISE: C\n#+CHECK: hello from fake kernel\n'
+        + '#+BEGIN_SRC mips\nnop\n#+END_SRC\n',
+    };
+    const { handle, root } = mount([page]);
+    handles.push(handle);
+    const runs = [...root.querySelectorAll<HTMLButtonElement>("[data-test='block-run']")];
+    expect(runs).toHaveLength(3);
+    for (const run of runs) {
+      run.click();
+      await flushAsync();
+    }
+
+    const stored = JSON.parse(window.localStorage.getItem('didact:progress:names.org')!);
+    expect(stored.passed).toHaveLength(3);
+    const [first, second, third] = stored.passed as string[];
+    expect(first).toMatch(/^names\.org:h:[0-9a-z]+:1$/);
+    expect(second).toMatch(/^names\.org:h:[0-9a-z]+:2$/);
+    // identical samples share the hash; the occurrence disambiguates
+    expect(first!.split(':').slice(0, 3)).toEqual(second!.split(':').slice(0, 3));
+    expect(third).toBe('names.org:n:solo');
+    expect(root.querySelector("[data-test='page-progress']")!.textContent)
+      .toBe('Exercises 3/3');
+  });
+
+  it('a storage that throws does not break completion toggling', () => {
+    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get(): Storage {
+        throw new Error('SecurityError: storage denied');
+      },
+    });
+    try {
+      const { handle, root } = mount([STABLE]);
+      handles.push(handle);
+      expect(root.querySelector("[data-test='page-progress']")!.textContent)
+        .toBe('Not complete');
+      const toggle = root.querySelector<HTMLButtonElement>("[data-test='page-complete']")!;
+      toggle.click();
+      // the choice applies in this session even though it cannot persist
+      expect(root.querySelector("[data-test='page-progress']")!.textContent)
+        .toBe('Page complete');
+    } finally {
+      if (original) Object.defineProperty(window, 'localStorage', original);
+      else delete (window as { localStorage?: Storage }).localStorage;
+    }
+  });
+});
+
+describe('mountSite: lesson search', () => {
+  const SEARCH_PAGES: PageSpec[] = [
+    {
+      title: 'Guide',
+      orgSource:
+        '#+TITLE: Guide\n\nIntro about registers.\n\n'
+        + '* Alpha\n\nAlpha prose about flags.\n\n'
+        + '* Beta\n\nBeta prose about memory.\n',
+    },
+    { title: 'Plain', orgSource: '#+TITLE: Plain\n\nJust prose, no headings.\n' },
+  ];
+
+  function search(root: HTMLElement, value: string): HTMLInputElement {
+    const input = root.querySelector<HTMLInputElement>("[data-test='search']")!;
+    input.value = value;
+    input.dispatchEvent(new Event('input'));
+    return input;
+  }
+
+  const results = (root: HTMLElement): HTMLElement =>
+    root.querySelector<HTMLElement>("[data-test='search-results']")!;
+
+  it('the search box sits in the nav rail above the view switch', () => {
+    const { handle, root } = mount(SEARCH_PAGES);
+    handles.push(handle);
+    const input = root.querySelector<HTMLInputElement>("[data-test='search']")!;
+    expect(input.type).toBe('search');
+    expect(input.getAttribute('aria-label')).toBe('Search lessons');
+    expect(input.getAttribute('placeholder')).toBe('Search lessons');
+    const rail = root.querySelector("[data-test='nav']")!;
+    const children = [...rail.children];
+    expect(children.indexOf(input)).toBeLessThan(children.indexOf(
+      rail.querySelector('.lw-nav-head')!));
+    expect(results(root).hidden).toBe(true);
+  });
+
+  it('matches every token case-insensitively and replaces the nav lists', () => {
+    const { handle, root } = mount(SEARCH_PAGES);
+    handles.push(handle);
+    search(root, 'BETA memory');
+
+    const box = results(root);
+    expect(box.hidden).toBe(false);
+    expect(root.querySelector("[data-test='toc']")!.hidden).toBe(true);
+    expect(root.querySelector("[data-test='nav-list']")).toBeNull();
+    const hits = [...box.querySelectorAll<HTMLAnchorElement>('a')];
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0]!.getAttribute('href')).toBe('#/guide/beta');
+    expect(hits[0]!.querySelector('.lw-search-result-title')!.textContent).toBe('Beta');
+    expect(hits[0]!.querySelector('.lw-search-result-snippet')!.textContent)
+      .toContain('memory');
+  });
+
+  it('links prose hits to the section that holds them', () => {
+    const { handle, root } = mount(SEARCH_PAGES);
+    handles.push(handle);
+    search(root, 'flags');
+    const hits = [...results(root).querySelectorAll<HTMLAnchorElement>('a')];
+    expect(hits[0]!.getAttribute('href')).toBe('#/guide/alpha');
+  });
+
+  it('indexes hint/solution children recursively', () => {
+    const { handle, root } = mount([{
+      title: 'Hints',
+      orgSource:
+        '#+TITLE: Hints\n\n* Hints\n\n'
+        + '#+BEGIN_HINT\nHidden clue about cache lines.\n#+END_HINT\n',
+    }]);
+    handles.push(handle);
+    search(root, 'cache');
+    const hits = [...results(root).querySelectorAll<HTMLAnchorElement>('a')];
+    expect(hits[0]!.getAttribute('href')).toBe('#/hints/hints');
+    expect(hits[0]!.textContent).toContain('cache');
+  });
+
+  it('a query below two characters leaves the nav view alone', () => {
+    const { handle, root } = mount(SEARCH_PAGES);
+    handles.push(handle);
+    search(root, ' a ');
+    expect(results(root).hidden).toBe(true);
+    expect(shownLists(root).map((el) => el.dataset.test)).toEqual(['toc']);
+  });
+
+  it('a query with no hits shows an empty state instead of blanking the rail', () => {
+    const { handle, root } = mount(SEARCH_PAGES);
+    handles.push(handle);
+    search(root, 'zzz');
+
+    const box = results(root);
+    expect(box.hidden).toBe(false);
+    expect(box.querySelectorAll('a')).toHaveLength(0);
+    const empty = box.querySelector<HTMLElement>('.lw-search-empty');
+    expect(empty).not.toBeNull();
+    expect(empty!.tagName).toBe('P');
+    expect(empty!.textContent).toBe('No lessons match');
+    // the rail stays owned by the search, never silently empty
+    expect(root.querySelector("[data-test='toc']")!.hidden).toBe(true);
+    expect(root.querySelector("[data-test='nav-list']")).toBeNull();
+  });
+
+  it('clearing restores the current nav view', () => {
+    const { handle, root } = mount(SEARCH_PAGES, { navView: 'pages' });
+    handles.push(handle);
+    search(root, 'memory');
+    expect(root.querySelector("[data-test='nav-list']")).toBeNull();
+    search(root, '');
+    expect(results(root).hidden).toBe(true);
+    expect(shownLists(root).map((el) => el.dataset.test)).toEqual(['nav-list']);
+    expect(pageLinkTexts(root)).toEqual(['Guide', 'Plain']);
+  });
+
+  it('Escape clears the query and restores the nav view', () => {
+    const { handle, root } = mount(SEARCH_PAGES);
+    handles.push(handle);
+    const input = search(root, 'memory');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(input.value).toBe('');
+    expect(results(root).hidden).toBe(true);
+    expect(shownLists(root).map((el) => el.dataset.test)).toEqual(['toc']);
+  });
+
+  it('Enter opens the first result', () => {
+    const { handle, root } = mount(SEARCH_PAGES);
+    handles.push(handle);
+    const input = search(root, 'plain');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(location.hash).toBe('#/plain');
+    hashChanged();
+    expect(handle.activeIndex).toBe(1);
+  });
+
+  it('following a result clears the query and restores the nav view', () => {
+    const { handle, root } = mount(SEARCH_PAGES);
+    handles.push(handle);
+    const input = search(root, 'memory');
+    results(root).querySelector<HTMLAnchorElement>('.lw-search-result')!.click();
+    expect(input.value).toBe('');
+    expect(results(root).hidden).toBe(true);
+    // default nav view is contents; the result click must not leave the
+    // rail in search mode
+    expect(shownLists(root).map((el) => el.dataset.test)).toEqual(['toc']);
+  });
+
+  it('a hit for the fragment already in the URL still routes and keeps it active', () => {
+    const { handle, root } = mount(SEARCH_PAGES);
+    handles.push(handle);
+    // start on the section the hit will name: no hashchange can fire later
+    location.hash = '#/guide/beta';
+    hashChanged();
+    expect(handle.activeIndex).toBe(0);
+    expect(root.querySelector('.lw-toc-active')!.textContent).toBe('Beta');
+
+    const input = search(root, 'memory');
+    const hit = [...results(root).querySelectorAll<HTMLAnchorElement>('a')]
+      .find((a) => a.getAttribute('href') === location.hash)!;
+    expect(hit).not.toBeUndefined();
+    hit.click(); // same fragment: the browser dispatches no hashchange
+
+    expect(input.value).toBe('');
+    expect(results(root).hidden).toBe(true);
+    expect(shownLists(root).map((el) => el.dataset.test)).toEqual(['toc']);
+    // the cleared rail must not lose the section the learner jumped to
+    expect(root.querySelector('.lw-toc-active')!.textContent).toBe('Beta');
+    expect(handle.activeIndex).toBe(0);
+  });
+
+  it('builds result text with textContent, never markup from org prose', () => {
+    const { handle, root } = mount([{
+      title: 'Literal',
+      orgSource: '#+TITLE: Literal\n\nUse <b>needle</b> literally.\n',
+    }]);
+    handles.push(handle);
+    search(root, 'needle');
+    const box = results(root);
+    expect(box.querySelector('b')).toBeNull();
+    expect(box.querySelector('.lw-search-result-snippet')!.textContent)
+      .toContain('<b>needle</b>');
+  });
+
+  it('caps snippets at 140 characters', () => {
+    const long = 'needle ' + 'padding '.repeat(40);
+    const { handle, root } = mount([{
+      title: 'Long',
+      orgSource: `#+TITLE: Long\n\n${long}\n`,
+    }]);
+    handles.push(handle);
+    search(root, 'needle');
+    const snippetEl = results(root).querySelector('.lw-search-result-snippet')!;
+    expect(snippetEl.textContent!.length).toBeLessThanOrEqual(140);
+    expect(snippetEl.textContent).toContain('needle');
+  });
+
+  it('shows at most ten results', () => {
+    const sections = Array.from(
+      { length: 12 }, (_, i) => `* Topic ${i}\n\nneedle number ${i}\n`).join('\n');
+    const { handle, root } = mount([{
+      title: 'Many',
+      orgSource: `#+TITLE: Many\n\n${sections}`,
+    }]);
+    handles.push(handle);
+    search(root, 'needle');
+    expect(results(root).querySelectorAll('a')).toHaveLength(10);
+  });
+});
+
+describe('mountSite: fold section links', () => {
+  it('resolves file::*Heading for a heading nested inside a hint', () => {
+    const { handle, root } = mount([
+      {
+        title: 'Home',
+        file: 'home.org',
+        orgSource: '#+TITLE: Home\n\nSee [[file:target.org::*Inside Hint][inside]].\n',
+      },
+      {
+        title: 'Target',
+        file: 'target.org',
+        orgSource:
+          '#+TITLE: Target\n\n'
+          + '#+BEGIN_HINT\n* Inside Hint\n\nClue.\n#+END_HINT\n',
+      },
+    ]);
+    handles.push(handle);
+    const link = root.querySelector<HTMLAnchorElement>('a.lw-link')!;
+    expect(link.getAttribute('href')).toBe('#/target/inside-hint');
+  });
+
+  it('opens every closed fold holding the target section on hash navigation', () => {
+    const { handle, root } = mount([{
+      title: 'Folded',
+      file: 'folded.org',
+      orgSource:
+        '#+TITLE: Folded\n\n'
+        + '* Intro\n\nText.\n\n'
+        + '#+BEGIN_HINT\n'
+        + '#+BEGIN_SOLUTION\n'
+        + '** Deep\n\nAnswer.\n'
+        + '#+END_SOLUTION\n'
+        + '#+END_HINT\n',
+    }]);
+    handles.push(handle);
+    const hint = root.querySelector<HTMLDetailsElement>("[data-test='fold-hint']")!;
+    const solution = root.querySelector<HTMLDetailsElement>("[data-test='fold-solution']")!;
+    expect(hint.open).toBe(false);
+    expect(solution.open).toBe(false);
+
+    // happy-dom has no layout: the scroll itself is a no-op, but the
+    // folds must be open (visible) before it happens
+    const into = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = (): void => undefined;
+    try {
+      location.hash = '#/folded/deep';
+      hashChanged();
+    } finally {
+      Element.prototype.scrollIntoView = into;
+    }
+
+    expect(hint.open).toBe(true);
+    expect(solution.open).toBe(true);
+    expect(root.querySelector('.lw-toc-active')!.textContent).toBe('Deep');
+  });
+});
+
+describe('mountSite: static typst diagrams', () => {
+  // A registered `typst` kernel plus artifacts: the `:results svg` block is
+  // build-time SVG, so it must not consume an executable block id. The
+  // python block after it owns the page's only executable ordinal — its
+  // saved draft and exercise pass must agree on that id.
+  const typst = {
+    artifacts: {
+      math: {},
+      diagrams: { 'circle radius 3': '<svg data-test="diagram"></svg>' },
+      mathCss: '',
+    },
+  };
+  const PAGE: PageSpec = {
+    title: 'Diagrams',
+    file: 'diagrams.org',
+    orgSource:
+      '#+TITLE: Diagrams\n\n'
+      + '#+BEGIN_SRC typst :results svg\ncircle radius 3\n#+END_SRC\n\n'
+      + '#+NAME: after\n'
+      + '#+EXERCISE: Run it\n'
+      + '#+CHECK: hello from fake kernel\n'
+      + '#+BEGIN_SRC python\nprint(1)\n#+END_SRC\n',
+  };
+  const kernels = [fakeKernel('typst').kernel, fakeResumableKernel('python').kernel];
+
+  it('the python block after a diagram owns the saved-code and exercise id', async () => {
+    const first = mount([PAGE], { typst, kernels });
+    handles.push(first.handle);
+
+    // the diagram is static; only the python block is executable
+    expect(first.root.querySelector("[data-test='diagram']")).not.toBeNull();
+    expect(first.root.querySelectorAll("[data-test='editor']")).toHaveLength(1);
+    expect(first.handle.blocks).toHaveLength(1);
+    expect(first.root.querySelector("[data-test='page-progress']")!.textContent)
+      .toBe('Exercises 0/1');
+
+    // edit the python block: the draft belongs to the block's unique NAME
+    const editor = first.root.querySelector<HTMLElement>('.cm-editor')!;
+    const view = EditorView.findFromDOM(editor)!;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'print(2)' } });
+    expect(window.localStorage.getItem('didact:code:diagrams.org:n:after')).toBe('print(2)');
+
+    first.root.querySelector<HTMLButtonElement>("[data-test='block-run']")!.click();
+    await flushAsync();
+
+    // the pass is reported against that same identity, not the diagram's
+    expect(first.root.querySelector("[data-test='page-progress']")!.textContent)
+      .toBe('Exercises 1/1');
+    expect(JSON.parse(window.localStorage.getItem('didact:progress:diagrams.org')!))
+      .toEqual({ passed: ['diagrams.org:n:after'], manual: false });
+
+    first.handle.dispose();
+    const second = mount([PAGE], { typst, kernels });
+    handles.push(second.handle);
+    expect(second.root.querySelector("[data-test='diagram']")).not.toBeNull();
+    expect(second.root.querySelector("[data-test='page-progress']")!.textContent)
+      .toBe('Exercises 1/1');
+    expect(second.handle.blocks[0]!.source).toBe('print(2)');
+  });
+});
+
+describe('mountSite: typst math stylesheet ownership', () => {
+  const typst = { artifacts: { math: {}, diagrams: {}, mathCss: '.lw-math{}' } };
+
+  it('removes only the stylesheet it created, leaving an adopted one in place', () => {
+    const first = mount(PAGES, { typst });
+    expect(document.querySelectorAll("style[data-test='typst-math-css']")).toHaveLength(1);
+    first.handle.dispose();
+    expect(document.querySelector("style[data-test='typst-math-css']")).toBeNull();
+
+    // another mount already owns the document's copy: adopting it must not
+    // make this mount remove it on dispose
+    const existing = document.createElement('style');
+    existing.dataset.test = 'typst-math-css';
+    document.head.appendChild(existing);
+    const second = mount(PAGES, { typst });
+    handles.push(second.handle);
+    second.handle.dispose();
+    expect(document.querySelector("style[data-test='typst-math-css']")).toBe(existing);
+    existing.remove();
+  });
+
+  it('keeps the stylesheet until the last live mount in the document disposes', () => {
+    const first = mount(PAGES, { typst });
+    const second = mount(PAGES, { typst });
+    let firstLive = true;
+    let secondLive = true;
+    try {
+      const style = document.querySelector("style[data-test='typst-math-css']");
+      expect(style).not.toBeNull();
+
+      first.handle.dispose();
+      firstLive = false;
+      expect(document.querySelector("style[data-test='typst-math-css']")).toBe(style);
+
+      second.handle.dispose();
+      secondLive = false;
+      expect(document.querySelector("style[data-test='typst-math-css']")).toBeNull();
+    } finally {
+      if (firstLive) first.handle.dispose();
+      if (secondLive) second.handle.dispose();
+    }
   });
 });

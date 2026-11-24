@@ -20,9 +20,10 @@ adding kernels a matter of implementing one package against
 ## Behavior
 
 1. **No global toolbar.** Every executable block owns its controls, inline in
-   its header: `▶ Run`, `⤵ Step`, `⟲ Reset`, and a monospace status text.
-   Kernels may opt out of stepping (`features.stepping === false` hides the
-   Step button entirely).
+   its header: `▶ Run`, `⤵ Step`, `⟲ Reset machine`, `↺ Revert code`,
+   `⧉ Copy Code`, and a monospace status text. Kernels may opt out of
+   stepping (`features.stepping === false` hides the Step button
+   entirely).
 2. **Run** = assemble + execute to completion (kernel budget bounded). The
    block being executed gets a visible *running* highlight; when finished,
    status shows `finished · exit summary · N steps` (kernels with
@@ -44,8 +45,10 @@ adding kernels a matter of implementing one package against
    block and mapped through document edits. Reset clears pause state but
    keeps breakpoints. Kernels without the feature get no gutter click
    behavior.
-5. **Block Reset** restores that block's machine to its just-assembled
-   state and clears its output; code and breakpoints are kept.
+5. **Reset machine vs Revert code.** Reset restores that block's machine
+   to its just-assembled state and clears its output; code, saved draft,
+   and breakpoints are kept. Revert code restores the org sample and
+   drops the saved draft, leaving the session and its output running.
 6. **Under-the-hood panel** is the third zone: a right rail that is
    zero-width (and hairline-invisible) until a panel attaches, then
    slides wide to `clamp(420px, 42vw, 720px)` over 300ms (all motion
@@ -150,16 +153,67 @@ adding kernels a matter of implementing one package against
   stay side by side, so the panel is not pushed below the fold and the
   document keeps ~40-65ch.
   Hairline separators, rails sticky and internally scrolling (the
-  one shown list scrolls on its own when the viewport is short); zones
+  one shown list — Contents, Pages, or live search results — scrolls on
+  its own when the viewport is short); zones
   stack vertically < 900px, where the rail header still shows both
   switches and the shown list wraps horizontally, and the panel
   (full-width, under the document) appears only while attached.
-  Page-level chrome is limited to the rail's small-caps switch and the
-  plain document title header. The navigator remembers which side it
+  Page-level chrome is the rail's wordmark/search masthead and small-caps
+  switch, the plain document title header, and the lesson footer; there
+  is no global toolbar. The navigator remembers which side it
   was put on (`localStorage['didact:nav-side']`), and `mountSite` can
   set the initial side with `navSide` and the initial list with
   `navView` (the example site opens on Pages; the core default is
   Contents).
+
+### Rail masthead, search, and completion
+
+The rail's first block is the wordmark (a real link home) over a full-width
+serif search field: 1px hairline, zero radius, ink focus-visible outline,
+and a hairline under the block that doubles as the switch bar's top rule.
+Live results take the rail's one scrolling slot and replace the current
+Contents/Pages list; each hit is a block link with an ink title over a
+gray snippet clamped to two lines, underlined on hover/focus. Results must
+not overflow the 232px rail; below 900px they stay inside the stacked rail
+with a bounded scroll height. The wordmark/search group is quiet chrome:
+no page-level toolbar is introduced.
+
+A completed page carries a small ink ✓ (`aria-hidden`, appended after the
+link text) in the Pages rail, and `data-complete="true"` on the link; the
+marker is deliberately small so titles do not visibly shift, and it is
+never the only completion signal — the footer states the reading.
+
+### Lesson footer
+
+A hairline and a generous top margin close the article. Previous and Next
+are text links in page order (ends omitted), with small-caps `Previous` /
+`Next` labels supplied by `::before`; they share a row at normal widths and
+stack left-aligned below 700px. The progress line (`Exercises n/m`,
+`Page complete`, `Not complete`) is small-caps gray. The manual
+`Mark complete` button uses the same hairline/mono language as block
+header buttons; its pressed state adds an ink border and underline, not a
+color change. The footer follows the document's measure (74/82/90ch) and
+fills the phone column below 900px.
+
+### Hint and solution folds
+
+Folds are native `<details>`, closed by default, boxed by a 1px hairline
+like a block, with a small-caps summary and the native disclosure triangle.
+Hint and solution differ only by their label and the solution's bold
+weight — no accent color. The open summary gains a hairline underneath and
+the body a small padding; that padding is the only inset, so nested blocks,
+result slots, tables, and further folds keep their own full width. The
+summary is keyboard-operable and shows a 1px ink focus-visible outline.
+
+### Exercise badge
+
+The `#+EXERCISE`/`#+CHECK` badge is compact mono small-caps in a hairline
+box, like the session label but styled independently. Pending and running
+are gray (running a dashed rule); passed is ink with an ink border and bold
+weight; failed is error ink with a dotted underline; unchecked is muted
+gray with a dotted border and underline. The state word is always part of
+the text, so weight, rules, and color only reinforce it — never replace it.
+Passed outcomes persist; failed outcomes live only in the session.
 
 ## Org-mode compatibility (binding, unchanged from v0.1)
 
@@ -176,8 +230,19 @@ The org file must remain valid org-babel source in Emacs.
 - `#+NAME: <id>` names the next block (blank lines, comments, and other
   directives in between do not drop the promise; only another `#+NAME:`
   or EOF does); `#+CAPTION: <text>` captions the next block's figure
-  (rendered as `<figcaption>`, which also names it for assistive
-  technology).
+  (rendered as `<figcaption>` for a static diagram, which also names it
+  for assistive technology).
+- `#+EXERCISE: <title>` / `#+CHECK: <expected output>` promise the next
+  src block an exercise check. The block carries `{ title, expected }`:
+  `title` falls back to `Exercise` when only `#+CHECK:` is present and
+  `expected` is null when there is no check. Both promises clear after
+  that block; `#+NAME:`/`#+CAPTION:` still apply to the same block and
+  neither directive changes the block's language, headers, or code.
+- `#+BEGIN_HINT` … `#+END_HINT` and `#+BEGIN_SOLUTION` … `#+END_SOLUTION`
+  (case-insensitive) render as closed `<details>` folds titled "Show hint"
+  and "Show solution". Fold bodies recurse through this same grammar —
+  they may nest and may contain `#+BEGIN_SRC`, whose executable index
+  stays in document order. An unterminated fold closes at EOF.
 - `#+BEGIN_COMMENT` … `#+END_COMMENT` hides every line in between,
   case-insensitively.
 - `#+BEGIN_SRC <lang> [headers]` / `#+END_SRC`; babel headers are parsed
@@ -232,15 +297,22 @@ renders read-only.
 
 ## E2E test hooks (binding)
 
-Per block: `block-run`, `block-step`, `block-reset`, `block-status`,
-`editor`, `block` (root), `block-error`, `results`; gutter line numbers
-`gutter-N`, breakpoint markers `breakpoint-N`. Panel: `uth` (root),
+Per block: `block-run`, `block-step`, `block-reset`, `block-revert`,
+`block-copy`, `block-status`, `block-exercise` (with `data-state`),
+`block-session` (with `data-session`; unsupported kernels also carry
+`lw-session-unsupported`), `editor`, `block` (root), `block-error`,
+`results`; gutter line numbers
+`gutter-N`, breakpoint markers `breakpoint-N`. Folds: `fold-hint`,
+`fold-solution`. Panel: `uth` (root),
 `uth-title`, `uth-detach`; panel sections `uth-sections`; register cells
 `reg-<name>`; disassembly current row `current-instr`; console `output`;
-trusted markup sections `html-panel`. Site: `nav` (left rail),
-`nav-item` (one per page link), `page` (rendered document root), `toc`
+trusted markup sections `html-panel`. Site: `nav` (left rail), `brand`,
+`search`, `search-results` (one result link per hit), `nav-item` (one per
+page link), `org-warnings` (diagnostics banner root, one `org-warning` per
+item), `page` (rendered document root), `toc`
 (the rail's Contents section), `toc-item` (one per h2/h3 heading deep
-link; the active entry carries `lw-toc-active`), `link-broken` (an
+link; the active entry carries `lw-toc-active`), `page-footer`,
+`prevnext`, `page-progress`, `page-complete`, `link-broken` (an
 unresolved internal link, inert text). Vite `base: './'`.
 
 ## Non-goals
