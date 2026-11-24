@@ -40,9 +40,21 @@ Read that file before touching how blocks run or render panels.
 Every kernel package keeps a byte-identical mirror at `src/types.ts` (so it
 typechecks standalone); `packages/core/test/mirror.test.ts` fails on drift.
 
-Rules: sessions are single-tenant (one per block); `state()` must be cheap
-and complete (core re-renders the whole panel from it); async signatures
-today so pyodide-style kernels need no contract change later.
+Rules: sessions are single-tenant (one per block), except for org-babel
+named sessions — `#+BEGIN_SRC <lang> :session <name>` — where every block
+on a rendered page with the same kernel id and session name shares one
+`Session` instance (see `SharedSession` in `block.ts`). `state()` must be
+cheap and complete (core re-renders the whole panel from it); async
+signatures today so pyodide-style kernels need no contract change later.
+
+Sessions are optional in the contract: a kernel may implement
+`resume(src)` to continue a session's live definitions and data with
+another block's source. Kernels without it are still valid; their
+`:session` blocks fall back to isolated `load(src)` runs and the block
+head shows an unsupported badge (console-warned once). Sessions created
+for a page are disposed when the page switches or the site is disposed;
+`BlockRuntime` only disposes sessions it created itself (normal blocks),
+never a host-supplied named session.
 
 ## Core responsibilities (`@didact/core`)
 

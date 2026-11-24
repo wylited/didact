@@ -646,6 +646,25 @@ code.lw-inline {
 
 .lw-block-name { color: var(--lw-ink); opacity: 0.75; }
 
+/* `:session <name>` badge: compact, muted, hairline — a label, not a
+   control. Unsupported kernels (no resume()) mark it in error ink with
+   a dotted underline instead of a second badge. */
+.lw-block-session {
+  font-family: var(--lw-mono);
+  font-size: 0.7rem;
+  font-variant: small-caps;
+  letter-spacing: 0.08em;
+  color: var(--lw-gray);
+  border: 1px solid var(--lw-hairline);
+  padding: 0 0.3rem;
+  white-space: nowrap;
+}
+.lw-session-unsupported {
+  color: var(--lw-error);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
 .lw-block-head button {
   font-family: var(--lw-mono);
   font-size: 0.78rem;

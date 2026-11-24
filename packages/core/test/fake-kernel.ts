@@ -9,6 +9,8 @@ export class FakeSession implements Session {
   runCalls = 0;
   lastBreakpoints: number[] | undefined;
   ran = false;
+  /** Number of dispose() calls (page-scoped session lifetime checks). */
+  disposed = 0;
   /** Tests override this to make load() fail. */
   loadResult: LoadResult = { ok: true, summary: 'loaded · fake' };
 
@@ -40,7 +42,19 @@ export class FakeSession implements Session {
   }
 
   dispose(): void {
-    /* noop */
+    this.disposed++;
+  }
+}
+
+/** A session that continues across blocks (`:session <name>`): resume()
+ *  records each block source and reports success; the caller's state
+ *  stays live across calls. */
+export class FakeResumableSession extends FakeSession {
+  resumedWith: string[] = [];
+
+  async resume(src: string): Promise<LoadResult> {
+    this.resumedWith.push(src);
+    return { ok: true, summary: 'resumed · fake' };
   }
 }
 
@@ -51,6 +65,20 @@ export function fakeKernel(id = 'mips'): { kernel: Kernel; session: FakeSession 
     label: 'Fake · Kernel',
     features: { breakpoints: true, stepping: true },
     editorSyntax: 'asm-mips',
+    createSession: () => session,
+  };
+  return { kernel, session };
+}
+
+export function fakeResumableKernel(
+  id = 'python',
+): { kernel: Kernel; session: FakeResumableSession } {
+  const session = new FakeResumableSession();
+  const kernel: Kernel = {
+    id,
+    label: 'Fake · Resumable',
+    features: { breakpoints: false, stepping: true },
+    editorSyntax: 'python',
     createSession: () => session,
   };
   return { kernel, session };

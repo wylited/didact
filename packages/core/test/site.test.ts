@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mountSite } from '../src/site';
 import type { MountOptions, PageSpec, SiteHandle } from '../src/site';
-import { fakeKernel, type FakeSession } from './fake-kernel';
+import { fakeKernel, fakeResumableKernel, type FakeSession } from './fake-kernel';
 
 const PAGES = [
   { title: 'First Lesson', orgSource: '#+TITLE: First Lesson\n\nIntro to page one.\n' },
@@ -967,5 +967,119 @@ describe('mountSite: org diagnostics', () => {
     expect(root.querySelectorAll("[data-test='org-warning']")).toHaveLength(0);
     expect(root.querySelector('.lw-doc-pane')!.firstElementChild!.getAttribute('data-test'))
       .toBe('page');
+  });
+});
+
+describe('mountSite: shared :session', () => {
+  /** Two blocks naming the same `:session` on one page; the next page
+   *  carries a normal block (no header) for the isolation check. */
+  const SESSION_PAGE: PageSpec = {
+    title: 'Shared',
+    orgSource:
+      '#+TITLE: Shared\n\n'
+      + '#+BEGIN_SRC python :session demo\nx = 1\n#+END_SRC\n\n'
+      + '#+BEGIN_SRC python :session demo\nx += 1\n#+END_SRC\n',
+  };
+  const NEXT_PAGE: PageSpec = {
+    title: 'Next',
+    orgSource:
+      '#+TITLE: Next\n\n'
+      + '#+BEGIN_SRC python\nprint(x)\n#+END_SRC\n',
+  };
+
+  function mountWith(
+    kernel: MountOptions['kernels'][number],
+    pages: PageSpec[] = [SESSION_PAGE],
+  ): { handle: SiteHandle; root: HTMLElement } {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const handle = mountSite({ root, kernels: [kernel], pages, fonts: false });
+    handles.push(handle);
+    return { handle, root };
+  }
+
+  const badges = (root: HTMLElement): HTMLElement[] =>
+    [...root.querySelectorAll<HTMLElement>('.lw-block-session')];
+  const runButtons = (root: HTMLElement): HTMLButtonElement[] =>
+    [...root.querySelectorAll<HTMLButtonElement>("[data-test='block-run']")];
+
+  it('shares one session, resumes on every run, and labels the blocks', async () => {
+    const { kernel, session } = fakeResumableKernel();
+    const { handle, root } = mountWith(kernel);
+    await flushAsync();
+
+    expect(handle.blocks).toHaveLength(2);
+    expect(handle.blocks[0]!.session).toBe(session);
+    expect(handle.blocks[1]!.session).toBe(session);
+
+    runButtons(root)[0]!.click();
+    await flushAsync();
+    runButtons(root)[1]!.click();
+    await flushAsync();
+
+    // org-babel: each run continues the live state, both sources in order
+    expect(session.resumedWith).toEqual(['x = 1', 'x += 1']);
+    expect(session.disposed).toBe(0);
+
+    const labels = badges(root);
+    expect(labels).toHaveLength(2);
+    expect(labels.map((el) => el.textContent)).toEqual([':session demo', ':session demo']);
+    for (const el of labels) expect(el.classList.contains('lw-session-unsupported')).toBe(false);
+  });
+
+  it('falls back to isolated loads when the kernel has no resume()', async () => {
+    const { kernel, session } = fakeKernel('mips');
+    // fakeKernel's blocks are mips; give the session blocks that language
+    const page: PageSpec = {
+      title: 'Isolated',
+      orgSource:
+        '#+TITLE: Isolated\n\n'
+        + '#+BEGIN_SRC mips :session demo\naddi $t0, $zero, 1\n#+END_SRC\n\n'
+        + '#+BEGIN_SRC mips :session demo\naddi $t1, $zero, 2\n#+END_SRC\n',
+    };
+    const { handle, root } = mountWith(kernel, [page]);
+    await flushAsync();
+
+    expect(handle.blocks).toHaveLength(2);
+    expect(badges(root)).toHaveLength(2);
+    for (const el of badges(root)) {
+      expect(el.classList.contains('lw-session-unsupported')).toBe(true);
+    }
+
+    runButtons(root)[0]!.click();
+    await flushAsync();
+    runButtons(root)[1]!.click();
+    await flushAsync();
+
+    // unsupported: load(), never resume(), and the page still runs
+    expect('resume' in session).toBe(false);
+    expect(session.loadedWith).toEqual([
+      'addi $t0, $zero, 1',
+      'addi $t1, $zero, 2',
+    ]);
+  });
+
+  it('disposes the shared session on a page switch; normal blocks still run', async () => {
+    const { kernel, session } = fakeResumableKernel();
+    const { handle, root } = mountWith(kernel, [SESSION_PAGE, NEXT_PAGE]);
+    await flushAsync();
+
+    runButtons(root)[0]!.click();
+    await flushAsync();
+    expect(session.disposed).toBe(0);
+
+    location.hash = '#/next';
+    hashChanged();
+    await flushAsync();
+
+    expect(handle.activeIndex).toBe(1);
+    expect(session.disposed).toBeGreaterThan(0);
+
+    // a block with no :session keeps its own session and runs normally
+    const runs = session.runCalls;
+    runButtons(root)[0]!.click();
+    await flushAsync();
+    expect(session.runCalls).toBe(runs + 1);
+    expect(session.loadedWith).toContain('print(x)');
   });
 });

@@ -177,6 +177,28 @@ async function main(): Promise<void> {
   assert(consoleText(s10) === 'second\n',
     `next session sees only its own output (got ${JSON.stringify(consoleText(s10))})`);
 
+  // 10. :session — resume continues the same namespace across blocks.
+  assert(typeof pythonKernel.createSession().resume === 'function',
+    'python kernel sessions expose resume()');
+  const sh = makeSession();
+  const sh1 = await sh.load("x = 41\nprint('first', x)\n");
+  assert(sh1.ok && sh1.summary.startsWith('loaded ·'),
+    `shared block1 loads (${JSON.stringify(sh1)})`);
+  await sh.run();
+  assert(consoleText(sh) === 'first 41\n',
+    `shared block1 console (got ${JSON.stringify(consoleText(sh))})`);
+  const sh2 = await sh.resume("x += 1\nprint('second', x)\n");
+  assert(sh2.ok && sh2.summary.startsWith('resumed ·'),
+    `shared block2 resumes (${JSON.stringify(sh2)})`);
+  await sh.run();
+  assert(consoleText(sh) === 'second 42\n',
+    `resumed block sees x = 41 and shows only its output (got ${JSON.stringify(consoleText(sh))})`);
+  const sh3 = await sh.resume("print('third', x)\n");
+  assert(sh3.ok, `shared block3 resumes (${JSON.stringify(sh3)})`);
+  await sh.run();
+  assert(consoleText(sh) === 'third 42\n',
+    `third block still sees the live namespace (got ${JSON.stringify(consoleText(sh))})`);
+
   console.log('\nALL PYTHON KERNEL SMOKE CHECKS PASSED');
 }
 

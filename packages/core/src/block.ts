@@ -165,6 +165,19 @@ const labelGutterNumbers = EditorView.updateListener.of((update) => {
   }
 });
 
+/** A named org-babel session shared by several blocks on one page.
+ *  `supported` is false when the kernel has no `resume`, in which case the
+ *  blocks still share the passed session object but run isolated (each Run
+ *  reloads its own source) and the head badge warns. */
+export interface SharedSession {
+  /** The single session instance used by every block in the group. */
+  session: Session;
+  /** Session name from `:session <name>`. */
+  name: string;
+  /** Whether the kernel can continue a session (`Session.resume`). */
+  supported: boolean;
+}
+
 /** Block lifecycle callbacks, supplied by the host that mounts the block. */
 export interface BlockEvents {
   /** Fired after every run, step, reset, or failed load. */
@@ -185,6 +198,10 @@ export class BlockRuntime {
   private readonly errorEl: HTMLElement;
   private readonly resultsEl: HTMLElement | null;
   private readonly sample: string;
+  /** Named-session group when this block carries `:session <name>`. */
+  private readonly shared: SharedSession | undefined;
+  /** True when `session` was created here and must be disposed here. */
+  private readonly ownsSession: boolean;
   private loadedDoc: string | null = null;
   /** True while the session sits mid-program (paused or stepped but not
    *  finished/errored): Run continues instead of restarting from scratch. */
@@ -199,10 +216,13 @@ export class BlockRuntime {
     mount: HTMLElement,
     resultsEl: HTMLElement | null,
     events: BlockEvents,
+    shared?: SharedSession,
   ) {
     this.kernel = kernel;
     this.kernelLabel = kernel.label;
-    this.session = kernel.createSession();
+    this.shared = shared;
+    this.session = shared?.session ?? kernel.createSession();
+    this.ownsSession = shared === undefined;
     this.sample = node.code;
     this.resultsEl = resultsEl;
     this.events = events;
@@ -225,6 +245,19 @@ export class BlockRuntime {
     name.className = 'lw-block-name';
     name.textContent = this.title;
     head.appendChild(name);
+
+    if (shared !== undefined) {
+      const sess = document.createElement('span');
+      sess.className = 'lw-block-session';
+      sess.dataset.test = 'block-session';
+      sess.dataset.session = shared.name;
+      sess.textContent = `:session ${shared.name}`;
+      if (!shared.supported) {
+        sess.classList.add('lw-session-unsupported');
+        sess.title = 'this kernel cannot share :session state; blocks run isolated';
+      }
+      head.appendChild(sess);
+    }
 
     const runBtn = document.createElement('button');
     runBtn.type = 'button';
@@ -330,7 +363,12 @@ export class BlockRuntime {
       const resume = this.midFlight && this.loadedDoc === this.source;
       if (!resume) {
         this.status('working…');
-        const load = await this.session.load(this.source);
+        // A supported named session continues its live state on every Run
+        // (org-babel semantics: re-running accumulates definitions/data).
+        const load = this.shared?.supported === true
+            && this.session.resume !== undefined
+          ? await this.session.resume(this.source)
+          : await this.session.load(this.source);
         if (!load.ok) {
           this.loadedDoc = null;
           this.midFlight = false;
@@ -395,6 +433,8 @@ export class BlockRuntime {
 
   reset(): void {
     if (this.disposed) return;
+    // For a shared named session this resets the whole group: the earlier
+    // blocks in the group must be re-run to rebuild their definitions.
     this.session.reset();
     this.loadedDoc = null;
     this.midFlight = false;
@@ -523,7 +563,8 @@ export class BlockRuntime {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.session.dispose();
+    // A host-supplied named session belongs to the page, not this block.
+    if (this.ownsSession) this.session.dispose();
     this.view.destroy();
     this.el.remove();
   }

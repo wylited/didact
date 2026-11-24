@@ -174,7 +174,15 @@ The org file must remain valid org-babel source in Emacs.
 
 - `*`… headings (depth = stars); `#+TITLE:`/`#+SUBTITLE:` page header.
 - `#+NAME: <id>` names the next block.
-- `#+BEGIN_SRC <lang> [headers]` / `#+END_SRC`; babel headers parsed+ignored.
+- `#+BEGIN_SRC <lang> [headers]` / `#+END_SRC`; babel headers parsed+ignored,
+  except `:session <name>` (below).
+- `:session <name>` header: blocks with the same kernel and name on one
+  rendered page share a single kernel session, so definitions and data
+  from earlier blocks stay live (org-babel semantics; every Run continues
+  the state). Sessions are page-scoped — a page switch or site dispose
+  ends them. Sharing requires the kernel's optional `Session.resume(src)`;
+  a kernel without it still runs its blocks, isolated, with a visible
+  unsupported badge.
 - `#+RESULTS:` slot replaced by live output on run (DOM only).
 - Unsupported constructs (unknown `#+` directives, stray `#+END_SRC`,
   unterminated src blocks, orphan `#+NAME:`, numbered lists, blockquotes,

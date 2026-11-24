@@ -45,8 +45,9 @@
 // detaching the panel) or scrolls within the current page. A scroll-spy
 // keeps exactly one contents entry active; it never writes the hash.
 
+import { parseBabelHeaders } from './babel';
 import { BlockRuntime } from './block';
-import type { Kernel } from './kernel';
+import type { Kernel, Session } from './kernel';
 import { parseOrgChecked } from './org';
 import type { OrgDiagnostic, OrgDoc } from './org';
 import { renderDocument } from './render';
@@ -282,6 +283,17 @@ export function mountSite(opts: MountOptions): SiteHandle {
 
   let active = -1;
   let blocks: BlockRuntime[] = [];
+  // Page-scoped sessions: every `:session <name>` group's instance (plus
+  // the isolated instances handed to blocks whose kernel cannot resume).
+  // Host-owned — BlockRuntime never disposes these; the page switch and
+  // dispose do, after the blocks are gone.
+  let pageSessions: Session[] = [];
+  // Unsupported-group warnings are issued once per mount, not per rebuild.
+  const warnedSessions = new Set<string>();
+  const disposePageSessions = (): void => {
+    for (const session of pageSessions) session.dispose();
+    pageSessions = [];
+  };
   const slugs = pageSlugs(pages);
   // Parsed once: the rendered page and the link index read the same doc.
   // Diagnostics are unsupported-construct reports, surfaced per page in
@@ -446,6 +458,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
     if (index < 0 || index >= pages.length || index === active) return;
     for (const block of blocks) block.dispose();
     blocks = [];
+    disposePageSessions(); // page-scoped: the previous page's sessions end here
     docPane.replaceChildren();
     if (active !== -1) panel.detach(); // page switch: panel detaches
     active = index;
@@ -463,15 +476,47 @@ export function mountSite(opts: MountOptions): SiteHandle {
     docPane.appendChild(rendered.root);
     buildToc(rendered.root, slugs[index]!);
 
-    blocks = rendered.blocks.map(
-      (b) => new BlockRuntime(
-        b.node,
-        b.index,
-        byLang.get(b.node.lang)!,
-        b.mount,
-        b.resultsEl,
-        { onActivity: (block) => panel.attach(block) },
-      ));
+    // One Session per (kernel id, `:session <name>`) on this page; a
+    // session-capable kernel shares it across the group's blocks, a
+    // kernel without resume() gets isolated sessions and a visible
+    // unsupported badge. Normal blocks (no :session) keep their own.
+    const groups = new Map<string, { session: Session; supported: boolean; used: boolean }>();
+    blocks = rendered.blocks.map((b) => {
+      const kernel = byLang.get(b.node.lang)!;
+      const name = parseBabelHeaders(b.node.headers).session;
+      const events = { onActivity: (block: BlockRuntime) => panel.attach(block) };
+      if (name === undefined) {
+        return new BlockRuntime(
+          b.node, b.index, kernel, b.mount, b.resultsEl, events);
+      }
+      const key = `${b.node.lang}\0${name}`;
+      let group = groups.get(key);
+      if (group === undefined) {
+        const session = kernel.createSession();
+        const supported = typeof session.resume === 'function';
+        group = { session, supported, used: false };
+        groups.set(key, group);
+        pageSessions.push(session);
+        if (!supported && !warnedSessions.has(key)) {
+          warnedSessions.add(key);
+          console.warn(
+            `didact: :session ${name} is not supported by the ${b.node.lang} kernel; blocks run isolated`,
+          );
+        }
+      }
+      let session: Session;
+      if (group.supported || !group.used) {
+        session = group.session;
+        group.used = true;
+      } else {
+        // unsupported kernel: every block after the first runs isolated
+        session = kernel.createSession();
+        pageSessions.push(session);
+      }
+      return new BlockRuntime(
+        b.node, b.index, kernel, b.mount, b.resultsEl, events,
+        { session, name, supported: group.supported });
+    });
 
     for (const [i, a] of links.entries()) {
       const on = i === index;
@@ -559,6 +604,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
       window.removeEventListener('hashchange', onHashChange);
       for (const block of blocks) block.dispose();
       blocks = [];
+      disposePageSessions();
       disposeToc();
       root.replaceChildren();
       root.classList.remove(

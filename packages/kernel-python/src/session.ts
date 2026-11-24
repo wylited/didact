@@ -88,9 +88,24 @@ export class PythonSession implements Session {
     this.engine = engine;
   }
 
-  // -- load ----------------------------------------------------------------
+  // -- load / resume -------------------------------------------------------
 
   async load(src: string): Promise<LoadResult> {
+    return this.prepare(src, false);
+  }
+
+  /** Continue the live namespace with another block (`:session <name>`). */
+  async resume(src: string): Promise<LoadResult> {
+    return this.prepare(src, true);
+  }
+
+  /**
+   * The shared load path. `keepState` keeps the namespace, so an org
+   * `:session` block sees the definitions and data of earlier blocks.
+   * Every call resets the per-block run state (console, cursor, trace,
+   * failure story), so the next run shows only this block's output.
+   */
+  private async prepare(src: string, keepState: boolean): Promise<LoadResult> {
     let py: PyodideInterface;
     try {
       py = await this.engine();
@@ -114,8 +129,10 @@ export class PythonSession implements Session {
       const [line, msg] = JSON.parse(verdict) as [number, string];
       return { ok: false, line, message: msg };
     }
-    this.ns?.destroy();
-    this.ns = py.toPy({ __name__: '__main__' });
+    if (!keepState || this.ns === null) {
+      this.ns?.destroy();
+      this.ns = py.toPy({ __name__: '__main__' });
+    }
     this.src = src;
     this.out = [];
     this.cursor = 0;
@@ -129,7 +146,8 @@ export class PythonSession implements Session {
     this.frames = [];
     this.statements = await this.json<Statement[]>(py, 'lw_split_json(src)', { src });
     await this.refresh(py, null);
-    return { ok: true, summary: `loaded · ${lineCount(src)} lines · ${this.statements.length} statements` };
+    const verb = keepState ? 'resumed' : 'loaded';
+    return { ok: true, summary: `${verb} · ${lineCount(src)} lines · ${this.statements.length} statements` };
   }
 
   // -- run / step ----------------------------------------------------------
