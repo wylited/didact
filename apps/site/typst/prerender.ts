@@ -88,18 +88,22 @@ export async function prerenderOrgPages(
     const collected = collectTypstSources(parseOrg(org));
     for (const item of collected.math) {
       const key = mathKey(item.src, item.display);
-      if (!(key in math) && !pendingMath.has(key)) {
+      if (!pendingMath.has(key)) {
         pendingMath.set(key, { ...item, page, org });
       }
     }
     for (const src of collected.diagrams) {
       const key = diagramKey(src);
-      if (!(key in diagrams) && !pendingDiagrams.has(key)) {
+      if (!pendingDiagrams.has(key)) {
         pendingDiagrams.set(key, { src, page, org });
       }
     }
   }
 
+  // Compile everything, then report. One broken block should not hide the
+  // rest: a cold build pays for every compile it can complete, and an author
+  // fixing a page should see all of its failures in one pass.
+  const failures: string[] = [];
   // Sequential on purpose: one engine instance, one promise chain.
   for (const [key, item] of pendingMath) {
     let artifact = mathCache.get(key);
@@ -107,7 +111,10 @@ export async function prerenderOrgPages(
       try {
         artifact = await compileMath(item.src, item.display);
       } catch (error) {
-        throw withPage(error, 'typst math', item.page, item.org, item.src);
+        failures.push(
+          withPage(error, 'typst math', item.page, item.org, item.src).message,
+        );
+        continue;
       }
       mathCache.set(key, artifact);
     }
@@ -120,11 +127,22 @@ export async function prerenderOrgPages(
         svg = await compileDiagram(item.src);
         assertDiagramQuality(svg, item.src);
       } catch (error) {
-        throw withPage(error, 'typst diagram', item.page, item.org, item.src);
+        failures.push(
+          withPage(error, 'typst diagram', item.page, item.org, item.src)
+            .message,
+        );
+        continue;
       }
       diagramCache.set(key, svg);
     }
     diagrams[key] = svg;
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      failures.length === 1
+        ? failures[0]!
+        : `${failures.length} typst blocks failed:\n\n${failures.join('\n\n')}`,
+    );
   }
 
   return { math, diagrams, mathCss: await mathLayoutCss() };

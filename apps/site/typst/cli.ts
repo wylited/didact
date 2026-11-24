@@ -1,43 +1,63 @@
 // cli.ts — acceptance/verification entry for the build-time pipeline.
 //
-//   node apps/site/typst/cli.ts <pagesDir> [--out <dir>]
+//   node apps/site/typst/cli.ts [pagesDir] [-o|--out <dir>]
 //
-// Reads every `*.org` file, prints the formula/diagram counts per page and the
-// total compile time. With `--out`, also writes one `<page>-<n>.svg` per
-// diagram so an author can open the artifact the page will show. Compiling a
-// diagram and passing the quality gate either succeeds silently or throws, so
-// exit code 0 with the counts printed means every diagram passed.
+// Defaults to apps/site/src/pages. Reads every `*.org` file, prints the
+// formula/diagram counts per page and the total compile time. With `--out`,
+// also writes one `<page>-<n>.svg` per diagram so an author can open the
+// artifact the page will show. Compiling a diagram and passing the quality
+// gate either succeeds silently or throws, so exit code 0 with the counts
+// printed means every diagram passed.
 // Relative imports keep their `.ts` extensions so Node 24 can run this file
 // directly through type stripping — no bundler involved.
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseOrg } from '../../../packages/core/src/org.ts';
 import { collectTypstSources, diagramKey, type TypstArtifacts } from '../../../packages/core/src/typst-source.ts';
 import { prerenderOrgPages } from './prerender.ts';
 
-const USAGE = 'usage: node apps/site/typst/cli.ts <pagesDir> [--out <dir>]';
+const DEFAULT_PAGES = fileURLToPath(new URL('../src/pages', import.meta.url));
+
+const USAGE = `usage: node apps/site/typst/cli.ts [pagesDir] [-o|--out <dir>]
+
+  pagesDir        directory of *.org pages (default: ${DEFAULT_PAGES})
+  -o, --out <dir> also write every diagram as <page>-<n>.svg
+  -h, --help      this message
+
+environment:
+  TYPST_PACKAGE_BASE_URL  package mirror (default https://packages.typst.org)
+  TYPST_NO_PACKAGE_CACHE=1  ignore apps/site/.typst-cache for this run`;
 
 function parseArgs(argv: string[]): { dir: string; out: string | null } {
   const positional: string[] = [];
   let out: string | null = null;
+  const takeOut = (value: string | undefined): void => {
+    if (value === undefined || value.startsWith('-')) {
+      throw new Error(`--out needs a directory\n${USAGE}`);
+    }
+    out = resolve(value);
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === '--help' || arg === '-h') {
       console.log(USAGE);
       process.exit(0);
-    } else if (arg === '--out') {
-      const value = argv[++i];
-      if (value === undefined) throw new Error(`--out needs a directory\n${USAGE}`);
-      out = resolve(value);
-    } else if (arg.startsWith('--')) {
+    } else if (arg === '--out' || arg === '-o') {
+      takeOut(argv[++i]);
+    } else if (arg.startsWith('--out=') || arg.startsWith('-o=')) {
+      takeOut(arg.slice(arg.indexOf('=') + 1));
+    } else if (arg.startsWith('-')) {
       throw new Error(`unknown flag ${arg}\n${USAGE}`);
     } else {
       positional.push(arg);
     }
   }
-  if (positional.length > 1) throw new Error(`expected one pages directory\n${USAGE}`);
-  return { dir: resolve(positional[0] ?? 'src/pages'), out };
+  if (positional.length > 1) {
+    throw new Error(`expected one pages directory\n${USAGE}`);
+  }
+  return { dir: resolve(positional[0] ?? DEFAULT_PAGES), out };
 }
 
 /** Intrinsic size from a diagram's `viewBox`, in pt. */
@@ -68,7 +88,15 @@ async function writeDiagrams(
 
 async function main(): Promise<void> {
   const { dir, out } = parseArgs(process.argv.slice(2));
-  const entries = await readdir(dir, { withFileTypes: true });
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`no such pages directory: ${dir}\n${USAGE}`);
+    }
+    throw error;
+  }
   const files = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith('.org'))
     .map((entry) => entry.name)

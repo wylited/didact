@@ -86,7 +86,8 @@ export interface MountOptions {
    *  example site opens on the page list. */
   navView?: NavView;
   /** Build-time Typst artifacts for prose math and static diagrams.
-   *  Absent → `$…$` stays literal and diagram blocks render as code. */
+   *  Absent → `$…$` stays literal and a `:results svg` block becomes an
+   *  ordinary kernel block. */
   typst?: TypstRenderOptions;
 }
 

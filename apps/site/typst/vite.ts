@@ -18,7 +18,7 @@ export const TYPST_RESOLVED_ID = '\0' + TYPST_VIRTUAL_ID;
 
 /** Serve pre-rendered Typst math and diagrams from the org pages. */
 export default function typstPlugin(): Plugin {
-  let pagesDir = resolve(process.cwd(), 'src/pages');
+  let pagesDir = '';
 
   return {
     name: 'didact-typst',
@@ -57,5 +57,8 @@ export default function typstPlugin(): Plugin {
 function isPageFile(pagesDir: string, file: string): boolean {
   if (!file.endsWith('.org')) return false;
   const rel = relative(pagesDir, file);
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+  // `prerenderPageFiles` reads direct children only; a nested file would
+  // reload the browser without ever being compiled.
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+    && !rel.includes('/') && !rel.includes('\\');
 }

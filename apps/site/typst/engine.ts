@@ -25,7 +25,7 @@
 //   diagrams  — a self-contained SVG page, widened to 100% when it would
 //               overflow the article column (same rule as the kernel).
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTypstCompiler } from 'typst-wasm';
@@ -78,7 +78,8 @@ const MAX_INLINE_PX = 680;
 let compilerPromise: Promise<TypstCompiler> | null = null;
 let queue: Promise<void> = Promise.resolve();
 /** Unique `<style>` payloads seen in HTML compiles, first-seen order. */
-const cssChunks: string[] = [];
+/** Typst's MathML layout CSS; identical for every HTML compile. */
+let mathCss: string | null = null;
 
 /** In-flight package downloads, so concurrent misses share one fetch. */
 const packageRequests = new Map<string, Promise<Uint8Array | Response>>();
@@ -116,9 +117,24 @@ function warnCacheOnce(action: string, error: unknown): void {
   );
 }
 
+/** One retry on server errors and network failures; 4xx will not improve. */
+async function fetchPackageArchive(
+  url: string,
+  init: RequestInit | undefined,
+): Promise<Response> {
+  try {
+    const first = await networkFetch(url, init);
+    if (first.status < 500) return first;
+  } catch (error) {
+    if (init?.signal?.aborted === true) throw error;
+  }
+  return networkFetch(url, init);
+}
+
 /** A gzip response over bytes we already hold (avoids a second request). */
 function archiveResponse(bytes: Uint8Array): Response {
-  return new Response(bytes, {
+  // `bytes` may be a view over a larger buffer; Response wants an ArrayBuffer.
+  return new Response(new Uint8Array(bytes).buffer, {
     headers: { 'content-type': 'application/gzip' },
   });
 }
@@ -131,18 +147,30 @@ function hasErrnoCode(error: unknown, code: string): boolean {
   return error.code === code;
 }
 
+/** True when the bytes decompress as a complete gzip stream. */
+async function isCompleteGzip(bytes: Uint8Array): Promise<boolean> {
+  if (bytes.length < 2 || bytes[0] !== 0x1f || bytes[1] !== 0x8b) return false;
+  try {
+    // Copy into a fresh Uint8Array so the buffer is a plain ArrayBuffer.
+    const body = new Uint8Array(bytes);
+    const stream = new Blob([body.buffer])
+      .stream()
+      .pipeThrough(new DecompressionStream('gzip'));
+    await new Response(stream).arrayBuffer();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Read a cached archive. A truncated/corrupt file is treated as a miss so it
- * gets replaced by the network copy.
+ * Read a cached archive. A truncated or corrupt file fails to decompress and
+ * is treated as a miss, so the network copy replaces it.
  */
 async function readCachedPackage(file: string): Promise<Uint8Array | null> {
   try {
     const bytes = new Uint8Array(await readFile(file));
-    // gzip magic: a valid archive is at least two bytes.
-    if (bytes.length < 2 || bytes[0] !== 0x1f || bytes[1] !== 0x8b) {
-      return null;
-    }
-    return bytes;
+    return (await isCompleteGzip(bytes)) ? bytes : null;
   } catch (error) {
     if (!hasErrnoCode(error, 'ENOENT')) {
       warnCacheOnce('read', error);
@@ -158,7 +186,9 @@ async function writeCachedPackage(
 ): Promise<void> {
   try {
     await ensureCacheDir();
-    await writeFile(file, bytes);
+    const temp = `${file}.${process.pid}.tmp`;
+    await writeFile(temp, bytes);
+    await rename(temp, file);
   } catch (error) {
     warnCacheOnce('write', error);
   }
@@ -174,8 +204,12 @@ async function loadPackageArchive(
     const cached = await readCachedPackage(file);
     if (cached !== null) return cached;
   }
-  const response = await networkFetch(url, init);
-  if (!response.ok) return response;
+  const response = await fetchPackageArchive(url, init);
+  if (!response.ok) {
+    throw new Error(
+      `typst package fetch failed: HTTP ${response.status} ${url}`,
+    );
+  }
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (file !== null) await writeCachedPackage(file, bytes);
   return bytes;
@@ -277,14 +311,16 @@ export function compileMath(
         throw new Error('typst HTML output contained no <math> element');
       }
       const css = extractCss(html);
-      if (css !== '' && !cssChunks.includes(css)) cssChunks.push(css);
+      if (mathCss === null && css !== '') mathCss = css;
 
       // Same inline/display wrapper as the HTML compile: Typst uses the
       // spaces inside the dollars to pick display style.
       const svgSource =
         `#set page(width: auto, height: auto, margin: 0pt, fill: none)\n` +
         (display ? `$ ${src} $` : `$${src}$`);
-      const svg = stripWhiteBackground(await compileSvg(compiler, svgSource));
+      const svg = responsiveSvg(
+        stripWhiteBackground(await compileSvg(compiler, svgSource)),
+      );
       return { mathml, svg };
     } catch (error) {
       throw typstFailure(error);
@@ -313,16 +349,16 @@ export function compileDiagram(src: string): Promise<string> {
  */
 export function mathLayoutCss(): Promise<string> {
   return serialized(async (compiler) => {
-    if (cssChunks.length === 0) {
+    if (mathCss === null) {
       try {
         const html = await compileHtml(compiler, '$ x $');
         const css = extractCss(html);
-        if (css !== '') cssChunks.push(css);
+        if (css !== '') mathCss = css;
       } catch (error) {
         throw typstFailure(error);
       }
     }
-    return cssChunks.join('\n');
+    return mathCss ?? '';
   });
 }
 

@@ -2,7 +2,7 @@
 // the browser renderer: which org text is math, which org src blocks are
 // static diagrams, and how both are keyed.
 //
-// Website content is pre-rendered (scripts/prerender-typst.ts or the Vite
+// Website content is pre-rendered (apps/site/typst/prerender.ts or the Vite
 // plugin) into `TypstArtifacts`; rendering is a pure lookup, so this module
 // has no engine, no DOM and no Node dependencies. The executable `typst`
 // KERNEL is a separate layer and never imports this file.
@@ -229,6 +229,15 @@ export function collectTypstSources(doc: readonly OrgNode[]): TypstSources {
   const diagrams: string[] = [];
   const seenMath = new Set<string>();
   const seenDiagrams = new Set<string>();
+  const addMath = (text: string): void => {
+    for (const part of splitTypstMath(text)) {
+      if (part.kind !== 'math') continue;
+      const key = mathKey(part.src, part.display);
+      if (seenMath.has(key)) continue;
+      seenMath.add(key);
+      math.push({ src: part.src, display: part.display });
+    }
+  };
   for (const node of doc) {
     if (node.kind === 'src') {
       if (isTypstDiagram(node)) {
@@ -238,17 +247,12 @@ export function collectTypstSources(doc: readonly OrgNode[]): TypstSources {
           diagrams.push(node.code);
         }
       }
+      // Captions are rendered as inline content (`render.ts`), so the
+      // formula in `#+CAPTION: tangent at $P$` needs an artifact too.
+      if (node.caption !== null) addMath(node.caption);
       continue;
     }
-    for (const text of inlineTexts(node)) {
-      for (const part of splitTypstMath(text)) {
-        if (part.kind !== 'math') continue;
-        const key = mathKey(part.src, part.display);
-        if (seenMath.has(key)) continue;
-        seenMath.add(key);
-        math.push({ src: part.src, display: part.display });
-      }
-    }
+    for (const text of inlineTexts(node)) addMath(text);
   }
   return { math, diagrams };
 }

@@ -97,8 +97,9 @@ diagram; a plain `typst` block stays a kernel block.
 
 - Contract: `TypstArtifacts { math, diagrams, mathCss }`. Math is keyed by
   `mathKey` = `I:`/`D:` + normalized source; diagrams by `diagramKey` =
-  normalized block source. Normalization is `trim` + collapse whitespace in
-  `normalizeTypst`; the pipeline and renderer must use the same function.
+  normalized block source. Normalization is `trim` only in `normalizeTypst`
+  (inner whitespace is significant); the pipeline and renderer must use the
+  same function.
 - Pipeline: `apps/site/typst/prerender.ts` parses pages with the core org
   parser, `collectTypstSources` dedupes, `apps/site/typst/engine.ts` compiles
   sequentially through one `typst-wasm` JSPI instance (module-level promise +
@@ -110,12 +111,13 @@ diagram; a plain `typst` block stays a kernel block.
   org source. The content browser path receives only the resulting strings:
   no content engine and no package fetch.
 - Failure: an unknown package or invalid Typst aborts the build with the
-  page, the block's first source line, then `file:line` and hints; a blank
-  diagram is rejected by `apps/site/typst/check.ts`; a missing artifact renders
-  the literal `$src$` (math) or the block source in `pre.lw-diagram-missing`,
-  never a hole.
-- Review surface: `apps/site/src/pages/typst-gallery.org` has one figure per
-  supported pattern (22 at present). The structural gate's unit tests live in
+  page, the block's first non-prelude code line, then `file:line` and hints;
+  every failing block is listed in one error. A blank diagram is rejected by
+  `apps/site/typst/check.ts`; a missing artifact renders the literal `$src$`
+  (math) or `Figure unavailable.` in `pre.lw-diagram-missing` (diagram), never
+  a hole.
+- Review surface: the diagram section of `apps/site/src/pages/typst.org` has
+  one figure per supported pattern (23 at present). The structural gate's unit tests live in
   `apps/site/typst/check.test.ts`; `pnpm typst:check` compiles the pages and
   runs the same gate.
 - JSPI is required by the build engine only; content pages work in browsers

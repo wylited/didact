@@ -237,6 +237,52 @@ describe('#+CAPTION on src blocks', () => {
   });
 });
 
+describe('math in every rendered field', () => {
+  it('collects formulas from the title and from a caption', () => {
+    const org = [
+      '#+TITLE: The $pi$ constant',
+      '#+CAPTION: tangent at $P$',
+      '#+BEGIN_SRC typst :results svg',
+      '#let a = 1',
+      '#+END_SRC',
+    ].join('\n');
+    const { math } = collectTypstSources(parseOrg(org));
+    expect(math.map((m) => mathKey(m.src, m.display))).toEqual([
+      mathKey('pi', false),
+      mathKey('P', false),
+    ]);
+  });
+
+  it('renders every collected formula, leaving no missing span', () => {
+    const org = [
+      '#+TITLE: The $pi$ constant',
+      '#+CAPTION: tangent at $P$',
+      '#+BEGIN_SRC typst :results svg',
+      '#let a = 1',
+      '#+END_SRC',
+    ].join('\n');
+    const doc = parseOrg(org);
+    const collected = collectTypstSources(doc);
+    const math: TypstArtifacts['math'] = {};
+    for (const item of collected.math) {
+      math[mathKey(item.src, item.display)] = {
+        mathml: `<math><mi>${item.src}</mi></math>`,
+        svg: '',
+      };
+    }
+    const { root } = renderDocument(doc, () => true, {
+      math: 'mathml',
+      artifacts: artifacts({
+        math,
+        diagrams: { [diagramKey('#let a = 1')]: '<svg viewBox="0 0 1 1"/>' },
+      }),
+    });
+    expect(root.querySelectorAll('.lw-math-missing')).toHaveLength(0);
+    expect(root.querySelector('h1.lw-title math')).not.toBeNull();
+    expect(root.querySelector('figcaption.lw-caption math')).not.toBeNull();
+  });
+});
+
 describe('renderDocument static diagrams', () => {
   const org = [
     '#+BEGIN_SRC typst :results svg',

@@ -58,6 +58,9 @@ export function renderInline(
   }
 }
 
+/** Missing math keys already reported; pages share one console. */
+const missingMathKeys = new Set<string>();
+
 /** Text node, or one wrapper per math span looked up in the artifacts. */
 function appendText(
   text: string,
@@ -78,7 +81,12 @@ function appendText(
     wrapper.dataset.test = 'math';
     const art = typst.artifacts.math[mathKey(part.src, part.display)];
     if (art === undefined) {
-      // A missing artifact is a build bug; show the source instead of a hole.
+      // A missing artifact is a build bug; show the source instead of a hole
+      // and report it once so the console names the exact key.
+      if (!missingMathKeys.has(part.src)) {
+        missingMathKeys.add(part.src);
+        console.error(`typst math not pre-rendered (run pnpm build): ${part.src}`);
+      }
       wrapper.classList.add('lw-math-missing');
       wrapper.textContent = part.display ? `$$${part.src}$$` : `$${part.src}$`;
     } else {
@@ -118,7 +126,7 @@ export function renderDocument(
       case 'title': {
         const h = document.createElement('h1');
         h.className = 'lw-title';
-        h.textContent = node.text;
+        inline(node.text, h);
         root.appendChild(h);
         break;
       }
@@ -192,8 +200,12 @@ export function renderDocument(
           if (svg === undefined) {
             // A missing artifact is a build bug; keep reader-facing text
             // neutral and put the diagnostic where authors will see it.
+            const key = diagramKey(node.code);
+            const first = key.split('\n', 1)[0]!;
             console.error(
-              `typst diagram not pre-rendered (run pnpm build): ${diagramKey(node.code)}`,
+              `typst diagram not pre-rendered (run pnpm build): ` +
+                `${first.length > 80 ? `${first.slice(0, 77)}...` : first}` +
+                (key.length > first.length ? ' (block continues)' : ''),
             );
             const miss = document.createElement('pre');
             miss.className = 'lw-diagram-missing';

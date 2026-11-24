@@ -1,0 +1,18 @@
+{
+  "//": "Node-side build pipeline (apps/site/typst). Bundler resolution matches how Vite loads these files; DOM is in lib only for WebAssembly/Blob types that Node provides at runtime.",
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2024", "DOM"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["typst"]
+}
