@@ -402,7 +402,12 @@ export class BlockRuntime {
     try {
       if (this.loadedDoc !== this.source) {
         this.status('working…');
-        const load = await this.session.load(this.source);
+        // Same choice as run(): a supported named session continues its live
+        // state instead of reloading (which would wipe the group's state).
+        const load = this.shared?.supported === true
+            && this.session.resume !== undefined
+          ? await this.session.resume(this.source)
+          : await this.session.load(this.source);
         if (!load.ok) {
           this.loadedDoc = null;
           this.midFlight = false;

@@ -1002,6 +1002,8 @@ describe('mountSite: shared :session', () => {
     [...root.querySelectorAll<HTMLElement>('.lw-block-session')];
   const runButtons = (root: HTMLElement): HTMLButtonElement[] =>
     [...root.querySelectorAll<HTMLButtonElement>("[data-test='block-run']")];
+  const stepButtons = (root: HTMLElement): HTMLButtonElement[] =>
+    [...root.querySelectorAll<HTMLButtonElement>("[data-test='block-step']")];
 
   it('shares one session, resumes on every run, and labels the blocks', async () => {
     const { kernel, session } = fakeResumableKernel();
@@ -1025,6 +1027,20 @@ describe('mountSite: shared :session', () => {
     expect(labels).toHaveLength(2);
     expect(labels.map((el) => el.textContent)).toEqual([':session demo', ':session demo']);
     for (const el of labels) expect(el.classList.contains('lw-session-unsupported')).toBe(false);
+  });
+
+  it('steps a shared session via resume(), not load()', async () => {
+    const { kernel, session } = fakeResumableKernel();
+    const { root } = mountWith(kernel);
+    await flushAsync();
+
+    stepButtons(root)[0]!.click();
+    await flushAsync();
+
+    // Stepping a supported shared block must continue the live session;
+    // load() would wipe the group's state.
+    expect(session.resumedWith).toEqual(['x = 1']);
+    expect(session.loadedWith).toEqual([]);
   });
 
   it('falls back to isolated loads when the kernel has no resume()', async () => {
