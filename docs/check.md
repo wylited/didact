@@ -63,7 +63,10 @@ compared with the canned text after stripping trailing newlines:
 
 A block with no canned results is run-only: success is `ok` as long as the
 interpreter exits zero. Each block is independent — state does not carry
-between blocks.
+between blocks. Because the checker uses a fresh interpreter per block, a
+block with `:session <name>` (which shares state with earlier blocks in the
+browser) is reported as `skipped` rather than run; its output is not
+verified by `--run`.
 
 ## Exit codes
 

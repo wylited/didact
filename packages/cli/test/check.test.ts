@@ -123,6 +123,37 @@ describe('checkPages: --run', () => {
     expect(report.blocks[0]!.status).toBe('skipped');
   });
 
+  it('skips :session blocks and still runs independent ones', async () => {
+    const dir = pages({
+      'shared.org': [
+        '#+TITLE: Shared',
+        '#+BEGIN_SRC python :session demo',
+        'print("shared")',
+        '#+END_SRC',
+        '',
+        '#+BEGIN_SRC python',
+        'print("solo")',
+        '#+END_SRC',
+      ].join('\n'),
+    });
+
+    const ran: string[] = [];
+    const report = await checkPages({
+      pagesDir: dir,
+      run: true,
+      runner: async (block) => {
+        ran.push(block.code);
+        return { code: 0, stdout: 'solo\n', stderr: '' };
+      },
+    });
+
+    expect(report.blocks).toHaveLength(2);
+    expect(report.blocks[0]!.status).toBe('skipped');
+    expect(report.blocks[0]!.detail).toContain(':session demo');
+    expect(report.blocks[1]!.status).toBe('ok');
+    expect(ran).toEqual(['print("solo")']);
+  });
+
   it('accepts a matching RESULTS block', async () => {
     const dir = pages({
       'match.org': '#+TITLE: Match\n#+BEGIN_SRC python\nprint(1)\n#+END_SRC\n#+RESULTS:\n: 1\n',

@@ -59,6 +59,7 @@ interface ScannedBlock {
   line: number;
   lang: string;
   name: string | null;
+  session: string | null;
   code: string;
   canned: string | null;
 }
@@ -68,6 +69,7 @@ const RE_END_SRC = /^#\+END_SRC\s*$/i;
 const RE_RESULTS = /^#\+RESULTS:/i;
 const RE_OUTPUT_LINE = /^\s*:\s?(.*)$/;
 const RE_NAME = /^#\+NAME:\s*(\S+)/i;
+const RE_SESSION = /(?:^|\s):session\s+(\S+)/i;
 const TIMEOUT_MS = 30_000;
 const STDERR_EXCERPT = 2_000;
 
@@ -104,6 +106,9 @@ function scanBlocks(src: string): ScannedBlock[] {
 
     const line = i + 2; // first code line (1-based)
     const lang = beginMatch[1]!.toLowerCase();
+    const headerTail = stripped.slice(beginMatch[0].length);
+    const sessionMatch = RE_SESSION.exec(headerTail);
+    const session = sessionMatch === null ? null : sessionMatch[1]!;
     const name = pendingName;
     pendingName = null;
     const code: string[] = [];
@@ -132,7 +137,7 @@ function scanBlocks(src: string): ScannedBlock[] {
       i = j - 1; // continue after the consumed RESULTS block
     }
 
-    blocks.push({ line, lang, name, code: code.join('\n'), canned });
+    blocks.push({ line, lang, name, session, code: code.join('\n'), canned });
   }
 
   return blocks;
@@ -165,6 +170,14 @@ export async function checkPages(opts: CheckOptions): Promise<CheckReport> {
       const base = { file, page, line: block.line, lang: block.lang, name: block.name };
       if (runner === null) {
         blocks.push({ ...base, status: 'skipped' });
+        continue;
+      }
+      if (block.session !== null) {
+        blocks.push({
+          ...base,
+          status: 'skipped',
+          detail: `:session ${block.session} blocks are not verified by --run (shared state); run them in the browser`,
+        });
         continue;
       }
       try {
