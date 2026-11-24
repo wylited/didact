@@ -166,6 +166,12 @@ importers:
 
   .:
     devDependencies:
+      '@didact/cli':
+        specifier: workspace:*
+        version: link:packages/cli
+      '@types/node':
+        specifier: 26.6.5
+        version: 26.6.5
       eslint:
         specifier: ^10.13.0
         version: 10.13.0
@@ -239,6 +245,12 @@ importers:
       vite:
         specifier: 7.3.7
         version: 7.3.7(@types/node@26.6.5)
+
+  packages/cli:
+    dependencies:
+      '@didact/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/core:
     dependencies:
