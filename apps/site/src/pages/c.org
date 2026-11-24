@@ -1,7 +1,7 @@
 #+TITLE: C in the Browser
 #+SUBTITLE: Real clang compiling to wasm32-wasi right in this tab
 
-These blocks compile with actual clang (LLVM 22 via =@yowasp/clang=) and run in your browser's WebAssembly engine. The first run pulls down the ~105 MB toolchain once and caches it locally. After that, hitting Run compiles, links with =wasm-ld=, and executes the binary in the same tab.
+These blocks compile with actual clang (LLVM 22 via =@yowasp/clang=) and run in your browser's [[file:wasm.org][WebAssembly]] engine. The first run pulls down the ~105 MB toolchain once and caches it locally. After that, hitting Run compiles, links with =wasm-ld=, and executes the binary in the same tab.
 
 WebAssembly cannot talk to your OS directly, so a small WASI shim handles stdout/stderr, exit codes, random bytes, and wall-clock time. Anything else (files, sleep, spawning processes) stops with an explicit unsupported-call error. Keep an eye on the panel on the right: it shows the compiler output, exit code, binary size, compile time, and the first 256 bytes of the linked =.wasm= file. One catch: a tight infinite loop with no I/O will freeze the tab because raw WebAssembly cannot be preempted.
 

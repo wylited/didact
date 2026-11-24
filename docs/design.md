@@ -178,6 +178,15 @@ The org file must remain valid org-babel source in Emacs.
 - `#+RESULTS:` slot replaced by live output on run (DOM only).
 - Paragraphs with `*bold*` `/italic/` `=code=` `~verbatim~`; `- ` bullet
   lists; `| a | b |` tables; `# ` comments hidden.
+- Links: `[[file:<page>.org][label]]` (page), `[[file:<page>.org::*Heading][label]]`
+  and `[[file:<page>.org::#section-slug][label]]` (page + section),
+  `[[*Heading][label]]` / `[[#section-slug][label]]` (current page), and
+  `[[https://…][label]]` / `[[mailto:…][label]]` (external). A bare
+  `[[<page>.org::*Heading]]` works too, as org resolves a relative file
+  link. Page/section names are the site's hash routes, so `<page>.org` is
+  resolved by file name (a `PageSpec.file`), then file stem, then page
+  slug; an unknown page, heading, or section renders inert as a
+  `data-test="link-broken"` span instead of navigating.
 
 ## Pages
 
@@ -202,7 +211,8 @@ Per block: `block-run`, `block-step`, `block-reset`, `block-status`,
 trusted markup sections `html-panel`. Site: `nav` (left rail),
 `nav-item` (one per page link), `page` (rendered document root), `toc`
 (the rail's Contents section), `toc-item` (one per h2/h3 heading deep
-link; the active entry carries `lw-toc-active`). Vite `base: './'`.
+link; the active entry carries `lw-toc-active`), `link-broken` (an
+unresolved internal link, inert text). Vite `base: './'`.
 
 ## Non-goals
 

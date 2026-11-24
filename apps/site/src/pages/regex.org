@@ -5,7 +5,7 @@
 
 The first non-comment line is a pattern between slashes (=/a(b|c)+d/=, no flags), and each line after it is a test input (=#= lines are comments; inputs decode =\n=, =\t=, =\r=, =\f=, =\v=, and =\\=).
 
-Instead of backtracking like JS or Python's =re=, this engine compiles the regex into a Thompson NFA and tracks the full *set* of active states at every character. Open *The machine* to see the compiled graph, *NFA states* to see which states are currently alive, and *Input* to watch the scan cursor move.
+Instead of backtracking like [[file:javascript.org][JS]] or [[file:python.org][Python]]'s =re=, this engine compiles the regex into a Thompson NFA and tracks the full *set* of active states at every character. Open *The machine* to see the compiled graph, *NFA states* to see which states are currently alive, and *Input* to watch the scan cursor move.
 
 Literals match themselves, =.= matches anything except =\n=, character classes like =[a-z]= and =[^0-9]= take no escapes inside =[...]=, and =^=/=$= anchor to the start and end of the whole string.
 

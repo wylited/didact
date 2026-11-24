@@ -108,8 +108,12 @@ syscall
 ```
 
 Output replaces the block's `#+RESULTS:` slot when it runs. Lessons stay
-valid org-babel documents in Emacs; the full grammar (headings, `#+NAME:`,
-markup, lists, tables) is in [`docs/design.md`](docs/design.md).
+valid org-babel documents in Emacs. Cross-page prose uses org's file-link
+syntax, `[[file:python.org][Python]]` or a section of another lesson with
+`[[file:python.org::*Loops leave their variable in scope][loops]]`;
+`[[*Heading]]` links within the current page and `[[https://…]]` links out.
+The full grammar (headings, `#+NAME:`, markup, links, lists, tables) is in
+[`docs/design.md`](docs/design.md).
 
 ## Adding a kernel
 

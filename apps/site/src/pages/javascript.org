@@ -1,5 +1,5 @@
 #+TITLE: JavaScript, Stepped Live
-#+SUBTITLE: Coercion, closures, hoisting, and the event loop on a small steppable JS interpreter
+#+SUBTITLE: Coercion, [[file:lisp.org::*Closures][closures]], hoisting, and the event loop on a small steppable JS interpreter
 
 This page runs a hand-written JavaScript interpreter instead of your browser's engine, so you can single-step through statements and watch *Scopes*, *Call stack*, and *Event loop* update live. It supports =var=/=let=/=const=, functions, arrows, loops, =Math=, =console=, and basic array/string methods. Classes, =this=, and =async=/=await= are rejected up front with a line number.
 

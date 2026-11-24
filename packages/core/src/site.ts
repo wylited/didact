@@ -48,6 +48,7 @@
 import { BlockRuntime } from './block';
 import type { Kernel } from './kernel';
 import { parseOrg } from './org';
+import type { OrgDoc } from './org';
 import { renderDocument } from './render';
 import { PanelHost } from './panel';
 import { installTooltips } from './tooltip';
@@ -66,6 +67,10 @@ const NAV_SIDE_KEY = 'didact:nav-side';
 export interface PageSpec {
   title: string;
   orgSource: string;
+  /** Source file name (`python.org`), the name org links use
+   *  (`[[file:python.org]]`). Defaults to `<page-slug>.org`; without it,
+   *  `file:` links still resolve by page slug. */
+  file?: string;
 }
 
 export interface MountOptions {
@@ -278,6 +283,10 @@ export function mountSite(opts: MountOptions): SiteHandle {
   let active = -1;
   let blocks: BlockRuntime[] = [];
   const slugs = pageSlugs(pages);
+  // Parsed once: the rendered page and the link index read the same doc.
+  const parsedPages = pages.map((page) => parseOrg(page.orgSource));
+  const linkIndex = pages.map(
+    (page, i) => buildPageLinkIndex(page, parsedPages[i]!, slugs[i]!));
   const links = pages.map((page, i) => {
     const a = doc.createElement('a');
     a.className = 'lw-nav-link';
@@ -376,14 +385,9 @@ export function mountSite(opts: MountOptions): SiteHandle {
     disposeToc();
     const headings = Array.from(
       docRoot.querySelectorAll<HTMLElement>('h2.lw-heading, h3.lw-heading'));
-    const taken = new Set<string>();
+    const nextSlug = sectionSlugger();
     tocEntries = headings.map((heading, i) => {
-      let slug = kebab(heading.textContent ?? '');
-      if (slug === '') slug = `section-${i + 1}`;
-      let unique = slug;
-      let n = 2;
-      while (taken.has(unique)) unique = `${slug}-${n++}`;
-      taken.add(unique);
+      const unique = nextSlug(heading.textContent ?? '', i);
       heading.id = `lw-h-${unique}`;
       const link = doc.createElement('a');
       link.className = 'lw-toc-item';
@@ -412,8 +416,11 @@ export function mountSite(opts: MountOptions): SiteHandle {
     if (active !== -1) panel.detach(); // page switch: panel detaches
     active = index;
 
-    const parsed = parseOrg(pages[index]!.orgSource);
-    const rendered = renderDocument(parsed, (lang) => byLang.has(lang));
+    const rendered = renderDocument(
+      parsedPages[index]!,
+      (lang) => byLang.has(lang),
+      (target) => resolveLinkTarget(target, index, linkIndex, slugs),
+    );
     rendered.root.dataset.test = 'page';
     docPane.appendChild(rendered.root);
     buildToc(rendered.root, slugs[index]!);
@@ -521,6 +528,106 @@ export function mountSite(opts: MountOptions): SiteHandle {
       // the persisted side is deliberately kept: the next mount restores it
     },
   };
+}
+
+/** Heading-slug generator shared by the rendered contents and the link
+ *  index: kebab-case, deduplicated in document order, `section-N` when the
+ *  heading has no ASCII. */
+function sectionSlugger(): (text: string, index: number) => string {
+  const taken = new Set<string>();
+  return (text, index) => {
+    const base = kebab(text) || `section-${index + 1}`;
+    let unique = base;
+    for (let n = 2; taken.has(unique); n++) unique = `${base}-${n}`;
+    taken.add(unique);
+    return unique;
+  };
+}
+
+/** What a link can name on one page: its file, and its h2/h3 headings. */
+interface PageLinkIndex {
+  /** Source file name, lowercased (`python.org`). */
+  file: string;
+  slug: string;
+  /** Heading text and its kebab form → section slug. */
+  byHeading: Map<string, string>;
+  sections: Set<string>;
+}
+
+function buildPageLinkIndex(page: PageSpec, doc: OrgDoc, slug: string): PageLinkIndex {
+  const nextSlug = sectionSlugger();
+  const byHeading = new Map<string, string>();
+  const sections = new Set<string>();
+  let headingIndex = 0;
+  for (const node of doc) {
+    if (node.kind !== 'heading' || node.level > 2) continue;
+    const section = nextSlug(node.text, headingIndex++);
+    sections.add(section);
+    byHeading.set(node.text.trim().replace(/\s+/g, ' ').toLowerCase(), section);
+    byHeading.set(kebab(node.text), section);
+  }
+  return {
+    file: (page.file ?? `${slug}.org`).toLowerCase(),
+    slug,
+    byHeading,
+    sections,
+  };
+}
+
+/** Page named by a file link: exact file, file stem, or page slug. */
+function findPageIndex(ref: string, index: readonly PageLinkIndex[]): number {
+  const clean = ref.trim().replace(/^\.\//, '').toLowerCase();
+  if (clean === '') return -1;
+  const stem = clean.replace(/\.org$/, '');
+  for (let i = 0; i < index.length; i++) {
+    const page = index[i]!;
+    if (clean === page.file || stem === page.file.replace(/\.org$/, '')
+      || stem === page.slug) return i;
+  }
+  return -1;
+}
+
+/** Resolve one org link target for the page being rendered. Accepted
+ *  forms, all valid org:
+ *    file:python.org                another page
+ *    file:python.org::*Heading      a heading on another page
+ *    file:python.org::#section      a section slug on another page
+ *    *Heading / #section            the current page
+ *  A bare `python.org` or `python` also resolves (org treats a relative
+ *  file link the same way). Unknown page, heading, or section → null. */
+function resolveLinkTarget(
+  raw: string,
+  current: number,
+  index: readonly PageLinkIndex[],
+  slugs: readonly string[],
+): string | null {
+  let ref = raw.trim();
+  if (ref.toLowerCase().startsWith('file:')) ref = ref.slice(5);
+  const sep = ref.indexOf('::');
+  let filePart = sep === -1 ? ref : ref.slice(0, sep);
+  let sectionPart = sep === -1 ? '' : ref.slice(sep + 2);
+  if (sep === -1 && (ref.startsWith('*') || ref.startsWith('#'))) {
+    filePart = ''; // in-page link: [[*Heading]] or [[#slug]]
+    sectionPart = ref;
+  }
+  const page = filePart === '' ? current : findPageIndex(filePart, index);
+  if (page === -1) return null;
+  const target = index[page]!;
+  let section = '';
+  if (sectionPart !== '') {
+    if (sectionPart.startsWith('*')) {
+      const text = sectionPart.slice(1).trim();
+      section = target.byHeading.get(
+        text.trim().replace(/\s+/g, ' ').toLowerCase()) ?? '';
+      if (section === '') return null;
+    } else if (sectionPart.startsWith('#')) {
+      section = sectionPart.slice(1).trim();
+      if (!target.sections.has(section)) return null;
+    } else {
+      return null;
+    }
+  }
+  return `#/${slugs[page]}${section === '' ? '' : `/${section}`}`;
 }
 
 /** Kebab-case a title: lowercase, non-alphanumeric runs collapsed to a

@@ -5,7 +5,7 @@ Hit Run on any block and clang++ compiles it against =libc++= with this exact co
 
 =clang++ -std=c++20 -fno-exceptions lesson.cpp -o lesson.wasm=
 
-The bundled =libc++abi= is built without exception support, so =-fno-exceptions= is on. If you write =throw=, clang rejects it at compile time on that line. Everything else is real C++20 running on WebAssembly via a minimal WASI shim (stdout and exit codes work; filesystem calls fail cleanly). The right-hand panel shows the build log, exit status, binary size, compile time, and the first 256 bytes of the linked =.wasm= output.
+The bundled =libc++abi= is built without exception support, so =-fno-exceptions= is on. If you write =throw=, clang rejects it at compile time on that line. Everything else is real C++20 running on [[file:wasm.org][WebAssembly]] via a minimal WASI shim (stdout and exit codes work; filesystem calls fail cleanly). The right-hand panel shows the build log, exit status, binary size, compile time, and the first 256 bytes of the linked =.wasm= output.
 
 * RAII and destructor order
 

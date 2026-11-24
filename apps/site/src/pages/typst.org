@@ -1,7 +1,7 @@
 #+TITLE: Typst in the Browser
 #+SUBTITLE: Real Typst 0.15 compiled to WebAssembly, rendering vector pages locally
 
-Each block on this page compiles locally with the real Typst 0.15 compiler running as WebAssembly. Click Run and the right-hand panel renders the vector page along with page count, compile time, and any compiler warnings. Each block compiles independently with =width: auto, height: auto= so the page fits tightly around the output.
+Each block on this page compiles locally with the real Typst 0.15 compiler running as [[file:wasm.org][WebAssembly]]. Click Run and the right-hand panel renders the vector page along with page count, compile time, and any compiler warnings. Each block compiles independently with =width: auto, height: auto= so the page fits tightly around the output.
 
 * Math inline with prose
 

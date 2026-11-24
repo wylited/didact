@@ -813,3 +813,103 @@ describe('mountSite: navigator layout', () => {
     }
   });
 });
+
+describe('mountSite: document links', () => {
+  const LINK_PAGES: PageSpec[] = [
+    {
+      title: 'Home',
+      file: 'home.org',
+      orgSource: [
+        '#+TITLE: Home',
+        '',
+        'Read [[file:target.org][the target]] or [[file:target.org::*Second Part][part two]].',
+        'Also [[file:target.org::#first-part][by slug]], [[*Local Part][locally]], and [[#local-part][this section]].',
+        'Broken: [[file:nope.org][nowhere]] and [[file:target.org::*Missing][no heading]].',
+        '',
+        '* Local Part',
+        '',
+        'Local prose.',
+      ].join('\n'),
+    },
+    {
+      title: 'Target Page',
+      file: 'target.org',
+      orgSource:
+        '#+TITLE: Target Page\n\n* First Part\n\nFirst prose.\n\n* Second Part\n\nSecond prose.\n',
+    },
+  ];
+
+  it('resolves file, file+heading, slug, and in-page link forms to fragment hrefs', () => {
+    const { handle, root } = mount(LINK_PAGES);
+    handles.push(handle);
+    const links = [...root.querySelectorAll<HTMLAnchorElement>('a.lw-link')];
+    expect(links.map((a) => a.textContent)).toEqual([
+      'the target', 'part two', 'by slug', 'locally', 'this section',
+    ]);
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      '#/target-page',
+      '#/target-page/second-part',
+      '#/target-page/first-part',
+      '#/home/local-part',
+      '#/home/local-part',
+    ]);
+  });
+
+  it('an unknown page or heading renders inert, never an anchor to another page', () => {
+    const { handle, root } = mount(LINK_PAGES);
+    handles.push(handle);
+    const broken = [...root.querySelectorAll("[data-test='link-broken']")];
+    expect(broken.map((el) => el.textContent)).toEqual(['nowhere', 'no heading']);
+    // the five resolvable links are the only anchors in the prose
+    expect(root.querySelectorAll('a.lw-link')).toHaveLength(5);
+  });
+
+  it('clicking a cross-page link switches the page and names it in the hash', () => {
+    const { handle, root } = mount(LINK_PAGES);
+    handles.push(handle);
+    root.querySelectorAll<HTMLAnchorElement>('a.lw-link')[0]!.click();
+    hashChanged();
+    expect(location.hash).toBe('#/target-page');
+    expect(handle.activeIndex).toBe(1);
+    expect(root.querySelector("[data-test='page'] .lw-title")!.textContent)
+      .toBe('Target Page');
+  });
+
+  it('clicking a cross-page heading link lands on that section of the other page', () => {
+    const { handle, root } = mount(LINK_PAGES);
+    handles.push(handle);
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element): void {
+      scrolled.push(this);
+    };
+    try {
+      root.querySelectorAll<HTMLAnchorElement>('a.lw-link')[1]!.click(); // part two
+      hashChanged();
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+    expect(location.hash).toBe('#/target-page/second-part');
+    expect(handle.activeIndex).toBe(1);
+    expect(scrolled.map((el) => el.id)).toEqual(['lw-h-second-part']);
+    expect(root.querySelector('.lw-toc-active')!.textContent).toBe('Second Part');
+  });
+
+  it('a cross-page heading link still resolves when the page is named without file:', () => {
+    const { handle, root } = mount([
+      {
+        title: 'Start',
+        file: 'start.org',
+        orgSource: '#+TITLE: Start\n\nGo [[target.org::*Later][later]].\n',
+      },
+      {
+        title: 'Target',
+        file: 'target.org',
+        orgSource: '#+TITLE: Target\n\n* Later\n\nProse.\n',
+      },
+    ]);
+    handles.push(handle);
+    expect(root.querySelector<HTMLAnchorElement>('a.lw-link')!.getAttribute('href'))
+      .toBe('#/target/later');
+  });
+});

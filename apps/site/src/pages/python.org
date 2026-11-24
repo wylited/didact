@@ -1,7 +1,7 @@
 #+TITLE: Python in the Browser
 #+SUBTITLE: Real CPython 3.14 running locally on Pyodide
 
-Hit Run on any block and it executes on real CPython compiled to WebAssembly (Pyodide, ~13 MB fetched once and cached). Nothing leaves your browser.
+Hit Run on any block and it executes on real CPython compiled to [[file:wasm.org][WebAssembly]] (Pyodide, ~13 MB fetched once and cached). Nothing leaves your browser.
 
 Each block gets its own clean global namespace, so variables do not leak from one block to another, and re-running starts fresh. There is no single-stepping here; blocks run straight through and dump their globals (with =repr= and type) into the Variables panel on the right.
 

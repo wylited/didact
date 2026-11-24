@@ -2,6 +2,11 @@
 // point that site.ts fills with a BlockRuntime; read-only languages render
 // as a static listing. Results slots pair with the nearest preceding src
 // block (by #+NAME: when given).
+//
+// Links: `[[target][description]]` (description optional). http(s)/mailto
+// targets become real anchors; every other target goes through the
+// caller's LinkResolver, which returns a site fragment (or null for an
+// unresolved link, rendered inert and visibly broken).
 
 import type { OrgDoc, OrgNode } from './org';
 
@@ -39,7 +44,7 @@ export function renderInline(text: string, into: HTMLElement): void {
     const el = document.createElement(
       m[1] === '*' ? 'strong' : m[1] === '/' ? 'em' : 'code');
     el.classList.add('lw-inline');
-    renderInline(m[2]!, el); // markup nests: /see =la= here/
+    renderInline(m[2]!, el, resolveLink); // markup nests: /see =la= here/
     into.appendChild(el);
   }
 }

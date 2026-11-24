@@ -83,4 +83,4 @@ WebAssembly has no arbitrary jumps. Control flow is built from nested =block= an
 #+RESULTS:
 : *42
 
-This kernel implements the =i32= core (stack, locals, globals, calls, structured branches, linear memory, and traps for divide-by-zero, =unreachable=, and out-of-bounds memory). =i64=, =f32=, and =f64= fail cleanly at load time. The opcode bytes in *Instructions* are the real binary spec encodings emitted by clang in the C and C++ lessons.
+This kernel implements the =i32= core (stack, locals, globals, calls, structured branches, linear memory, and traps for divide-by-zero, =unreachable=, and out-of-bounds memory). =i64=, =f32=, and =f64= fail cleanly at load time. The opcode bytes in *Instructions* are the real binary spec encodings emitted by clang in the [[file:c.org][C]] and [[file:cpp.org][C++]] lessons.

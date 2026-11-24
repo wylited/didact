@@ -43,6 +43,7 @@ for (const name of PAGE_ORDER) {
   pages.push({
     title: orgSource.match(/^#\+TITLE:\s*(.+)$/m)?.[1]?.trim() || name,
     orgSource,
+    file: `${name}.org`,
   });
 }
 for (const path of Object.keys(sources)) {

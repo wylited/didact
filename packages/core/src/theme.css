@@ -524,6 +524,21 @@
    double-caps; em for the spacing. */
 .lw-para { margin: 0 0 1em; max-width: calc(var(--lw-doc-measure) - 1ch); }
 
+/* prose links: ink, underlined with the muted rule; an unresolved link
+   is inert text (never an anchor) struck through in error ink */
+.lw-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--lw-gray);
+  text-underline-offset: 0.16em;
+}
+.lw-link:hover { text-decoration-color: var(--lw-ink); }
+.lw-link-broken {
+  color: var(--lw-error);
+  text-decoration: line-through;
+  cursor: help;
+}
+
 code.lw-inline {
   font-family: var(--lw-mono);
   font-size: 0.9em;
