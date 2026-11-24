@@ -19,6 +19,51 @@ describe('parseOrg: directives', () => {
     const doc = parseOrg('# a hidden comment\nvisible\n');
     expect(doc).toEqual([{ kind: 'para', text: 'visible' }]);
   });
+
+  it('drops a #+BEGIN_COMMENT block between two paragraphs', () => {
+    const src = 'before\n#+BEGIN_COMMENT\nhidden words\nmore hidden\n#+END_COMMENT\nafter\n';
+    expect(parseOrg(src)).toEqual([
+      { kind: 'para', text: 'before' },
+      { kind: 'para', text: 'after' },
+    ]);
+  });
+
+  it('accepts lowercase comment markers', () => {
+    const src = 'before\n#+begin_comment\nhidden\n#+end_comment\nafter\n';
+    expect(parseOrg(src)).toEqual([
+      { kind: 'para', text: 'before' },
+      { kind: 'para', text: 'after' },
+    ]);
+  });
+
+  it('skips src-block text inside a comment block as plain hidden lines', () => {
+    const src = [
+      'before',
+      '#+BEGIN_COMMENT',
+      '#+BEGIN_SRC asm',
+      'ret',
+      '#+END_SRC',
+      '#+END_COMMENT',
+      'after',
+    ].join('\n');
+    expect(parseOrg(src)).toEqual([
+      { kind: 'para', text: 'before' },
+      { kind: 'para', text: 'after' },
+    ]);
+  });
+
+  it('an unterminated comment block swallows the rest of the document', () => {
+    const src = 'before\n#+BEGIN_COMMENT\nhidden\n\n* not a heading\nmore\n';
+    expect(parseOrg(src)).toEqual([{ kind: 'para', text: 'before' }]);
+  });
+
+  it('parses text after #+END_COMMENT', () => {
+    const src = '#+BEGIN_COMMENT\nhidden\n#+END_COMMENT\nafter\n\n* Heading\n';
+    expect(parseOrg(src)).toEqual([
+      { kind: 'para', text: 'after' },
+      { kind: 'heading', level: 1, text: 'Heading' },
+    ]);
+  });
 });
 
 describe('parseOrg: headings and prose', () => {
@@ -80,6 +125,7 @@ describe('parseOrg: src blocks', () => {
         kind: 'src',
         lang: 'asm',
         name: 'add',
+        caption: null,
         headers: '-n',
         code: '  mov rax, 1\n\n  ret',
       },
@@ -89,7 +135,14 @@ describe('parseOrg: src blocks', () => {
   it('lowercases the language and defaults name to null without #+NAME', () => {
     const src = '#+BEGIN_SRC ASM\nret\n#+END_SRC\n';
     expect(parseOrg(src)).toEqual([
-      { kind: 'src', lang: 'asm', name: null, headers: '', code: 'ret' },
+      {
+        kind: 'src',
+        lang: 'asm',
+        name: null,
+        caption: null,
+        headers: '',
+        code: 'ret',
+      },
     ]);
   });
 });
@@ -110,8 +163,8 @@ describe('parseOrg: #+RESULTS pairing', () => {
       ': ok',
     ].join('\n');
     expect(parseOrg(src)).toEqual([
-      { kind: 'src', lang: 'asm', name: 'a', headers: '', code: 'ret' },
-      { kind: 'src', lang: 'asm', name: 'b', headers: '', code: 'ret' },
+      { kind: 'src', lang: 'asm', name: 'a', caption: null, headers: '', code: 'ret' },
+      { kind: 'src', lang: 'asm', name: 'b', caption: null, headers: '', code: 'ret' },
       { kind: 'results', name: 'b', canned: '42\nok' },
     ]);
   });
@@ -267,6 +320,14 @@ describe('parseOrgChecked: diagnostics', () => {
       '- bullet one',
       '| a | b |',
       'A [[https://example.com][link]] and [[file:page.org][page]].',
+      '#+CAPTION: A $x$ caption',
+      '#+BEGIN_COMMENT',
+      '#+FOO: hidden directives do not warn',
+      '1. hidden numbered list',
+      '#+END_COMMENT',
+      '#+BEGIN_SRC typst',
+      'x',
+      '#+END_SRC',
     ].join('\n');
     expect(parseOrgChecked(src).diagnostics).toEqual([]);
   });

@@ -20,3 +20,19 @@ export { installTooltips } from './tooltip';
 export type { Disposer } from './tooltip';
 export { mountSite } from './site';
 export type { MountOptions, SiteHandle, PageSpec } from './site';
+export {
+  collectTypstSources,
+  diagramKey,
+  isTypstDiagram,
+  mathKey,
+  normalizeTypst,
+  splitTypstMath,
+} from './typst-source';
+export type {
+  TypstArtifacts,
+  TypstMathArtifact,
+  TypstMathSource,
+  TypstRenderOptions,
+  TypstSources,
+  TypstTextPart,
+} from './typst-source';

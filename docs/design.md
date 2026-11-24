@@ -175,8 +175,13 @@ The org file must remain valid org-babel source in Emacs.
 - `*`… headings (depth = stars); `#+TITLE:`/`#+SUBTITLE:` page header.
 - `#+NAME: <id>` names the next block (blank lines, comments, and other
   directives in between do not drop the promise; only another `#+NAME:`
-  or EOF does).
-- `#+BEGIN_SRC <lang> [headers]` / `#+END_SRC`; babel headers parsed+ignored,
+  or EOF does); `#+CAPTION: <text>` captions the next block's figure
+  (rendered as `<figcaption>`, which also names it for assistive
+  technology).
+- `#+BEGIN_COMMENT` … `#+END_COMMENT` hides every line in between,
+  case-insensitively.
+- `#+BEGIN_SRC <lang> [headers]` / `#+END_SRC`; babel headers are parsed
+  (they distinguish the two Typst layers, below) and otherwise ignored,
   except `:session <name>` (below).
 - `:session <name>` header: blocks with the same kernel and name on one
   rendered page share a single kernel session, so definitions and data
@@ -186,6 +191,13 @@ The org file must remain valid org-babel source in Emacs.
   a kernel without it still runs its blocks, isolated, with a visible
   unsupported badge.
 - `#+RESULTS:` slot replaced by live output on run (DOM only).
+- `$…$` inline Typst math and `$$…$$` display math are rendered at build
+  time (MathML by default, SVG fallback). `=code=` and `~verbatim~` are
+  literal, so `=$v0=` is not math; `\$` is a dollar.
+- `#+BEGIN_SRC typst :results svg` (or `:file x.svg`) is a **static
+  diagram**: the build compiles it once and inlines the SVG. A `typst`
+  block without that header is the executable in-browser kernel. Same
+  language, two lifecycles; they never share a session.
 - Unsupported constructs (unknown `#+` directives, stray `#+END_SRC`,
   unterminated src blocks, a `#+NAME:` promise lost to another `#+NAME:` or
   EOF, numbered lists, blockquotes,

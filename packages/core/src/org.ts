@@ -9,7 +9,14 @@ export type OrgNode =
   | { kind: 'para'; text: string }
   | { kind: 'list'; items: string[] }
   | { kind: 'table'; head: string[]; rows: string[][] }
-  | { kind: 'src'; lang: string; name: string | null; headers: string; code: string }
+  | {
+      kind: 'src';
+      lang: string;
+      name: string | null;
+      caption: string | null;
+      headers: string;
+      code: string;
+    }
   | { kind: 'results'; name: string | null; canned: string };
 
 /** A parsed lesson document (flat node list, document order). */
@@ -53,6 +60,7 @@ function parseDoc(src: string): OrgDoc {
   const lines = src.split(/\r?\n/);
   let i = 0;
   let pendingName: string | null = null;
+  let pendingCaption: string | null = null;
 
   while (i < lines.length) {
     const line = lines[i]!;
@@ -77,6 +85,20 @@ function parseDoc(src: string): OrgDoc {
           pendingName = body.split(/\s+/)[0] ?? null;
           i++;
           continue;
+        // `#+CAPTION:` names the next src block's figure; org's convention is
+        // to put it immediately before the block.
+        case 'Caption':
+          pendingCaption = body === '' ? null : body;
+          i++;
+          continue;
+        case 'BeginComment': {
+          // org block comment: hide everything up to (and including) the
+          // closing marker. No nesting; unterminated blocks run to EOF.
+          i++;
+          while (i < lines.length && lines[i]!.trim().toUpperCase() !== '#+END_COMMENT') i++;
+          if (i < lines.length) i++; // consume #+END_COMMENT
+          continue;
+        }
         case 'BeginSrc': {
           const parts = body.split(/\s+/).filter(Boolean);
           const lang = (parts[0] ?? '').toLowerCase();
@@ -92,10 +114,12 @@ function parseDoc(src: string): OrgDoc {
             kind: 'src',
             lang: lang || 'text',
             name: pendingName,
+            caption: pendingCaption,
             headers, // babel headers parsed + ignored
             code: code.join('\n'),
           });
           pendingName = null;
+          pendingCaption = null;
           continue;
         }
         case 'Results': {
@@ -231,7 +255,15 @@ function collectDiagnostics(src: string): OrgDiagnostic[] {
           seenTitle = true;
           break;
         case 'Subtitle':
+        case 'Caption':
           break;
+        case 'BeginComment': {
+          // Hidden comments are not rendered, so their body must not
+          // produce diagnostics either.
+          i++;
+          while (i < lines.length && lines[i]!.trim().toUpperCase() !== '#+END_COMMENT') i++;
+          break;
+        }
         case 'Name':
           flushPendingName();
           pendingName = { name: body.split(/\s+/)[0] ?? '', line: lineNo };

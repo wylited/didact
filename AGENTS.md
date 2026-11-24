@@ -2,7 +2,8 @@
 
 pnpm monorepo. TypeScript strict, no UI framework, Vite only at the app layer.
 Packages ship **source TS** (`main: src/index.ts`); only `apps/site` builds —
-one `tsc --noEmit` + `vite build` covers everything. No per-package build step.
+one DOM `tsc --noEmit`, one Node `tsc -p apps/site/tsconfig.typst.json` for the
+build pipeline, and `vite build` cover everything. No per-package build step.
 
 ## Repo map
 
@@ -96,7 +97,7 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
 Run from the repo root before handing off:
 
 ```
-pnpm typecheck   # apps/site tsc --noEmit, covers all packages
+pnpm typecheck   # apps/site tsc --noEmit (DOM) + tsconfig.typst.json (Node)
 pnpm build       # apps/site production build
 pnpm test        # vitest run (packages/*/test)
 pnpm lint        # eslint .

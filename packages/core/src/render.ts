@@ -9,6 +9,13 @@
 // unresolved link, rendered inert and visibly broken).
 
 import type { OrgDoc, OrgNode } from './org';
+import {
+  diagramKey,
+  isTypstDiagram,
+  mathKey,
+  splitTypstMath,
+  type TypstRenderOptions,
+} from './typst-source';
 
 export interface RenderedBlock {
   /** 1-based index among executable blocks (for "Block N"). */
@@ -30,6 +37,13 @@ export interface RenderedDoc {
  *  unresolved. */
 export type LinkResolver = (target: string) => string | null;
 
+/** Everything the renderer needs from its host. Kept as one object because
+ *  the parameters are orthogonal and both are usually absent. */
+export interface RenderOptions {
+  resolveLink?: LinkResolver;
+  typst?: TypstRenderOptions;
+}
+
 // Inline markup: *bold* /italic/ =code= ~verbatim~. Org emphasis border
 // rules: an opening marker must not follow a word character or `/` (so
 // `add/addu/sub` and `src/core/main.ts` stay plain), and a closing marker
@@ -42,6 +56,57 @@ const RE_INLINE =
 const RE_LINK = /\[\[([^\[\]]+)\](?:\[([^\]]*)\])?\]/;
 const RE_EXTERNAL = /^(?:https?:\/\/|mailto:)/i;
 
+/** Missing math keys already reported; pages share one console. */
+const missingMathKeys = new Set<string>();
+
+/** Text node, or one wrapper per math span looked up in the artifacts. */
+function appendText(
+  text: string,
+  into: HTMLElement,
+  typst?: TypstRenderOptions,
+): void {
+  if (typst === undefined) {
+    into.appendChild(document.createTextNode(text));
+    return;
+  }
+  for (const part of splitTypstMath(text)) {
+    if (part.kind === 'text') {
+      into.appendChild(document.createTextNode(part.text));
+      continue;
+    }
+    const wrapper = document.createElement('span');
+    wrapper.className = part.display ? 'lw-math lw-math-block' : 'lw-math';
+    wrapper.dataset.test = 'math';
+    const art = typst.artifacts.math[mathKey(part.src, part.display)];
+    if (art === undefined) {
+      // A missing artifact is a build bug; show the source instead of a hole
+      // and report it once so the console names the exact key.
+      if (!missingMathKeys.has(part.src)) {
+        missingMathKeys.add(part.src);
+        console.error(`typst math not pre-rendered (run pnpm build): ${part.src}`);
+      }
+      wrapper.classList.add('lw-math-missing');
+      wrapper.textContent = part.display ? `$$${part.src}$$` : `$${part.src}$`;
+    } else {
+      // Explicit mode wins; otherwise MathML where the browser has it and
+      // the pixel-exact SVG fallback where it does not (older engines).
+      const svg = typst.math === 'svg'
+        || (typst.math !== 'mathml' && typeof MathMLElement === 'undefined');
+      // Build-time engine output; same trusted-markup rule as panels.
+      wrapper.innerHTML = svg ? art.svg : art.mathml;
+      // MathML has no source annotation from Typst, and the SVG fallback is
+      // an anonymous graphic; both need the formula text as their name.
+      if (svg) {
+        wrapper.setAttribute('role', 'img');
+        wrapper.setAttribute('aria-label', part.src);
+      } else {
+        wrapper.querySelector('math')?.setAttribute('alttext', part.src);
+      }
+    }
+    into.appendChild(wrapper);
+  }
+}
+
 /** Render one link. External targets are real anchors; an internal
  *  target the resolver does not know stays text, marked broken — it must
  *  never navigate somewhere unrelated. */
@@ -50,6 +115,7 @@ function renderLink(
   label: string,
   into: HTMLElement,
   resolveLink: LinkResolver | undefined,
+  typst: TypstRenderOptions | undefined,
 ): void {
   const external = RE_EXTERNAL.test(target);
   const href = external ? target : resolveLink?.(target) ?? null;
@@ -58,7 +124,7 @@ function renderLink(
     broken.className = 'lw-link lw-link-broken';
     broken.dataset.test = 'link-broken';
     broken.title = `Unresolved link: ${target}`;
-    renderInline(label, broken, resolveLink);
+    renderInline(label, broken, { resolveLink, typst });
     into.appendChild(broken);
     return;
   }
@@ -70,7 +136,7 @@ function renderLink(
     a.rel = 'noopener noreferrer';
     a.classList.add('lw-link-external');
   }
-  renderInline(label, a, resolveLink); // =code=, *bold* inside the label
+  renderInline(label, a, { resolveLink, typst }); // =code=, *bold* inside the label
   into.appendChild(a);
 }
 
@@ -80,18 +146,25 @@ function renderEmphasis(
   text: string,
   into: HTMLElement,
   resolveLink: LinkResolver | undefined,
+  typst: TypstRenderOptions | undefined,
 ): void {
   for (const part of text.split(RE_INLINE)) {
     if (part === '') continue;
     const m = /^(\*|\/|=|~)([\s\S]+)\1$/.exec(part);
     if (m === null) {
-      into.appendChild(document.createTextNode(part));
+      appendText(part, into, typst);
       continue;
     }
     const el = document.createElement(
       m[1] === '*' ? 'strong' : m[1] === '/' ? 'em' : 'code');
     el.classList.add('lw-inline');
-    renderInline(m[2]!, el, resolveLink); // markup nests: /see =la= here/
+    // Emphasis nests (/see =la= here/); code and verbatim are literal, so a
+    // `$` inside =…= must never become math.
+    if (m[1] === '*' || m[1] === '/') {
+      renderInline(m[2]!, el, { resolveLink, typst });
+    } else {
+      el.textContent = m[2]!;
+    }
     into.appendChild(el);
   }
 }
@@ -100,27 +173,37 @@ function renderEmphasis(
 export function renderInline(
   text: string,
   into: HTMLElement,
-  resolveLink?: LinkResolver,
+  options: RenderOptions = {},
 ): void {
+  const { resolveLink, typst } = options;
   let rest = text;
   let m: RegExpExecArray | null;
   while ((m = RE_LINK.exec(rest)) !== null) {
-    renderEmphasis(rest.slice(0, m.index), into, resolveLink);
+    renderEmphasis(rest.slice(0, m.index), into, resolveLink, typst);
     const target = m[1]!;
     // org's default description hides the file: scheme
-    renderLink(target, m[2] ?? target.replace(/^file:/i, ''), into, resolveLink);
+    renderLink(
+      target,
+      m[2] ?? target.replace(/^file:/i, ''),
+      into,
+      resolveLink,
+      typst,
+    );
     rest = rest.slice(m.index + m[0].length);
   }
-  renderEmphasis(rest, into, resolveLink);
+  renderEmphasis(rest, into, resolveLink, typst);
 }
 
 export function renderDocument(
   doc: OrgDoc,
   isExecutable: (lang: string) => boolean,
-  resolveLink?: LinkResolver,
+  options: RenderOptions = {},
 ): RenderedDoc {
+  const { typst } = options;
   const root = document.createElement('article');
   root.className = 'lw-doc';
+  const inline = (text: string, into: HTMLElement): void =>
+    renderInline(text, into, options);
   const blocks: RenderedBlock[] = [];
   let execIndex = 0;
   let lastBlock: RenderedBlock | null = null;
@@ -129,21 +212,21 @@ export function renderDocument(
       case 'title': {
         const h = document.createElement('h1');
         h.className = 'lw-title';
-        h.textContent = node.text;
+        inline(node.text, h);
         root.appendChild(h);
         break;
       }
       case 'subtitle': {
         const p = document.createElement('p');
         p.className = 'lw-subtitle';
-        renderInline(node.text, p, resolveLink);
+        inline(node.text, p);
         root.appendChild(p);
         break;
       }
       case 'para': {
         const p = document.createElement('p');
         p.className = 'lw-para';
-        renderInline(node.text, p, resolveLink);
+        inline(node.text, p);
         root.appendChild(p);
         break;
       }
@@ -151,7 +234,7 @@ export function renderDocument(
         const h = document.createElement(
           node.level <= 1 ? 'h2' : node.level === 2 ? 'h3' : 'h4');
         h.className = 'lw-heading';
-        renderInline(node.text, h, resolveLink);
+        inline(node.text, h);
         root.appendChild(h);
         break;
       }
@@ -160,7 +243,7 @@ export function renderDocument(
         ul.className = 'lw-list';
         for (const item of node.items) {
           const li = document.createElement('li');
-          renderInline(item, li, resolveLink);
+          inline(item, li);
           ul.appendChild(li);
         }
         root.appendChild(ul);
@@ -174,7 +257,7 @@ export function renderDocument(
           const tr = document.createElement('tr');
           for (const cell of node.head) {
             const th = document.createElement('th');
-            renderInline(cell, th, resolveLink);
+            inline(cell, th);
             tr.appendChild(th);
           }
           thead.appendChild(tr);
@@ -185,7 +268,7 @@ export function renderDocument(
           const tr = document.createElement('tr');
           for (const cell of row) {
             const td = document.createElement('td');
-            renderInline(cell, td, resolveLink);
+            inline(cell, td);
             tr.appendChild(td);
           }
           tbody.appendChild(tr);
@@ -195,6 +278,38 @@ export function renderDocument(
         break;
       }
       case 'src': {
+        if (typst !== undefined && isTypstDiagram(node)) {
+          // Static diagram: build-time SVG, never an editor or a kernel.
+          const figure = document.createElement('figure');
+          figure.className = 'lw-figure lw-diagram';
+          const svg = typst.artifacts.diagrams[diagramKey(node.code)];
+          if (svg === undefined) {
+            // A missing artifact is a build bug; keep reader-facing text
+            // neutral and put the diagnostic where authors will see it.
+            const key = diagramKey(node.code);
+            const first = key.split('\n', 1)[0]!;
+            console.error(
+              `typst diagram not pre-rendered (run pnpm build): ` +
+                `${first.length > 80 ? `${first.slice(0, 77)}...` : first}` +
+                (key.length > first.length ? ' (block continues)' : ''),
+            );
+            const miss = document.createElement('pre');
+            miss.className = 'lw-diagram-missing';
+            miss.textContent = 'Figure unavailable.';
+            figure.appendChild(miss);
+          } else {
+            figure.innerHTML = svg; // build-time engine output (trusted)
+          }
+          if (node.caption !== null) {
+            const caption = document.createElement('figcaption');
+            caption.className = 'lw-caption';
+            inline(node.caption, caption);
+            figure.appendChild(caption);
+          }
+          root.appendChild(figure);
+          lastBlock = null;
+          break;
+        }
         const figure = document.createElement('figure');
         figure.className = 'lw-src';
         if (isExecutable(node.lang)) {

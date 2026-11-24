@@ -53,6 +53,7 @@ import type { OrgDiagnostic, OrgDoc } from './org';
 import { renderDocument } from './render';
 import { PanelHost } from './panel';
 import { installTooltips } from './tooltip';
+import type { TypstRenderOptions } from './typst-source';
 import './theme.css';
 
 /** Navigator side: the grid column the navigation rail occupies. */
@@ -90,6 +91,10 @@ export interface MountOptions {
   /** Initial navigator view (default 'contents'). Not persisted: the
    *  example site opens on the page list. */
   navView?: NavView;
+  /** Build-time Typst artifacts for prose math and static diagrams.
+   *  Absent → `$…$` stays literal and a `:results svg` block becomes an
+   *  ordinary kernel block. */
+  typst?: TypstRenderOptions;
 }
 
 export interface SiteHandle {
@@ -144,6 +149,26 @@ export function mountSite(opts: MountOptions): SiteHandle {
 
   root.classList.add('lw-site');
   if (opts.fonts === false) root.classList.add('lw-no-fonts');
+
+  // Typst emits its MathML layout rules with each HTML compile; the build
+  // pipeline keeps one copy, injected once per mounted document.
+  const mathCss = opts.typst?.artifacts.mathCss ?? '';
+  let mathStyle: HTMLStyleElement | null = null;
+  if (mathCss !== '') {
+    const existing = doc.head?.querySelector<HTMLStyleElement>(
+      'style[data-test="typst-math-css"]',
+    );
+    if (existing != null) {
+      existing.textContent = mathCss;
+      mathStyle = existing;
+    } else {
+      const style = doc.createElement('style');
+      style.dataset.test = 'typst-math-css';
+      style.textContent = mathCss;
+      (doc.head ?? root).appendChild(style);
+      mathStyle = style;
+    }
+  }
 
   // ---- navigator rail: ONE list at a time (contents | pages) ----
   const navSideDefault: NavSide = opts.navSide === 'right' ? 'right' : 'left';
@@ -467,7 +492,10 @@ export function mountSite(opts: MountOptions): SiteHandle {
     const rendered = renderDocument(
       parsed.doc,
       (lang) => byLang.has(lang),
-      (target) => resolveLinkTarget(target, index, linkIndex, slugs),
+      {
+        resolveLink: (target) => resolveLinkTarget(target, index, linkIndex, slugs),
+        typst: opts.typst,
+      },
     );
     rendered.root.dataset.test = 'page';
     if (parsed.diagnostics.length > 0) {
@@ -606,6 +634,8 @@ export function mountSite(opts: MountOptions): SiteHandle {
       blocks = [];
       disposePageSessions();
       disposeToc();
+      mathStyle?.remove();
+      mathStyle = null;
       root.replaceChildren();
       root.classList.remove(
         'lw-site', 'lw-no-fonts', 'lw-panel-attached', 'lw-nav-left', 'lw-nav-right');

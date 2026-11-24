@@ -6,30 +6,32 @@
   "description": "Didact site: composes @didact/core with sixteen kernels (x86-64, RISC-V, MIPS, C, C++, WebAssembly, Python, SQL, MATLAB, Lua, JavaScript, regex, Lisp, Emacs Lisp, Prolog, Typst)",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsc -p tsconfig.typst.json && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@didact/core": "workspace:*",
     "@didact/kernel-asm64": "workspace:*",
-    "@didact/kernel-riscv": "workspace:*",
-    "@didact/kernel-mips": "workspace:*",
     "@didact/kernel-c": "workspace:*",
     "@didact/kernel-cpp": "workspace:*",
-    "@didact/kernel-python": "workspace:*",
     "@didact/kernel-javascript": "workspace:*",
     "@didact/kernel-lisp": "workspace:*",
     "@didact/kernel-lua": "workspace:*",
     "@didact/kernel-matlab": "workspace:*",
+    "@didact/kernel-mips": "workspace:*",
     "@didact/kernel-prolog": "workspace:*",
+    "@didact/kernel-python": "workspace:*",
     "@didact/kernel-regex": "workspace:*",
+    "@didact/kernel-riscv": "workspace:*",
     "@didact/kernel-sql": "workspace:*",
     "@didact/kernel-wasm": "workspace:*",
     "@didact/kernel-typst": "workspace:*",
     "@didact/kernel-elisp": "workspace:*"
   },
   "devDependencies": {
+    "@typst-wasm/fonts": "1.0.0",
     "typescript": "5.9.3",
+    "typst-wasm": "1.0.0",
     "vite": "7.3.7"
   }
 }

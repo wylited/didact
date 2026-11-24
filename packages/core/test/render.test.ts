@@ -147,7 +147,7 @@ describe('renderDocument: links', () => {
 
   it('renders an internal link through the resolver as a fragment anchor', () => {
     const { root } = renderDocument(
-      parseOrg('See [[file:other.org][the other page]].'), () => true, resolve);
+      parseOrg('See [[file:other.org][the other page]].'), () => true, { resolveLink: resolve });
     const a = root.querySelector('a.lw-link')!;
     expect(a.textContent).toBe('the other page');
     expect(a.getAttribute('href')).toBe('#/other-page');
@@ -156,7 +156,7 @@ describe('renderDocument: links', () => {
 
   it('renders a page + heading link and the inline markup inside its description', () => {
     const { root } = renderDocument(
-      parseOrg('Read [[file:other.org::*Loops][the =while= loop]] next.'), () => true, resolve);
+      parseOrg('Read [[file:other.org::*Loops][the =while= loop]] next.'), () => true, { resolveLink: resolve });
     const a = root.querySelector('a.lw-link')!;
     expect(a.getAttribute('href')).toBe('#/other-page/loops');
     expect(a.querySelector('code.lw-inline')!.textContent).toBe('while');
@@ -165,7 +165,7 @@ describe('renderDocument: links', () => {
 
   it('falls back to the target text with the file: scheme hidden', () => {
     const { root } = renderDocument(
-      parseOrg('See [[file:other.org]] and [[*Local]].'), () => true, resolve);
+      parseOrg('See [[file:other.org]] and [[*Local]].'), () => true, { resolveLink: resolve });
     const anchors = [...root.querySelectorAll('a.lw-link')];
     expect(anchors.map((a) => a.textContent)).toEqual(['other.org', '*Local']);
     expect(anchors.map((a) => a.getAttribute('href')))
@@ -174,7 +174,7 @@ describe('renderDocument: links', () => {
 
   it('renders emphasis inside a link label', () => {
     const { root } = renderDocument(
-      parseOrg('Go [[*Local][=here= now]].'), () => true, resolve);
+      parseOrg('Go [[*Local][=here= now]].'), () => true, { resolveLink: resolve });
     const a = root.querySelector('a.lw-link')!;
     expect(a.textContent).toBe('here now');
     expect(a.querySelector('code.lw-inline')!.textContent).toBe('here');
@@ -182,7 +182,7 @@ describe('renderDocument: links', () => {
 
   it('external http(s) links open in a new tab with a safe rel', () => {
     const { root } = renderDocument(
-      parseOrg('Read [[https://example.org/a][the docs]].'), () => true, resolve);
+      parseOrg('Read [[https://example.org/a][the docs]].'), () => true, { resolveLink: resolve });
     const a = root.querySelector('a.lw-link')!;
     expect(a.getAttribute('href')).toBe('https://example.org/a');
     expect(a.getAttribute('target')).toBe('_blank');
@@ -192,7 +192,7 @@ describe('renderDocument: links', () => {
 
   it('mailto: works without a new tab', () => {
     const { root } = renderDocument(
-      parseOrg('Mail [[mailto:a@b.c][us]].'), () => true, resolve);
+      parseOrg('Mail [[mailto:a@b.c][us]].'), () => true, { resolveLink: resolve });
     const a = root.querySelector('a.lw-link')!;
     expect(a.getAttribute('href')).toBe('mailto:a@b.c');
     expect(a.getAttribute('target')).toBeNull();
@@ -200,7 +200,7 @@ describe('renderDocument: links', () => {
 
   it('an unresolved internal link is inert, never an anchor that navigates', () => {
     const { root } = renderDocument(
-      parseOrg('Go [[file:missing.org][nowhere]].'), () => true, resolve);
+      parseOrg('Go [[file:missing.org][nowhere]].'), () => true, { resolveLink: resolve });
     expect(root.querySelector('a')).toBeNull();
     const broken = root.querySelector("[data-test='link-broken']")!;
     expect(broken.textContent).toBe('nowhere');

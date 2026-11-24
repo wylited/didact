@@ -92,6 +92,53 @@ never a host-supplied named session.
   console.
 - Exports `asm64Kernel: Kernel` (id `'asm'`, editorSyntax `'asm-intel'`).
 
+## Typst content layer (build time)
+
+Website content never compiles in the browser. Two layers share the `typst`
+language name but no session, engine, or code path:
+
+| layer | code | runs |
+|---|---|---|
+| content pipeline | `apps/site/typst/*.ts` (Node only) | once at build/dev, emits `virtual:didact-typst` |
+| typst kernel | `packages/kernel-typst` | per block, on Run, in the page |
+
+Header rule (`isTypstDiagram` in `packages/core/src/typst-source.ts`): a
+`#+BEGIN_SRC typst` block with `:results svg` or `:file <path>` is a static
+diagram; a plain `typst` block stays a kernel block.
+`apps/site/src/main.ts` imports the generated artifacts and passes them as
+`mountSite({ typst: { artifacts } })`.
+
+- Contract: `TypstArtifacts { math, diagrams, mathCss }`. Math is keyed by
+  `mathKey` = `I:`/`D:` + normalized source; diagrams by `diagramKey` =
+  normalized block source. Normalization is `trim` only in `normalizeTypst`
+  (inner whitespace is significant); the pipeline and renderer must use the
+  same function.
+- Pipeline: `apps/site/typst/prerender.ts` parses pages with the core org
+  parser, `collectTypstSources` dedupes, `apps/site/typst/engine.ts` compiles
+  sequentially through one `typst-wasm` JSPI instance (module-level promise +
+  promise chain): MathML plus an SVG fallback per formula, one SVG per
+  diagram. Results are memoized at module scope; the Vite plugin watches
+  `src/pages` and full-reloads page changes.
+- Packages: every `@preview/name:version` import resolves from
+  packages.typst.org during the build — no allowlist, versions pinned in the
+  org source. The content browser path receives only the resulting strings:
+  no content engine and no package fetch.
+- Failure: an unknown package or invalid Typst aborts the build with the
+  page, the block's first non-prelude code line, then `file:line` and hints;
+  every failing block is listed in one error. A blank diagram is rejected by
+  `apps/site/typst/check.ts`; a missing artifact renders the literal `$src$`
+  (math) or `Figure unavailable.` in `pre.lw-diagram-missing` (diagram), never
+  a hole.
+- Review surface: the diagram section of `apps/site/src/pages/typst.org` has
+  one figure per supported pattern (23 at present). The structural gate's unit tests live in
+  `apps/site/typst/check.test.ts`; `pnpm typst:check` compiles the pages and
+  runs the same gate.
+- JSPI is required by the build engine only; content pages work in browsers
+  without JSPI (the interactive kernel still needs it).
+
+Authoring rules, package policy, HTML-export trade-off, and verification:
+`docs/typst-web.md`.
+
 ## apps/site responsibilities
 
 - Thin composition: glob `src/pages/*.org` raw, order them by the

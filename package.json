@@ -3,12 +3,13 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@12.4.2",
-  "description": "Didact: client-side literate-programming site framework — org-mode lessons with executable, steppable code blocks and machine panels",
+  "description": "Didact: client-side literate-programming site framework \u2014 org-mode lessons with executable, steppable code blocks and machine panels",
   "scripts": {
     "build": "node scripts/sync-vendors.mjs && pnpm --dir apps/site build",
     "dev": "node scripts/sync-vendors.mjs && pnpm --dir apps/site dev",
     "preview": "pnpm --dir apps/site preview",
-    "typecheck": "pnpm --dir apps/site exec tsc --noEmit",
+    "typecheck": "pnpm --dir apps/site exec tsc --noEmit && pnpm --dir apps/site exec tsc -p tsconfig.typst.json",
+    "typst:check": "node apps/site/typst/cli.ts apps/site/src/pages",
     "test": "vitest run && pnpm test:smoke",
     "test:smoke": "bun packages/kernel-riscv/test/smoke.ts && bun packages/kernel-mips/test/smoke.ts && bun packages/kernel-python/test/smoke.ts && bun packages/kernel-c/test/smoke.ts && bun packages/kernel-javascript/test/smoke.ts && bun packages/kernel-lisp/test/smoke.ts && bun packages/kernel-cpp/test/smoke.ts && bun packages/kernel-wasm/test/smoke.ts && bun packages/kernel-lua/test/smoke.ts && bun packages/kernel-prolog/test/smoke.ts && bun packages/kernel-regex/test/smoke.ts && bun packages/kernel-matlab/test/smoke.ts && bun packages/kernel-sql/test/smoke.ts",
     "check": "didact check",
@@ -17,10 +18,13 @@
   },
   "devDependencies": {
     "@didact/cli": "workspace:*",
-    "@types/node": "26.6.5",
+    "@types/node": "26.6.6",
     "eslint": "^10.13.0",
     "happy-dom": "^21.0.4",
     "typescript-eslint": "^8.72.0",
     "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }
