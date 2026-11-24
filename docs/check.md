@@ -49,12 +49,20 @@ with what the site actually renders.
 
 With `--run`, each block is sent to a `BlockRunner`. The default runner
 executes Python blocks in a fresh interpreter (a temporary `.py` file,
-30-second timeout, no stdin); it returns `null` for every other language, so
-those blocks are reported as `skipped`. A block whose code calls `input()`
-is reported as an error because there is no stdin.
+30-second timeout that kills the child with SIGKILL, no stdin); it returns
+`null` for every other language, so those blocks are reported as `skipped`.
+A block whose code calls `input()` is reported as an error because there is
+no stdin.
 
-For a block with a following `#+RESULTS:` block, the runner's stdout is
-compared with the canned text after stripping trailing newlines:
+A `#+BEGIN_SRC` line with no language is rendered and scanned as `text`, so
+the default runner skips it like any other non-Python block; a custom runner
+can still verify its `#+RESULTS:`.
+
+For a block with an associated `#+RESULTS:` block, the runner's stdout is
+compared with the canned text after stripping trailing newlines. The colon
+after `#+RESULTS` is optional, blank and comment lines between the block and
+its results are ignored, and a named `#+RESULTS: <name>` targets the block
+with that `#+NAME`:
 
 - equal → `ok`;
 - different → `mismatch`, with the expected and actual output in the

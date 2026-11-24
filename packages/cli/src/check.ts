@@ -39,6 +39,7 @@ export type BlockRunner = (block: {
   page: string;
   line: number;
   lang: string;
+  session: string | null;
   code: string;
 }) => Promise<RunnerOutput | null>;
 
@@ -64,9 +65,9 @@ interface ScannedBlock {
   canned: string | null;
 }
 
-const RE_BEGIN_SRC = /^#\+BEGIN_SRC\s+(\S+)/i;
+const RE_BEGIN_SRC = /^#\+BEGIN_SRC(?:\s+(.*))?$/i;
 const RE_END_SRC = /^#\+END_SRC\s*$/i;
-const RE_RESULTS = /^#\+RESULTS:/i;
+const RE_RESULTS = /^#\+RESULTS\b:?/i;
 const RE_OUTPUT_LINE = /^\s*:\s?(.*)$/;
 const RE_NAME = /^#\+NAME:\s*(\S+)/i;
 const RE_SESSION = /(?:^|\s):session\s+(\S+)/i;
@@ -78,14 +79,28 @@ function rstripNl(text: string): string {
   return text.replace(/\n+$/, '');
 }
 
+interface ResultsOccurrence {
+  name: string | null;
+  canned: string;
+  /** Index of the nearest preceding scanned block, or -1 when none. */
+  preceding: number;
+}
+
 /**
- * Pair #+NAME, #+BEGIN_SRC/#+END_SRC, and the immediately following
- * #+RESULTS: block (blank lines allowed between them). Text inside a source
- * block is code even if it spells #+BEGIN_SRC.
+ * Scan #+NAME, #+BEGIN_SRC/#+END_SRC, and #+RESULTS blocks in document order.
+ * The language defaults to `text` when the header is empty. Text inside a
+ * source block is code even if it spells #+BEGIN_SRC or #+RESULTS.
+ *
+ * RESULTS blocks are paired afterwards: a named `#+RESULTS: <name>` targets
+ * the first preceding block with that #+NAME (falling back to the nearest
+ * preceding block); an unnamed block targets the nearest preceding block.
+ * Blank lines and comment lines between a block and its results are ignored,
+ * and each results block is attached to at most one block.
  */
 function scanBlocks(src: string): ScannedBlock[] {
   const lines = src.split(/\r?\n/);
   const blocks: ScannedBlock[] = [];
+  const results: ResultsOccurrence[] = [];
   let pendingName: string | null = null;
 
   for (let i = 0; i < lines.length; i++) {
@@ -98,6 +113,24 @@ function scanBlocks(src: string): ScannedBlock[] {
       continue;
     }
 
+    const resultsMatch = RE_RESULTS.exec(stripped);
+    if (resultsMatch !== null) {
+      pendingName = null;
+      const tail = stripped.slice(resultsMatch[0].length).trim();
+      const name = tail === '' ? null : tail.split(/\s+/)[0]!;
+      const out: string[] = [];
+      let j = i + 1;
+      while (j < lines.length) {
+        const m = RE_OUTPUT_LINE.exec(lines[j]!);
+        if (m === null) break;
+        out.push(m[1]!);
+        j++;
+      }
+      results.push({ name, canned: out.join('\n'), preceding: blocks.length - 1 });
+      i = j - 1; // continue after the consumed RESULTS block
+      continue;
+    }
+
     const beginMatch = RE_BEGIN_SRC.exec(stripped);
     if (beginMatch === null) {
       pendingName = null;
@@ -105,9 +138,10 @@ function scanBlocks(src: string): ScannedBlock[] {
     }
 
     const line = i + 2; // first code line (1-based)
-    const lang = beginMatch[1]!.toLowerCase();
-    const headerTail = stripped.slice(beginMatch[0].length);
-    const sessionMatch = RE_SESSION.exec(headerTail);
+    const tokens = (beginMatch[1] ?? '').trim().split(/\s+/).filter(Boolean);
+    const lang = (tokens.shift() ?? 'text').toLowerCase();
+    const header = tokens.join(' ');
+    const sessionMatch = RE_SESSION.exec(header);
     const session = sessionMatch === null ? null : sessionMatch[1]!;
     const name = pendingName;
     pendingName = null;
@@ -119,25 +153,23 @@ function scanBlocks(src: string): ScannedBlock[] {
       i++;
     }
 
-    // The RESULTS block must follow the source block (blank lines allowed).
-    let j = i + 1;
-    while (j < lines.length && lines[j]!.trim() === '') j++;
+    blocks.push({ line, lang, name, session, code: code.join('\n'), canned: null });
+  }
 
-    let canned: string | null = null;
-    if (j < lines.length && RE_RESULTS.test(lines[j]!.trim())) {
-      j++;
-      const out: string[] = [];
-      while (j < lines.length) {
-        const m = RE_OUTPUT_LINE.exec(lines[j]!);
-        if (m === null) break;
-        out.push(m[1]!);
-        j++;
+  for (const result of results) {
+    let target = -1;
+    if (result.name !== null) {
+      for (let b = 0; b <= result.preceding; b++) {
+        if (blocks[b]!.name === result.name) {
+          target = b;
+          break;
+        }
       }
-      canned = out.join('\n');
-      i = j - 1; // continue after the consumed RESULTS block
     }
-
-    blocks.push({ line, lang, name, session, code: code.join('\n'), canned });
+    if (target === -1) target = result.preceding;
+    if (target < 0) continue;
+    const block = blocks[target]!;
+    if (block.canned === null) block.canned = result.canned;
   }
 
   return blocks;
@@ -186,6 +218,7 @@ export async function checkPages(opts: CheckOptions): Promise<CheckReport> {
           page,
           line: block.line,
           lang: block.lang,
+          session: block.session,
           code: block.code,
         });
         if (result === null) {
@@ -240,7 +273,11 @@ export function pythonRunner(python = 'python3'): BlockRunner {
     try {
       const file = join(dir, 'block.py');
       writeFileSync(file, `${block.code}\n`);
-      const result = spawnSync(python, [file], { encoding: 'utf8', timeout: TIMEOUT_MS });
+      const result = spawnSync(python, [file], {
+        encoding: 'utf8',
+        timeout: TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+      });
       let stderr = String(result.stderr ?? '');
       if (result.error !== undefined) {
         stderr = stderr === '' ? result.error.message : `${stderr}\n${result.error.message}`;

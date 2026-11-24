@@ -50,6 +50,22 @@ describe('checkPages: syntax', () => {
     });
   });
 
+  it('defaults a language-less block to text', async () => {
+    const dir = pages({
+      'plain.org': '#+TITLE: Plain\n#+BEGIN_SRC\nplain text\n#+END_SRC\n',
+    });
+
+    const report = await checkPages({ pagesDir: dir });
+
+    expect(report.blocks).toHaveLength(1);
+    expect(report.blocks[0]).toMatchObject({
+      line: 3,
+      lang: 'text',
+      name: null,
+      status: 'skipped',
+    });
+  });
+
   it('maps an unknown directive to an exact file/line diagnostic', async () => {
     const dir = pages({ 'bad.org': '#+TITLE: Bad\n#+FOO: bar\n' });
 
@@ -154,6 +170,65 @@ describe('checkPages: --run', () => {
     expect(ran).toEqual(['print("solo")']);
   });
 
+  it('compares a colon-less RESULTS block', async () => {
+    const dir = pages({
+      'nocolon.org': [
+        '#+TITLE: No colon',
+        '#+BEGIN_SRC python',
+        'print("new")',
+        '#+END_SRC',
+        '#+RESULTS',
+        ': old',
+      ].join('\n'),
+    });
+
+    const report = await checkPages({
+      pagesDir: dir,
+      run: true,
+      runner: async () => ({ code: 0, stdout: 'new\n', stderr: '' }),
+    });
+
+    expect(report.blocks[0]!.status).toBe('mismatch');
+    expect(report.blocks[0]!.detail).toContain('-old');
+    expect(report.blocks[0]!.detail).toContain('+new');
+  });
+
+  it('attaches a named RESULTS block to the named block across comments', async () => {
+    const dir = pages({
+      'named.org': [
+        '#+TITLE: Named',
+        '#+NAME: first',
+        '#+BEGIN_SRC python',
+        'print("one")',
+        '#+END_SRC',
+        '',
+        '#+BEGIN_SRC python',
+        'print("two")',
+        '#+END_SRC',
+        '',
+        '# an intervening comment',
+        '#+RESULTS: first',
+        ': one',
+      ].join('\n'),
+    });
+
+    const report = await checkPages({
+      pagesDir: dir,
+      run: true,
+      runner: async (block) => ({
+        code: 0,
+        stdout: block.code.includes('one') ? 'wrong\n' : 'two\n',
+        stderr: '',
+      }),
+    });
+
+    expect(report.blocks).toHaveLength(2);
+    expect(report.blocks[0]!.status).toBe('mismatch');
+    expect(report.blocks[0]!.detail).toContain('-one');
+    expect(report.blocks[0]!.detail).toContain('+wrong');
+    expect(report.blocks[1]!.status).toBe('ok');
+  });
+
   it('accepts a matching RESULTS block', async () => {
     const dir = pages({
       'match.org': '#+TITLE: Match\n#+BEGIN_SRC python\nprint(1)\n#+END_SRC\n#+RESULTS:\n: 1\n',
@@ -203,6 +278,7 @@ describe('pythonRunner', () => {
         page: 'x',
         line: 1,
         lang: 'c',
+        session: null,
         code: 'input("this must not run")',
       }),
     ).resolves.toBeNull();
