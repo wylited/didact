@@ -46,8 +46,8 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
    kernel's `id` must match the org `#+BEGIN_SRC <lang>` word; declare
    `editorSyntax` with one of the ids supported in
    `packages/core/src/languages.ts` (`asm-intel`, `asm-riscv`, `asm-mips`,
-   `c`, `cpp`, `javascript`, `lua`, `octave`, `python`, `regexp`, `scheme`,
-   `sql`, `typst`, `wat`, `plain`; missing/unknown → plain text).
+   `c`, `cpp`, `javascript`, `lua`, `octave`, `python`, `prolog`, `regexp`,
+   `scheme`, `sql`, `typst`, `wat`, `plain`; missing/unknown → plain text).
 3. Declare the wasm engine as an npm dependency of the kernel package
    (exact version, no caret) and record licenses in `THIRD-PARTY.md`;
    keep license texts under `packages/kernel-<name>/vendor/`. Add the

@@ -85,6 +85,7 @@ export interface Kernel {
     | 'lua'
     | 'octave'
     | 'python'
+    | 'prolog'
     | 'regexp'
     | 'scheme'
     | 'sql'

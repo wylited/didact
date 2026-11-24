@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { StreamParser } from '@codemirror/language';
 import { editorLanguage } from '../src/languages';
 import type { Kernel } from '../src/kernel';
-import { regexpSpec, sqlSpec, typstSpec, watSpec } from '../src/modes';
+import { prologSpec, regexpSpec, sqlSpec, typstSpec, watSpec } from '../src/modes';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGES = resolve(HERE, '../..');
@@ -59,7 +59,7 @@ type Tokenizer = Pick<StreamParser<unknown>, 'startState' | 'token'>;
  * CodeMirror's StringStream the modes use. Returns `text:tokenClass` per
  * consumed run — whitespace included, so a skipped whitespace run is SP.
  */
-function highlight(mode: Tokenizer, line: string): string[] {
+function highlight(mode: Tokenizer, line: string, shared?: unknown): string[] {
   const indent = /^\s*/.exec(line)?.[0].length ?? 0;
   const stream = {
     pos: indent,
@@ -88,7 +88,7 @@ function highlight(mode: Tokenizer, line: string): string[] {
     next(): string | undefined; eatSpace(): boolean; skipToEnd(): void;
     match(p: string | RegExp): RegExpMatchArray | null;
   };
-  const state = mode.startState?.(0) ?? {};
+  const state = shared ?? mode.startState?.(0) ?? {};
   const out: string[] = [];
   for (let guard = 0; !stream.eol(); guard++) {
     if (guard > 200) throw new Error(`tokenizer did not advance on: ${line}`);
@@ -109,7 +109,7 @@ describe('editorLanguage: syntax → CM6 extension mapping', () => {
     expect(members).toContain('asm-intel');
     expect(members).toContain('sql');
     expect(new Set(members).size).toBe(members.length); // no duplicates
-    expect(members.length).toBe(15);
+    expect(members.length).toBe(16);
   });
 
   it('resolves every union member except plain, and never null for a declared mode', () => {
@@ -141,9 +141,9 @@ describe('editorLanguage: syntax → CM6 extension mapping', () => {
   it('gives each written mode its own distinct extension instance', () => {
     const modes = [
       editorLanguage('sql'), editorLanguage('regexp'),
-      editorLanguage('wat'), editorLanguage('typst'),
+      editorLanguage('wat'), editorLanguage('typst'), editorLanguage('prolog'),
     ];
-    expect(new Set(modes).size).toBe(4);
+    expect(new Set(modes).size).toBe(5);
   });
 });
 
@@ -154,22 +154,15 @@ describe('every registered kernel declares a syntax that resolves', () => {
     expect([...declared.keys()].sort()).toEqual([...REGISTERED].sort());
   });
 
+  it('no registered kernel declares plain text', () => {
+    // Every kernel now has a real mode: a package that silently drops its
+    // editorSyntax back to 'plain' must fail here, not just render dully.
+    expect([...declared.values()]).not.toContain('plain');
+  });
+
   it.each([...declared.entries()])('%s → %s', (id, syntax) => {
     expect(unionMembers(), `${id} declares a syntax outside the union`).toContain(syntax);
-    const ext = editorLanguage(syntax);
-    // 'plain' is a decision, not a gap: lisp is Scheme — the `scheme` legacy
-    // mode reads it — and is the only kernel still without its own mode
-    // (prolog got one). Everything else must resolve to a real extension.
-    if (id === 'lisp') {
-      expect(syntax).toBe('scheme');
-      expect(ext).not.toBeNull();
-    } else if (syntax === 'plain') {
-      // plain is an explicit choice (prolog has no stock mode); the
-      // absence of an extension is the contract, not a gap in this test
-      expect(ext, `${id} declares plain text on purpose`).toBeNull();
-    } else {
-      expect(ext, `${id} declares ${syntax}`).not.toBeNull();
-    }
+    expect(editorLanguage(syntax), `${id} declares ${syntax}`).not.toBeNull();
   });
 
   it('no kernel reuses a syntax meant for another language', () => {
@@ -178,6 +171,7 @@ describe('every registered kernel declares a syntax that resolves', () => {
     expect(declared.get('wasm')).toBe('wat');
     expect(declared.get('regex')).toBe('regexp');
     expect(declared.get('typst')).toBe('typst');
+    expect(declared.get('prolog')).toBe('prolog');
     expect(declared.get('lisp')).toBe('scheme');
     expect(declared.get('elisp')).toBe('scheme');
     expect(declared.get('matlab')).toBe('octave');
@@ -274,5 +268,116 @@ describe('modes.ts: each tokenizer marks its language, not a neighbour', () => {
     // indentation is not a token: highlighting starts at the first
     // non-space character
     expect(highlight(typstSpec, '  - nested')).toEqual(['- :punctuation', 'nested:null']);
+  });
+
+  it('prolog: facts, rules and queries split atom, variable and clause neck', () => {
+    expect(highlight(prologSpec, 'parent(tom, bob).')).toEqual([
+      'parent:null', '(:punctuation', 'tom:null', ',:operator', SP,
+      'bob:null', '):punctuation', '.:punctuation',
+    ]);
+    expect(highlight(prologSpec, 'grandparent(X, Z) :- parent(X, Y), parent(Y, Z).')).toEqual([
+      'grandparent:null', '(:punctuation', 'X:variableName', ',:operator', SP,
+      'Z:variableName', '):punctuation', SP, ':-:keyword', SP,
+      'parent:null', '(:punctuation', 'X:variableName', ',:operator', SP,
+      'Y:variableName', '):punctuation', ',:operator', SP,
+      'parent:null', '(:punctuation', 'Y:variableName', ',:operator', SP,
+      'Z:variableName', '):punctuation', '.:punctuation',
+    ]);
+    expect(highlight(prologSpec, '?- member(X, [a, b]).')).toEqual([
+      '?-:keyword', SP, 'member:null', '(:punctuation', 'X:variableName',
+      ',:operator', SP, '[:punctuation', 'a:null', ',:operator', SP,
+      'b:null', ']:punctuation', '):punctuation', '.:punctuation',
+    ]);
+    expect(highlight(prologSpec, 'sentence --> noun_phrase.')).toEqual([
+      'sentence:null', SP, '-->:keyword', SP, 'noun_phrase:null', '.:punctuation',
+    ]);
+  });
+
+  it('prolog: % and /* */ comments, quoted atoms and both string quotes', () => {
+    expect(highlight(prologSpec, '% a fact: parent(tom, bob).')).toEqual([
+      '% a fact: parent(tom, bob).:comment',
+    ]);
+    expect(highlight(prologSpec, '/* rule */ parent(tom, bob).')).toEqual([
+      '/* rule */:comment', SP, 'parent:null', '(:punctuation', 'tom:null',
+      ',:operator', SP, 'bob:null', '):punctuation', '.:punctuation',
+    ]);
+    expect(highlight(prologSpec, `write('hello'), write("hi"), write(\`bt\`).`)).toEqual([
+      'write:atom', '(:punctuation', "'hello':string", '):punctuation',
+      ',:operator', SP, 'write:atom', '(:punctuation', '"hi":string',
+      '):punctuation', ',:operator', SP, 'write:atom', '(:punctuation',
+      '`bt`:string', '):punctuation', '.:punctuation',
+    ]);
+  });
+
+  it('prolog: numbers, variables, cut/negation and builtin atoms', () => {
+    expect(highlight(prologSpec, 'N is 2 + 3, _ = X.')).toEqual([
+      'N:variableName', SP, 'is:keyword', SP, '2:number', SP, '+:operator',
+      SP, '3:number', ',:operator', SP, '_:variableName', SP, '=:operator',
+      SP, 'X:variableName', '.:punctuation',
+    ]);
+    expect(highlight(prologSpec, "X is 0'a.")).toEqual([
+      'X:variableName', SP, 'is:keyword', SP, "0'a:number", '.:punctuation',
+    ]);
+    expect(highlight(prologSpec, 'safe(X) :- \\+ unsafe(X), !.')).toEqual([
+      'safe:null', '(:punctuation', 'X:variableName', '):punctuation', SP,
+      ':-:keyword', SP, '\\+:operator', SP, 'unsafe:null', '(:punctuation',
+      'X:variableName', '):punctuation', ',:operator', SP, '!:operator',
+      '.:punctuation',
+    ]);
+    expect(highlight(prologSpec, 'findall(X, p(X), L), retract(f(a)), nl.')).toEqual([
+      'findall:atom', '(:punctuation', 'X:variableName', ',:operator', SP,
+      'p:null', '(:punctuation', 'X:variableName', '):punctuation',
+      ',:operator', SP, 'L:variableName', '):punctuation', ',:operator', SP,
+      'retract:atom', '(:punctuation', 'f:null', '(:punctuation', 'a:null',
+      '):punctuation', '):punctuation', ',:operator', SP, 'nl:atom',
+      '.:punctuation',
+    ]);
+  });
+
+  it('prolog: block comment state carries across separate lines', () => {
+    const state = prologSpec.startState?.(0);
+    expect(highlight(prologSpec, '/* opens a comment', state)).toEqual([
+      '/* opens a comment:comment',
+    ]);
+    // one shared state: the second line starts inside the block
+    expect(highlight(prologSpec, 'still inside */ p(a).', state)).toEqual([
+      'still inside */:comment', SP, 'p:null', '(:punctuation', 'a:null',
+      '):punctuation', '.:punctuation',
+    ]);
+  });
+
+  it('prolog: own-property lookup leaves Object.prototype names as atoms', () => {
+    expect(highlight(prologSpec, 'p(constructor).')).toEqual([
+      'p:null', '(:punctuation', 'constructor:null', '):punctuation',
+      '.:punctuation',
+    ]);
+    expect(highlight(prologSpec, 'p(toString), p(hasOwnProperty).')).toEqual([
+      'p:null', '(:punctuation', 'toString:null', '):punctuation', ',:operator',
+      SP, 'p:null', '(:punctuation', 'hasOwnProperty:null', '):punctuation',
+      '.:punctuation',
+    ]);
+  });
+
+  it('prolog: multi-character operators match whole, longest first', () => {
+    expect(highlight(prologSpec, 'X =:= 1')).toEqual([
+      'X:variableName', SP, '=:=:operator', SP, '1:number',
+    ]);
+    expect(highlight(prologSpec, 'X =.. L, Y =\\= 2, Z @=< W, U @>= V.')).toEqual([
+      'X:variableName', SP, '=..:operator', SP, 'L:variableName', ',:operator',
+      SP, 'Y:variableName', SP, '=\\=:operator', SP, '2:number', ',:operator',
+      SP, 'Z:variableName', SP, '@=<:operator', SP, 'W:variableName',
+      ',:operator', SP, 'U:variableName', SP, '@>=:operator', SP,
+      'V:variableName', '.:punctuation',
+    ]);
+    expect(highlight(prologSpec, 'M:plus(X) :: int, A == B, A \\== B, A =< B, A >= B.')).toEqual([
+      'M:variableName', '::operator', 'plus:null', '(:punctuation',
+      'X:variableName', '):punctuation', SP, ':::operator', SP, 'int:null',
+      ',:operator', SP, 'A:variableName', SP, '==:operator', SP,
+      'B:variableName', ',:operator', SP, 'A:variableName', SP,
+      '\\==:operator', SP, 'B:variableName', ',:operator', SP,
+      'A:variableName', SP, '=<:operator', SP, 'B:variableName', ',:operator',
+      SP, 'A:variableName', SP, '>=:operator', SP, 'B:variableName',
+      '.:punctuation',
+    ]);
   });
 });

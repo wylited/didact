@@ -309,3 +309,75 @@ export const typstSpec: StreamParser<{ inCode: boolean }> = {
 
 /** The language defined from the spec above (what the editor mounts). */
 export const typstMode = StreamLanguage.define(typstSpec);
+
+/** Prolog's control vocabulary: `is` evaluates, `true`/`fail` succeed or
+ *  fail, and `call`/`not` take a goal. The cut is `!/0` (operator `!`
+ *  below), not an atom. */
+const PROLOG_KEYWORDS = wordSet('is not true fail call');
+
+/** Builtin predicates a lesson calls by name. Plain user atoms (`parent`,
+ *  `append`, `member`, …) stay plain. */
+const PROLOG_BUILTINS = wordSet('write nl assert retract findall bagof setof');
+
+/** Prolog operator tokens, longest first so `=:=` is never split into
+ *  `=` `:` `=`. `->` and `\+` are checked ahead of this in the tokenizer. */
+const PROLOG_OPERATOR = /^(?:=:=|=\\=|=\.\.|\\==|@=<|@>=|==|\\=|=<|>=|@<|@>|::|=|<|>|:)/;
+
+/**
+ * Prolog: `%` line and slash-star block comments, single-quoted atoms,
+ * double-quoted and backtick strings (doubled quote or backslash escapes),
+ * numbers (including `0'a` code points and hex), variables (uppercase or
+ * `_` initial), the clause/query/DCG necks `:-` `?-` `-->`, comparison and
+ * unification operators (`=:=`, `=\=`, `=..`, `@<`, `@=<`, `@>`, `@>=`,
+ * `\==`, `==`, `\=`, `=<`, `>=`, `::`, `:`, `=`, `<`, `>`), the control
+ * operators `->` `;` `!` `\+`, and the builtins above. Every other
+ * lower-case atom stays plain.
+ */
+export const prologSpec: StreamParser<{ block: boolean }> = {
+  name: 'prolog',
+  startState: () => ({ block: false }),
+  token(stream: StringStream, state: { block: boolean }): string | null {
+    if (state.block) {
+      if (stream.match(/^[^\n]*?\*\//)) state.block = false;
+      else stream.skipToEnd();
+      return 'comment';
+    }
+    if (stream.eatSpace()) return null;
+    if (stream.match('%')) {
+      stream.skipToEnd();
+      return 'comment';
+    }
+    if (stream.match('/*')) {
+      state.block = true;
+      if (stream.match(/^[^\n]*?\*\//)) state.block = false;
+      else stream.skipToEnd();
+      return 'comment';
+    }
+    if (stream.match(/^'(?:[^'\\\n]|''|\\.)*'?/)) return 'string';
+    if (stream.match(/^"(?:[^"\\\n]|""|\\.)*"?/)) return 'string';
+    if (stream.match(/^`(?:[^`\\\n]|``|\\.)*`?/)) return 'string';
+    if (stream.match(/^0'(?:\\.|[^\\\n])/)) return 'number';
+    if (stream.match(/^0[xX][0-9a-fA-F]+|^\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/)) return 'number';
+    // necks: clause, query, DCG
+    if (stream.match(':-') || stream.match('?-') || stream.match('-->')) return 'keyword';
+    if (stream.match('->') || stream.match('\\+') || stream.match(PROLOG_OPERATOR) ||
+        stream.match('\\')) return 'operator';
+    if (stream.match('!') || stream.match(';') || stream.match(',') ||
+        stream.match('|') || stream.match(/^[+\-*/^~]/)) return 'operator';
+    if (stream.match(/^[()\[\]{}]/) || stream.match('.')) return 'punctuation';
+    const word = stream.match(/^[A-Za-z_][A-Za-z0-9_]*/) as unknown as RegExpMatchArray | null;
+    if (word !== null) {
+      const w = word[0];
+      if (/^[A-Z_]/.test(w)) return 'variableName';
+      if (Object.hasOwn(PROLOG_KEYWORDS, w)) return 'keyword';
+      if (Object.hasOwn(PROLOG_BUILTINS, w)) return 'atom';
+      return null; // plain user atom
+    }
+    stream.next();
+    return null;
+  },
+  languageData: { commentTokens: { line: '%', block: { open: '/*', close: '*/' } } },
+};
+
+/** The language defined from the spec above (what the editor mounts). */
+export const prologMode = StreamLanguage.define(prologSpec);
