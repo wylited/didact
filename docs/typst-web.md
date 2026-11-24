@@ -172,6 +172,13 @@ SVG width in points is converted at 96 dpi (`pt * 4/3`); above **680 px** the
 `width`/`height` attributes are replaced with `width="100%"` and
 `style="height:auto"`. Narrow diagrams keep their intrinsic size.
 
+Package APIs are not wrapped, so check the package's own conventions when a
+shape lands in the wrong place. Two that cost real time here: fletcher
+`node(…)` positions are relative units (about 1 cm), and `width:` fixes the box
+so a long body wraps to more lines instead of widening the node; cetz
+`arc(position, …)` takes a point *on* the arc, while `circle(centre, radius:)`
+takes the centre — mixing them draws the arc around the wrong point.
+
 ## Diagram gallery (review surface)
 
 `apps/site/src/pages/typst-gallery.org` holds one figure per supported pattern.
@@ -195,17 +202,18 @@ build, so the page is also a regression suite: a broken block fails with
 | 9 | box plots | two boxes with medians, whiskers, one outlier |
 | 10 | wide plot | `width="100%"` on the `<svg>`; shrinks with the column past 680 px |
 | 11 | right triangle (cetz) | grid, closed triangle, square right-angle marker, labels outside |
-| 12 | circle geometry | tangent through the top, dashed radius, angle arc, no label collisions |
+| 12 | circle geometry | tangent at the radius endpoint (perpendicular to it), dashed radius, base ray, centre dot, angle arc, no label collisions |
 | 13 | cubic Bézier | smooth curve, dashed control polygon, control points marked |
 | 14 | filled polygon | translucent fill under the outline, grid visible through it |
 | 15 | matrix equation | display math as outlines — a diagram, not MathML |
 | 16 | commutative square | four formula nodes, four labelled arrows |
 | 17 | default margin | no `#set page` in the block; 6 pt gutter from the prepend |
 | 18 | margin override | 18 pt gutter, visibly wider than figure 17 |
-| 19 | text-only | words only, no shapes; the gate counts text as ink |
+| 19 | text-only | words only, no shapes; Typst outlines text, so the gate passes it via `<use>` |
 | 20 | tall flow | vertical stack, intrinsic width, not hit by the responsive rule |
 | 21 | gradient fill | smooth teal-to-white ramp inside the shape |
 | 22 | unicode math | Greek letters, subscripts, and an arrow with no fallback boxes |
+| 23 | C++ build pipeline | eight boxes in two rows, left-to-right then right-to-left arrows, executable highlighted |
 
 The gallery is content, not a second pipeline: adding a figure is adding an org
 block. Keep new figures deterministic (no `datetime.today()`, no `random`) so
@@ -216,8 +224,9 @@ The structural gate (`apps/site/typst/check.ts`, unit tests in
 cached. It rejects a missing `<svg>` root, a non-finite `viewBox`, zero
 drawables, and zero real geometry — while ignoring Typst's white page
 background, which is a `path` from the origin or a full-canvas `rect`. A
-`text` element alone counts as ink, which is why figure 19 passes. It only
-warns (never throws) when the intrinsic width falls outside 20–1400 px.
+`text` element alone counts as ink, but Typst exports text as glyph outlines,
+so figure 19 passes through the `<use>` rule rather than the `<text>` one. It
+only warns (never throws) when the intrinsic width falls outside 20–1400 px.
 
 ## Would HTML export be better?
 
@@ -247,11 +256,16 @@ Checks:
 
 ```sh
 pnpm build                                      # sync vendors + Vite build (runs the plugin + gate)
-node apps/site/typst/cli.ts apps/site/src/pages # per-page math/diagram counts + total ms
+node apps/site/typst/cli.ts apps/site/src/pages # per-page counts + total ms
+node apps/site/typst/cli.ts apps/site/src/pages --out /tmp/svg  # also write every diagram
 pnpm vitest run apps/site/typst                 # gate unit tests
 ```
 
 The CLI reads every `*.org` in the directory, prints
 `<page>: N math, M diagrams` per file and one total line with key counts, CSS
 size, and compile time. It uses the same `prerenderOrgPages` as the plugin, so
-a clean CLI run and a clean build agree.
+a clean CLI run and a clean build agree. Compiling and passing the gate are
+silent, so exit code 0 together with the counts means every diagram passed;
+a failure throws with the page, line, and reason. `--out <dir>` additionally
+writes each diagram as `<page>-<n>.svg` and prints its intrinsic size, which is
+how you inspect a figure without running the site. `--help` prints usage.

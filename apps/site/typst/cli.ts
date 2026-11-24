@@ -1,19 +1,73 @@
 // cli.ts — acceptance/verification entry for the build-time pipeline.
 //
-//   node apps/site/typst/cli.ts <pagesDir>
+//   node apps/site/typst/cli.ts <pagesDir> [--out <dir>]
 //
 // Reads every `*.org` file, prints the formula/diagram counts per page and the
-// total compile time. Relative imports keep their `.ts` extensions so Node 24
-// can run this file directly through type stripping — no bundler involved.
+// total compile time. With `--out`, also writes one `<page>-<n>.svg` per
+// diagram so an author can open the artifact the page will show. Compiling a
+// diagram and passing the quality gate either succeeds silently or throws, so
+// exit code 0 with the counts printed means every diagram passed.
+// Relative imports keep their `.ts` extensions so Node 24 can run this file
+// directly through type stripping — no bundler involved.
 
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseOrg } from '../../../packages/core/src/org.ts';
-import { collectTypstSources } from '../../../packages/core/src/typst-source.ts';
+import { collectTypstSources, diagramKey, type TypstArtifacts } from '../../../packages/core/src/typst-source.ts';
 import { prerenderOrgPages } from './prerender.ts';
 
+const USAGE = 'usage: node apps/site/typst/cli.ts <pagesDir> [--out <dir>]';
+
+function parseArgs(argv: string[]): { dir: string; out: string | null } {
+  const positional: string[] = [];
+  let out: string | null = null;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (arg === '--help' || arg === '-h') {
+      console.log(USAGE);
+      process.exit(0);
+    } else if (arg === '--out') {
+      const value = argv[++i];
+      if (value === undefined) throw new Error(`--out needs a directory\n${USAGE}`);
+      out = resolve(value);
+    } else if (arg.startsWith('--')) {
+      throw new Error(`unknown flag ${arg}\n${USAGE}`);
+    } else {
+      positional.push(arg);
+    }
+  }
+  if (positional.length > 1) throw new Error(`expected one pages directory\n${USAGE}`);
+  return { dir: resolve(positional[0] ?? 'src/pages'), out };
+}
+
+/** Intrinsic size from a diagram's `viewBox`, in pt. */
+function viewBoxSize(svg: string): string {
+  const raw = /\bviewBox="([^"]+)"/.exec(svg)?.[1];
+  if (raw === undefined) return '?';
+  const [, , width, height] = raw.trim().split(/[\s,]+/).map(Number);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return '?';
+  return `${Math.round(width!)}x${Math.round(height!)} pt`;
+}
+
+async function writeDiagrams(
+  out: string,
+  perFile: { name: string; keys: string[] }[],
+  artifacts: TypstArtifacts,
+): Promise<void> {
+  await mkdir(out, { recursive: true });
+  for (const { name, keys } of perFile) {
+    for (let i = 0; i < keys.length; i++) {
+      const svg = artifacts.diagrams[keys[i]!];
+      if (svg === undefined) continue;
+      const file = join(out, `${name}-${i + 1}.svg`);
+      await writeFile(file, svg, 'utf8');
+      console.log(`${file}: ${viewBoxSize(svg)}`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
-  const dir = resolve(process.argv[2] ?? 'src/pages');
+  const { dir, out } = parseArgs(process.argv.slice(2));
   const entries = await readdir(dir, { withFileTypes: true });
   const files = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith('.org'))
@@ -24,7 +78,7 @@ async function main(): Promise<void> {
   }
 
   const sources: Record<string, string> = {};
-  const counts: { name: string; math: number; diagrams: number }[] = [];
+  const counts: { name: string; math: number; diagrams: number; keys: string[] }[] = [];
   for (const file of files) {
     const name = file.slice(0, -'.org'.length);
     const text = await readFile(join(dir, file), 'utf8');
@@ -34,6 +88,7 @@ async function main(): Promise<void> {
       name,
       math: collected.math.length,
       diagrams: collected.diagrams.length,
+      keys: collected.diagrams.map(diagramKey),
     });
   }
 
@@ -49,6 +104,9 @@ async function main(): Promise<void> {
       `${Object.keys(artifacts.diagrams).length} diagrams, ` +
       `${artifacts.mathCss.length} css chars, ${ms.toFixed(0)} ms`,
   );
+  if (out !== null) {
+    await writeDiagrams(out, counts, artifacts);
+  }
 }
 
 main().catch((error: unknown) => {

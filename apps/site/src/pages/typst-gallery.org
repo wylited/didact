@@ -247,32 +247,41 @@ Expect grid lines, three sides, and the square marker at the right angle.
 #canvas(length: 1.5cm, {
   import draw: *
   grid((0, 0), (3, 2), step: 1, stroke: 0.3pt + luma(215))
-  line((0, 0), (3, 0), (3, 2), close: true, stroke: 0.9pt + rgb("#1A9988"))
+  line((0, 0), (3.2, 0), (3, 2), close: true, stroke: 0.9pt + rgb("#1A9988"))
   line((2.75, 0), (2.75, 0.25), (3, 0.25), stroke: 0.6pt + rgb("#1A9988"))
   content((0, 0), [$A$], anchor: "north-east")
-  content((3, 0), [$B$], anchor: "north-west")
+  content((3.2, 0), [$B$], anchor: "north-west")
   content((3.08, 2.06), [$C$], anchor: "south-west")
   content((1.5, -0.16), [$3$], anchor: "north")
 })
 #+END_SRC
 
-A circle, radius, tangent, and central angle. Expect one circle, a dashed
-radius, a tangent line touching at the top, and an angle arc at the centre.
+A circle with the tangent drawn where the radius meets the rim. Expect a
+dashed radius to $P$, a tangent at $P$ perpendicular to it, a base ray, a dot
+at the centre $O$, and the angle $theta$ between radius and base.
 
 #+CAPTION: Circle with radius, tangent, and angle
 #+BEGIN_SRC typst :results svg
 #set text(size: 11pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
+#let a = 44deg
+#let c = calc.cos(a)
+#let s = calc.sin(a)
+
 #canvas(length: 1.7cm, {
   import draw: *
   circle((0, 0), radius: 1, stroke: 0.9pt + rgb("#1A9988"))
-  line((0, 0), (calc.cos(44deg), calc.sin(44deg)), stroke: (paint: rgb("#8A5A44"), thickness: 0.7pt, dash: "dashed"))
-  line((-1.3, 1), (1.3, 1), stroke: 0.9pt + rgb("#1A9988"))
-  arc((0.5, 0), start: 0deg, stop: 44deg, radius: 0.5, stroke: 0.7pt + rgb("#1A9988"))
-  content((0.26, 0.09), [$theta$], anchor: "center")
-  content((0.27, 0.45), [$r$], anchor: "south-east")
-  content((-0.1, -0.1), [$O$], anchor: "north-east")
+  // the two rays that bound theta
+  line((0, 0), (1, 0), stroke: 0.7pt + rgb("#1A9988"))
+  line((0, 0), (c, s), stroke: (paint: rgb("#8A5A44"), thickness: 0.7pt, dash: "dashed"))
+  // tangent at the rim, perpendicular to the radius
+  line((c - 0.8 * s, s + 0.8 * c), (c + 0.8 * s, s - 0.8 * c), stroke: 0.9pt + rgb("#1A9988"))
+  arc((0.48, 0), start: 0deg, stop: a, radius: 0.48, stroke: 0.7pt + rgb("#1A9988"))
+  circle((0, 0), radius: 0.04, fill: rgb("#1A9988"), stroke: none)
+  content((0.27, 0.13), [$theta$], anchor: "center")
+  content((0.33, 0.43), [$r$], anchor: "south-east")
+  content((-0.07, -0.07), [$O$], anchor: "north-east")
 })
 #+END_SRC
 
@@ -308,7 +317,7 @@ under the outline and the grid to show through it.
 #canvas(length: 1.4cm, {
   import draw: *
   grid((0, 0), (4, 3), step: 1, stroke: 0.3pt + luma(220))
-  line((0, 0), (3, 0), (4, 2), (1.5, 2.8), close: true,
+  line((0, 0), (3.2, 0), (4, 2), (1.5, 2.8), close: true,
     fill: rgb("#1A9988").transparentize(80%),
     stroke: 0.9pt + rgb("#1A9988"))
   content((2, 1.2), [area])
@@ -437,4 +446,52 @@ than as missing text.
 #+BEGIN_SRC typst :results svg
 #set text(size: 10pt)
 $ alpha -> beta, quad x_i >= 0, quad sum_(i=1)^n x_i = 1 $
+#+END_SRC
+
+* A composed figure
+
+A real use of the layer, not a test of one feature: the C++ build pipeline as
+the compiler page describes it. Every stage is the same helper, so the figure
+is eight nodes and eight edges; the snake layout keeps it under 500 pt wide.
+Expect boxes in two rows, arrows left to right then right to left, the linker
+carrying its runtime note, and the executable highlighted.
+
+#+CAPTION: The C++20 build pipeline from source files to a linked executable
+#+BEGIN_SRC typst :results svg
+#set text(size: 9.5pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let stage(pos, body, fill: none) = node(
+  pos, body,
+  shape: rect, corner-radius: 2pt, inset: 4pt, width: 86pt, outset: 2pt,
+  stroke: 0.8pt + rgb("#1A9988"), fill: fill,
+)
+#let flow(from, to) = edge(
+  from, to, "->",
+  stroke: 0.9pt + rgb("#1A9988"), mark-scale: 70%,
+)
+
+#diagram(
+  stage((0, 0), [C++ sources]),
+  stage((1.6, 0), [CMake]),
+  stage(
+    (3.2, 0),
+    [clang frontend #linebreak() + preprocessor #linebreak() #text(size: 8pt)[C++20]],
+  ),
+  stage((4.8, 0), [LLVM IR #linebreak() #text(size: 8pt)[.ll]]),
+  stage((4.8, 1.45), [opt #linebreak() #text(size: 8pt)[LLVM optimizer]]),
+  stage((3.2, 1.45), [x86-64 #linebreak() codegen]),
+  stage(
+    (1.6, 1.45),
+    [ld / lld #linebreak() #text(size: 8pt)[compiler-rt, libc++]],
+  ),
+  stage((0, 1.45), [executable], fill: rgb("#F2F8F6")),
+  flow((0, 0), (1.6, 0)),
+  flow((1.6, 0), (3.2, 0)),
+  flow((3.2, 0), (4.8, 0)),
+  flow((4.8, 0), (4.8, 1.45)),
+  flow((4.8, 1.45), (3.2, 1.45)),
+  flow((3.2, 1.45), (1.6, 1.45)),
+  flow((1.6, 1.45), (0, 1.45)),
+)
 #+END_SRC
