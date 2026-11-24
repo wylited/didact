@@ -13,6 +13,7 @@ import {
   mathKey,
   splitTypstMath,
   type TypstArtifacts,
+  type TypstMathArtifact,
   type TypstRenderOptions,
 } from '../src/typst-source';
 
@@ -24,6 +25,26 @@ function inlineHtml(text: string, typst?: TypstRenderOptions): string {
   const p = document.createElement('p');
   renderInline(text, p, { typst });
   return p.innerHTML;
+}
+
+/**
+ * The math the browser extracts from one inline text, in document order.
+ * Every formula gets a synthesized artifact so it renders a wrapper whose
+ * `aria-label` (the SVG fallback) carries the exact source.
+ */
+function renderedMath(text: string): { src: string; display: boolean }[] {
+  const art: TypstMathArtifact = { mathml: '<math></math>', svg: '<svg></svg>' };
+  const math = new Proxy({} as Record<string, TypstMathArtifact>, {
+    get: () => art,
+  });
+  const p = document.createElement('p');
+  renderInline(text, p, {
+    typst: { math: 'svg', artifacts: artifacts({ math }) },
+  });
+  return [...p.querySelectorAll<HTMLElement>('.lw-math')].map((el) => ({
+    src: el.getAttribute('aria-label') ?? '',
+    display: el.classList.contains('lw-math-block'),
+  }));
 }
 
 describe('splitTypstMath', () => {
@@ -110,6 +131,64 @@ describe('collectTypstSources', () => {
       'I:d',
     ]);
     expect(got.diagrams).toEqual([]);
+  });
+
+  it('scans exactly the inline runs the browser scans', () => {
+    const org = [
+      '*$E = mc^2$*',
+      '',
+      '$a *b* c$',
+      '',
+      '[[page][see $x$]] and [[$y$][label]]',
+    ].join('\n');
+    const got = collectTypstSources(parseOrg(org));
+    // Bold/italic recurse like render.ts; the dollars around `*b*` are split
+    // apart by the emphasis pass, so the browser shows no math there. A link
+    // description (or, when absent, its `file:`-stripped target) is inline
+    // content; the raw target is not.
+    expect(got.math.map((m) => m.src)).toEqual(['E = mc^2', 'x']);
+  });
+
+  it('scans the default label of a description-less link', () => {
+    for (const org of ['see [[$x$]]', '[[page]]', '[[file:$y$]]']) {
+      expect(collectTypstSources(parseOrg(org)).math).toEqual(renderedMath(org));
+    }
+    // The browser renders the target-as-label, so the build must collect it;
+    // a plain page link contributes no math.
+    expect(renderedMath('see [[$x$]]')).toEqual([{ src: 'x', display: false }]);
+    expect(collectTypstSources(parseOrg('see [[$x$]]')).math).toEqual([
+      { src: 'x', display: false },
+    ]);
+    expect(collectTypstSources(parseOrg('[[page]]')).math).toEqual([]);
+  });
+
+  it('recurses into fold bodies for math and static diagrams', () => {
+    const org = [
+      '#+BEGIN_HINT',
+      'Use $e^x$ and $$\\int f$$.',
+      '#+BEGIN_SRC typst :results svg',
+      '#let h = 1',
+      '#+END_SRC',
+      '#+END_HINT',
+    ].join('\n');
+    const got = collectTypstSources(parseOrg(org));
+    expect(got.math.map((m) => `${m.display ? 'D' : 'I'}:${m.src}`)).toEqual([
+      'I:e^x',
+      'D:\\int f',
+    ]);
+    expect(got.diagrams).toEqual(['#let h = 1']);
+  });
+
+  it('collects caption math only where render.ts emits a figcaption', () => {
+    const org = [
+      '#+CAPTION: a $hidden$ caption',
+      '#+BEGIN_SRC typst',
+      '#let a = 1',
+      '#+END_SRC',
+    ].join('\n');
+    // A kernel block never renders its caption, so compiling `$hidden$`
+    // would only hide a broken formula from the build.
+    expect(collectTypstSources(parseOrg(org)).math).toEqual([]);
   });
 
   it('deduplicates repeated formulas and collects static diagrams only', () => {

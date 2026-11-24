@@ -77,7 +77,6 @@ const MAX_INLINE_PX = 680;
 
 let compilerPromise: Promise<TypstCompiler> | null = null;
 let queue: Promise<void> = Promise.resolve();
-/** Unique `<style>` payloads seen in HTML compiles, first-seen order. */
 /** Typst's MathML layout CSS; identical for every HTML compile. */
 let mathCss: string | null = null;
 
@@ -336,9 +335,11 @@ export function compileDiagram(src: string): Promise<string> {
       const doc = `#set page(width: auto, height: auto, margin: 6pt)\n${src}`;
       // The page's white background is invisible on the page; dropping it
       // keeps figures transparent for print and forced-colors rendering.
-      return responsiveSvg(stripWhiteBackground(await compileSvg(compiler, doc)));
+      return responsiveSvg(
+        stripWhiteBackground(await compileSvg(compiler, doc, 1)),
+      );
     } catch (error) {
-      throw typstFailure(error);
+      throw typstFailure(error, 1);
     }
   });
 }
@@ -375,10 +376,11 @@ async function compileHtml(
 async function compileSvg(
   compiler: TypstCompiler,
   src: string,
+  preludeLines = 0,
 ): Promise<string> {
   await compiler.addSource(MAIN, src);
   const result = await compiler.compile({ main: MAIN, format: 'svg' });
-  assertNoErrors(result.diagnostics);
+  assertNoErrors(result.diagnostics, preludeLines);
   // A figure is one page. Dropping the rest would silently truncate a
   // diagram that overflowed its page box.
   if (result.pages.length !== 1) {
@@ -390,9 +392,14 @@ async function compileSvg(
   return result.pages[0]!.output;
 }
 
-function assertNoErrors(diagnostics: readonly TypstDiagnostic[]): void {
+function assertNoErrors(
+  diagnostics: readonly TypstDiagnostic[],
+  preludeLines = 0,
+): void {
   const error = diagnostics.find((d) => d.severity === 'error');
-  if (error !== undefined) throw new Error(formatDiagnostic(error));
+  if (error !== undefined) {
+    throw new Error(formatDiagnostic(error, preludeLines));
+  }
 }
 
 /** The first `math` element, including its attributes. */
@@ -440,12 +447,12 @@ function responsiveSvg(svg: string): string {
 }
 
 /** A readable error carrying the diagnostic's file, line and hints. */
-function typstFailure(error: unknown): Error {
+function typstFailure(error: unknown, preludeLines = 0): Error {
   const diagnostics = diagnosticsOf(error);
   if (diagnostics !== null) {
     const first =
       diagnostics.find((d) => d.severity === 'error') ?? diagnostics[0]!;
-    return new Error(formatDiagnostic(first));
+    return new Error(formatDiagnostic(first, preludeLines));
   }
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -460,8 +467,18 @@ function diagnosticsOf(error: unknown): TypstDiagnostic[] | null {
   return diagnostics as TypstDiagnostic[];
 }
 
-function formatDiagnostic(diagnostic: TypstDiagnostic): string {
-  const location = `${diagnostic.file ?? 'typst'}:${diagnostic.line ?? 0}`;
+/**
+ * Format a Typst diagnostic. `preludeLines` unshifts authored lines back to
+ * their position in the block: diagrams compile behind one injected
+ * `#set page` line, so Typst's virtual line numbers run one too high.
+ */
+export function formatDiagnostic(
+  diagnostic: TypstDiagnostic,
+  preludeLines = 0,
+): string {
+  const virtual = diagnostic.line ?? 0;
+  const line = virtual > 0 ? Math.max(1, virtual - preludeLines) : virtual;
+  const location = `${diagnostic.file ?? 'typst'}:${line}`;
   const hints = diagnostic.hints.length
     ? '\n' + diagnostic.hints.map((hint) => `  hint: ${hint}`).join('\n')
     : '';

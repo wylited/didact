@@ -14,6 +14,11 @@
 //   #+BEGIN_SRC typst :results svg   → static diagram (pre-rendered SVG)
 //   #+BEGIN_SRC typst               → executable kernel block (unchanged)
 //   #+BEGIN_SRC typst :file x.svg   → static diagram (same as :results svg)
+//
+// Collection mirrors rendering: links split first (only a description is
+// inline content), then emphasis (`*`/`/` recurse, `=`/`~` are literal), and
+// only then is math read from each remaining run. Fold bodies are walked the
+// same way the renderer walks them.
 
 import type { OrgNode } from './org';
 
@@ -206,6 +211,81 @@ function findCodeClose(text: string, start: number): number {
   return -1;
 }
 
+/**
+ * Org inline markup, mirrors `render.ts`'s RE_LINK / RE_INLINE exactly. The
+ * link alternative comes first so a span that both sides can see is read as
+ * a link; groups 1/2 are the link target and description, group 3 is one
+ * emphasis span. Border rules are copied verbatim: an opening marker may not
+ * follow a word character or `/`, a closing marker may not precede one.
+ */
+const RE_MARKUP =
+  /\[\[([^\[\]]+)\](?:\[([^\]]*)\])?\]|(?<![\w/])(\*[^*\s][^*]*\*|\/[^/\s][^/]*\/|=[^=\s][^=]*=|~[^~\s][^~]*~)(?![\w/])/g;
+
+/**
+ * The link alternative of RE_MARKUP, used only to reject an emphasis
+ * candidate that crosses a link: `render.ts` extracts links first, so
+ * `=see $x$ [[page]]=` is not a code span there (the `$x$` is math), and an
+ * emphasis span that swallows a link must be re-scanned rather than skipped.
+ */
+const RE_LINK_SPAN = /\[\[[^\[\]]+\](?:\[[^\]]*\])?\]/;
+
+/**
+ * Report the formulas in one link- and emphasis-free run of org text.
+ */
+function addMathRuns(
+  run: string,
+  add: (src: string, display: boolean) => void,
+): void {
+  for (const part of splitTypstMath(run)) {
+    if (part.kind === 'math') add(part.src, part.display);
+  }
+}
+
+/**
+ * Report every formula a browser would render from one org inline text.
+ * Mirrors `renderInline` step for step: links first (the label is inline
+ * content — the description if present, otherwise the target without its
+ * `file:` scheme), then emphasis on each link-free run (`*`/`/` recurse,
+ * `=`/`~` stay literal), then `splitTypstMath` on every remaining run.
+ */
+function addTypstMath(
+  text: string,
+  add: (src: string, display: boolean) => void,
+): void {
+  RE_MARKUP.lastIndex = 0;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = RE_MARKUP.exec(text)) !== null) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (m[3] === undefined) {
+      addMathRuns(text.slice(last, start), add);
+      // Only the label is inline content; a bare target is not. With no
+      // description org renders the target itself as the label (minus the
+      // `file:` scheme), and `renderInline` scans that label like any text.
+      addTypstMath(m[2] ?? m[1]!.replace(/^file:/i, ''), add);
+      RE_MARKUP.lastIndex = end;
+      last = end;
+      continue;
+    }
+    const span = m[3]!;
+    const marker = span[0]!;
+    if (RE_LINK_SPAN.test(span)) {
+      // render.ts splits the run at the link before emphasis is considered,
+      // so this candidate is not emphasis at all. Restart one character in
+      // and let the link (and any valid emphasis inside) be found.
+      RE_MARKUP.lastIndex = start + 1;
+      continue;
+    }
+    addMathRuns(text.slice(last, start), add);
+    if (marker === '*' || marker === '/') addTypstMath(span.slice(1, -1), add);
+    // `=` and `~` are literal: a `$` inside them is never math.
+    RE_MARKUP.lastIndex = end;
+    last = end;
+  }
+  addMathRuns(text.slice(last), add);
+}
+
 /** All text-bearing inline content in an org node, in document order. */
 function inlineTexts(node: OrgNode): string[] {
   switch (node.kind) {
@@ -229,30 +309,36 @@ export function collectTypstSources(doc: readonly OrgNode[]): TypstSources {
   const diagrams: string[] = [];
   const seenMath = new Set<string>();
   const seenDiagrams = new Set<string>();
-  const addMath = (text: string): void => {
-    for (const part of splitTypstMath(text)) {
-      if (part.kind !== 'math') continue;
-      const key = mathKey(part.src, part.display);
-      if (seenMath.has(key)) continue;
-      seenMath.add(key);
-      math.push({ src: part.src, display: part.display });
-    }
+  const emitMath = (src: string, display: boolean): void => {
+    const key = mathKey(src, display);
+    if (seenMath.has(key)) return;
+    seenMath.add(key);
+    math.push({ src, display });
   };
-  for (const node of doc) {
-    if (node.kind === 'src') {
-      if (isTypstDiagram(node)) {
+  // Fold bodies are rendered as part of the same document, in place, so the
+  // walk recurses rather than treating a fold as opaque.
+  const visit = (nodes: readonly OrgNode[]): void => {
+    for (const node of nodes) {
+      if (node.kind === 'fold') {
+        visit(node.doc);
+        continue;
+      }
+      if (node.kind === 'src') {
+        if (!isTypstDiagram(node)) continue;
         const key = diagramKey(node.code);
         if (!seenDiagrams.has(key)) {
           seenDiagrams.add(key);
           diagrams.push(node.code);
         }
+        // Only static diagrams render a `#+CAPTION:` figcaption
+        // (`render.ts`); a kernel block's caption never reaches the page,
+        // so a formula there would be compiled for nothing.
+        if (node.caption !== null) addTypstMath(node.caption, emitMath);
+        continue;
       }
-      // Captions are rendered as inline content (`render.ts`), so the
-      // formula in `#+CAPTION: tangent at $P$` needs an artifact too.
-      if (node.caption !== null) addMath(node.caption);
-      continue;
+      for (const text of inlineTexts(node)) addTypstMath(text, emitMath);
     }
-    for (const text of inlineTexts(node)) addMath(text);
-  }
+  };
+  visit(doc);
   return { math, diagrams };
 }

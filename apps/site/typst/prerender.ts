@@ -24,14 +24,23 @@ import { compileDiagram, compileMath, mathLayoutCss } from './engine.ts';
 const mathCache = new Map<string, TypstMathArtifact>();
 const diagramCache = new Map<string, string>();
 
+/** How a block appears in its org source, which picks the location strategy. */
+export type BlockKind = 'math' | 'diagram';
+
 /**
  * Locate a block in its page: the line number and a representative source
  * line. Boilerplate (`#set page`, `#set text`, `#import`) is skipped so the
  * message names the code that failed, not the prelude every block shares.
+ *
+ * Diagram sources are reproduced verbatim in the org file (src blocks), so
+ * the exact `src` locates the block even when a shared prelude line appears
+ * in several diagrams. Math sources appear without their `$` delimiters, so
+ * the delimited form locates them.
  */
-function blockLocation(
+export function blockLocation(
   org: string,
   src: string,
+  kind: BlockKind,
 ): { line: number | null; snippet: string } {
   const lines = src.split('\n');
   const isPrelude = (line: string): boolean =>
@@ -40,12 +49,31 @@ function blockLocation(
   if (offset < 0) offset = lines.findIndex((line) => line.trim() !== '');
   const raw = offset < 0 ? '' : (lines[offset] ?? '').trim();
   const snippet = raw.length > 64 ? `${raw.slice(0, 61)}...` : raw;
+  if (raw === '') return { line: null, snippet };
 
-  const start = org.indexOf(src);
-  const line =
-    start < 0 || offset < 0
-      ? null
-      : org.slice(0, start).split('\n').length + offset;
+  // Exact sources are the reliable locator; fall back to the representative
+  // line when the page's whitespace differs from what was collected.
+  if (kind === 'diagram') {
+    const at = org.indexOf(src);
+    if (at >= 0) return { line: org.slice(0, at).split('\n').length, snippet };
+  } else {
+    // Display (`$$…$$`) and inline (`$…$`) spellings; the earliest wins so a
+    // display formula is not reported at the inner inline offset.
+    let at = -1;
+    for (const needle of [`$$${src}$$`, `$${src}$`]) {
+      const found = org.indexOf(needle);
+      if (found >= 0 && (at < 0 || found < at)) at = found;
+    }
+    if (at >= 0) return { line: org.slice(0, at).split('\n').length, snippet };
+  }
+
+  // Match the whole line, not a substring: a short formula (`x`, `0`) occurs
+  // on many lines, and `indexOf` would happily report an earlier one. The
+  // representative source line is unique enough in practice, and a miss is
+  // better than a confident wrong line.
+  const orgLines = org.split(/\r?\n/);
+  const at = orgLines.findIndex((line) => line.trim() === raw);
+  const line = at < 0 ? null : at + 1;
   return { line, snippet };
 }
 
@@ -60,9 +88,10 @@ function withPage(
   page: string,
   org: string,
   src: string,
+  blockKind: BlockKind,
 ): Error {
   const message = error instanceof Error ? error.message : String(error);
-  const { line, snippet } = blockLocation(org, src);
+  const { line, snippet } = blockLocation(org, src, blockKind);
   const file = page.endsWith('.org') ? page : `${page}.org`;
   const where = line === null ? file : `${file}:${line}`;
   return new Error(`${kind} in ${where} (\`${snippet}\`):\n${message}`);
@@ -112,7 +141,8 @@ export async function prerenderOrgPages(
         artifact = await compileMath(item.src, item.display);
       } catch (error) {
         failures.push(
-          withPage(error, 'typst math', item.page, item.org, item.src).message,
+          withPage(error, 'typst math', item.page, item.org, item.src, 'math')
+            .message,
         );
         continue;
       }
@@ -128,8 +158,14 @@ export async function prerenderOrgPages(
         assertDiagramQuality(svg, item.src);
       } catch (error) {
         failures.push(
-          withPage(error, 'typst diagram', item.page, item.org, item.src)
-            .message,
+          withPage(
+            error,
+            'typst diagram',
+            item.page,
+            item.org,
+            item.src,
+            'diagram',
+          ).message,
         );
         continue;
       }
