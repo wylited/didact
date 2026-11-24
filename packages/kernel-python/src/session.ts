@@ -123,10 +123,12 @@ export class PythonSession implements Session {
         return null;
       });
     } catch (e) {
+      if (keepState) this.clearBlockView();
       return { ok: false, line: 0, message: `compile check failed: ${message(e)}` };
     }
     if (typeof verdict === 'string') {
       const [line, msg] = JSON.parse(verdict) as [number, string];
+      if (keepState) this.clearBlockView();
       return { ok: false, line, message: msg };
     }
     if (!keepState || this.ns === null) {
@@ -148,6 +150,27 @@ export class PythonSession implements Session {
     await this.refresh(py, null);
     const verb = keepState ? 'resumed' : 'loaded';
     return { ok: true, summary: `${verb} · ${lineCount(src)} lines · ${this.statements.length} statements` };
+  }
+
+  /**
+   * Drop the per-block view state after a failed resume, so the panels stop
+   * describing the previous block. The namespace and engine stay alive: a
+   * later successful resume continues from them.
+   */
+  private clearBlockView(): void {
+    this.src = null;
+    this.statements = [];
+    this.out = [];
+    this.cursor = 0;
+    this.prevVars = null;
+    this.vars = new Map();
+    this.failure = null;
+    this.locals = new Map();
+    this.annotations = [];
+    this.progress = null;
+    this.trace = null;
+    this.flow = null;
+    this.frames = [];
   }
 
   // -- run / step ----------------------------------------------------------

@@ -199,6 +199,27 @@ async function main(): Promise<void> {
   assert(consoleText(sh) === 'third 42\n',
     `third block still sees the live namespace (got ${JSON.stringify(consoleText(sh))})`);
 
+  // 11. failed resume: the panels must not keep describing the previous
+  //     block, and the live namespace must survive for the next resume.
+  const sf = makeSession();
+  const sf1 = await sf.load("x = 41\nprint('first', x)\n");
+  assert(sf1.ok, `failed-resume block1 loads (${JSON.stringify(sf1)})`);
+  await sf.run();
+  assert(consoleText(sf) === 'first 41\n',
+    `failed-resume block1 console (got ${JSON.stringify(consoleText(sf))})`);
+  const sfBad = await sf.resume('y =\n');
+  assert(!sfBad.ok && sfBad.line === 1 && /SyntaxError/.test(sfBad.message),
+    `failed resume reports the syntax error (${JSON.stringify(sfBad)})`);
+  assert(consoleText(sf) === '',
+    `failed resume clears the console (got ${JSON.stringify(consoleText(sf))})`);
+  assert(fieldsOf(sf).length === 0,
+    `failed resume leaves no variables panel (got ${JSON.stringify(fieldsOf(sf))})`);
+  const sf2 = await sf.resume('print(x)\n');
+  assert(sf2.ok, `resume after the failure loads (${JSON.stringify(sf2)})`);
+  await sf.run();
+  assert(consoleText(sf) === '41\n',
+    `resume after the failure still sees x = 41 (got ${JSON.stringify(consoleText(sf))})`);
+
   console.log('\nALL PYTHON KERNEL SMOKE CHECKS PASSED');
 }
 
