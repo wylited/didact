@@ -179,7 +179,7 @@ describe('parseOrgChecked: diagnostics', () => {
     ]);
   });
 
-  it('warns when a #+NAME: promise is broken by another construct or EOF', () => {
+  it('warns when a #+NAME: promise is lost to another #+NAME: or EOF', () => {
     const src = [
       '#+TITLE: T',
       '#+NAME: doomed',
@@ -190,6 +190,36 @@ describe('parseOrgChecked: diagnostics', () => {
     expect(diagnostics).toEqual([
       { line: 2, severity: 'warning', message: '#+NAME: doomed is not followed by a source block' },
       { line: 4, severity: 'warning', message: '#+NAME: last is not followed by a source block' },
+    ]);
+  });
+
+  it('keeps a #+NAME: promise across blank lines, comments, and directives until the src block', () => {
+    const src = [
+      '#+TITLE: T',
+      '#+NAME: kept',
+      '',
+      '# # comment',
+      '#+UNKNOWN: x',
+      '#+BEGIN_SRC asm',
+      'ret',
+      '#+END_SRC',
+    ].join('\n');
+    expect(parseOrgChecked(src).diagnostics).toEqual([
+      { line: 5, severity: 'warning', message: 'unsupported directive #+UNKNOWN — dropped by the renderer' },
+    ]);
+  });
+
+  it('warns about the overwritten #+NAME: when two NAME directives are consecutive', () => {
+    const src = [
+      '#+TITLE: T',
+      '#+NAME: first',
+      '#+NAME: second',
+      '#+BEGIN_SRC asm',
+      'ret',
+      '#+END_SRC',
+    ].join('\n');
+    expect(parseOrgChecked(src).diagnostics).toEqual([
+      { line: 2, severity: 'warning', message: '#+NAME: first is not followed by a source block' },
     ]);
   });
 

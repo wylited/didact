@@ -194,8 +194,9 @@ function collectDiagnostics(src: string): OrgDiagnostic[] {
   const report = (line: number, severity: OrgDiagnostic['severity'], message: string): void => {
     diagnostics.push({ line, severity, message });
   };
-  // A #+NAME: promise is fulfilled only by the immediately following construct
-  // being a src block; anything else (or EOF) reports at the #+NAME line.
+  // parseDoc keeps a #+NAME: promise alive across blank lines, comments,
+  // directives, headings, and paragraphs; it is lost only to another #+NAME:
+  // (which overwrites it) or EOF. A src block fulfils it.
   const flushPendingName = (): void => {
     if (pendingName !== null) {
       report(pendingName.line, 'warning', `#+NAME: ${pendingName.name} is not followed by a source block`);
@@ -227,11 +228,9 @@ function collectDiagnostics(src: string): OrgDiagnostic[] {
       const body = dm[2]!.trim();
       switch (kw) {
         case 'Title':
-          flushPendingName();
           seenTitle = true;
           break;
         case 'Subtitle':
-          flushPendingName();
           break;
         case 'Name':
           flushPendingName();
@@ -246,24 +245,20 @@ function collectDiagnostics(src: string): OrgDiagnostic[] {
           break;
         }
         case 'EndSrc':
-          flushPendingName();
           report(lineNo, 'error', '#+END_SRC without #+BEGIN_SRC');
           break;
         case 'Results':
-          flushPendingName();
           inResults = true;
           break;
         default:
-          flushPendingName();
           report(lineNo, 'warning', `unsupported directive #+${dm[1]} — dropped by the renderer`);
           break;
       }
       continue;
     }
 
-    // Headings, lists, tables, and paragraphs are constructs: they break a
-    // pending #+NAME promise. Line-oriented constructs may still warn.
-    flushPendingName();
+    // Headings, lists, tables, and paragraphs do not lose a pending #+NAME
+    // promise (parseDoc keeps it until a src block, another #+NAME, or EOF).
     if (RE_NUMBERED_LIST.test(line)) report(lineNo, 'warning', 'numbered lists are not rendered; use "- "');
     if (RE_BLOCKQUOTE.test(line)) report(lineNo, 'warning', 'blockquotes are not rendered');
     if (RE_MD_LINK.test(line)) report(lineNo, 'warning', 'Markdown links are not supported; use [[url][label]]');

@@ -173,7 +173,9 @@ The org file must remain valid org-babel source in Emacs.
 ### Org-subset grammar
 
 - `*`… headings (depth = stars); `#+TITLE:`/`#+SUBTITLE:` page header.
-- `#+NAME: <id>` names the next block.
+- `#+NAME: <id>` names the next block (blank lines, comments, and other
+  directives in between do not drop the promise; only another `#+NAME:`
+  or EOF does).
 - `#+BEGIN_SRC <lang> [headers]` / `#+END_SRC`; babel headers parsed+ignored,
   except `:session <name>` (below).
 - `:session <name>` header: blocks with the same kernel and name on one
@@ -185,7 +187,8 @@ The org file must remain valid org-babel source in Emacs.
   unsupported badge.
 - `#+RESULTS:` slot replaced by live output on run (DOM only).
 - Unsupported constructs (unknown `#+` directives, stray `#+END_SRC`,
-  unterminated src blocks, orphan `#+NAME:`, numbered lists, blockquotes,
+  unterminated src blocks, a `#+NAME:` promise lost to another `#+NAME:` or
+  EOF, numbered lists, blockquotes,
   Markdown links, `:` output outside `#+RESULTS:`, missing `#+TITLE:`) are
   reported by `parseOrgChecked` as `{ line, severity, message }`; the site
   shows them in a banner and `didact check` reports them. Plain `# ` comments
