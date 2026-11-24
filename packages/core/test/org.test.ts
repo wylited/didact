@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseOrg } from '../src/org';
+import { parseOrg, parseOrgChecked } from '../src/org';
 
 describe('parseOrg: directives', () => {
   it('parses #+TITLE and #+SUBTITLE into title/subtitle nodes', () => {
@@ -153,5 +153,150 @@ describe('parseOrg: #+RESULTS colon stripping', () => {
       { kind: 'results', name: null, canned: '42' },
       { kind: 'para', text: 'not a results line : orphan' }, // later : lines are prose
     ]);
+  });
+});
+
+describe('parseOrgChecked: diagnostics', () => {
+  it('warns about unsupported directives using the keyword as written', () => {
+    const { diagnostics } = parseOrgChecked('#+TITLE: T\n#+FOO: bar\n#+SETUPFILE: whatever\nhello\n');
+    expect(diagnostics).toEqual([
+      { line: 2, severity: 'warning', message: 'unsupported directive #+FOO — dropped by the renderer' },
+      { line: 3, severity: 'warning', message: 'unsupported directive #+SETUPFILE — dropped by the renderer' },
+    ]);
+  });
+
+  it('errors on #+END_SRC outside a source block', () => {
+    const { diagnostics } = parseOrgChecked('#+TITLE: T\n#+END_SRC\n');
+    expect(diagnostics).toEqual([
+      { line: 2, severity: 'error', message: '#+END_SRC without #+BEGIN_SRC' },
+    ]);
+  });
+
+  it('errors on an unterminated source block at its #+BEGIN_SRC line', () => {
+    const { diagnostics } = parseOrgChecked('#+TITLE: T\n#+BEGIN_SRC asm -n\nret\n');
+    expect(diagnostics).toEqual([
+      { line: 2, severity: 'error', message: 'unclosed #+BEGIN_SRC (asm)' },
+    ]);
+  });
+
+  it('warns when a #+NAME: promise is broken by another construct or EOF', () => {
+    const src = [
+      '#+TITLE: T',
+      '#+NAME: doomed',
+      'A paragraph intervenes.',
+      '#+NAME: last',
+    ].join('\n');
+    const { diagnostics } = parseOrgChecked(src);
+    expect(diagnostics).toEqual([
+      { line: 2, severity: 'warning', message: '#+NAME: doomed is not followed by a source block' },
+      { line: 4, severity: 'warning', message: '#+NAME: last is not followed by a source block' },
+    ]);
+  });
+
+  it('warns once at line 1 when #+TITLE: is missing', () => {
+    const { diagnostics } = parseOrgChecked('just prose\n');
+    expect(diagnostics).toEqual([
+      { line: 1, severity: 'warning', message: 'missing #+TITLE: line' },
+    ]);
+  });
+
+  it('warns about numbered list markers', () => {
+    const { diagnostics } = parseOrgChecked('#+TITLE: T\n1. first\n2) second\n');
+    expect(diagnostics).toEqual([
+      { line: 2, severity: 'warning', message: 'numbered lists are not rendered; use "- "' },
+      { line: 3, severity: 'warning', message: 'numbered lists are not rendered; use "- "' },
+    ]);
+  });
+
+  it('warns about blockquotes', () => {
+    const { diagnostics } = parseOrgChecked('#+TITLE: T\n> quote\n');
+    expect(diagnostics).toEqual([
+      { line: 2, severity: 'warning', message: 'blockquotes are not rendered' },
+    ]);
+  });
+
+  it('warns about Markdown links', () => {
+    const { diagnostics } = parseOrgChecked('#+TITLE: T\nSee [docs](https://example.com).\n');
+    expect(diagnostics).toEqual([
+      { line: 2, severity: 'warning', message: 'Markdown links are not supported; use [[url][label]]' },
+    ]);
+  });
+
+  it('warns about ":" output lines outside #+RESULTS', () => {
+    const { diagnostics } = parseOrgChecked('#+TITLE: T\n: stray output\n');
+    expect(diagnostics).toEqual([
+      { line: 2, severity: 'warning', message: '":" output line outside a #+RESULTS block is rendered as prose' },
+    ]);
+  });
+
+  it('stays quiet for hidden comments, org links, headings, lists, and tables', () => {
+    const src = [
+      '#+TITLE: T',
+      '# a hidden comment',
+      '* Heading',
+      '- bullet one',
+      '| a | b |',
+      'A [[https://example.com][link]] and [[file:page.org][page]].',
+    ].join('\n');
+    expect(parseOrgChecked(src).diagnostics).toEqual([]);
+  });
+
+  it('produces no diagnostics for constructs inside source blocks', () => {
+    const src = [
+      '#+TITLE: T',
+      '#+NAME: block',
+      '#+BEGIN_SRC text',
+      '1. numbered',
+      '> quoted',
+      '[link](https://example.com)',
+      '#+FOO: nope',
+      ': output',
+      '#+END_SRC',
+    ].join('\n');
+    expect(parseOrgChecked(src).diagnostics).toEqual([]);
+  });
+
+  it('collects diagnostics in document order across rules', () => {
+    const src = [
+      '#+TITLE: T',
+      '1. first',
+      '> quote',
+      '[x](y)',
+      ': stray',
+    ].join('\n');
+    const { diagnostics } = parseOrgChecked(src);
+    expect(diagnostics.map((d) => d.line)).toEqual([2, 3, 4, 5]);
+    expect(diagnostics.map((d) => d.message)).toEqual([
+      'numbered lists are not rendered; use "- "',
+      'blockquotes are not rendered',
+      'Markdown links are not supported; use [[url][label]]',
+      '":" output line outside a #+RESULTS block is rendered as prose',
+    ]);
+  });
+
+  it('leaves the produced doc identical to parseOrg for a mixed document', () => {
+    const src = [
+      '#+TITLE: Registers',
+      '#+SUBTITLE: x86-64 basics',
+      '',
+      '# a hidden comment',
+      '* Registers',
+      'Plain [[https://example.com][link]] text.',
+      '',
+      '#+NAME: add',
+      '#+BEGIN_SRC asm -n',
+      '  mov rax, 1',
+      '#+END_SRC',
+      '#+RESULTS: add',
+      ': 42',
+    ].join('\n');
+    const checked = parseOrgChecked(src);
+    expect(checked.doc).toEqual(parseOrg(src));
+    expect(checked.diagnostics).toEqual([]);
+  });
+
+  it('does not alter the doc when diagnostics are present', () => {
+    const src = '#+NAME: orphan\n1. numbered\n> quote\n[x](y)\n: stray\n';
+    expect(parseOrgChecked(src).doc).toEqual(parseOrg(src));
   });
 });

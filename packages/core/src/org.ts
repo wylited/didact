@@ -15,11 +15,40 @@ export type OrgNode =
 /** A parsed lesson document (flat node list, document order). */
 export type OrgDoc = OrgNode[];
 
+/** A construct the subset parser/rendering does not support. */
+export interface OrgDiagnostic {
+  /** 1-based source line. */
+  line: number;
+  severity: 'warning' | 'error';
+  message: string;
+}
+
 // #+TITLE: has a colon; #+BEGIN_SRC does not — make the colon optional.
 const RE_DIRECTIVE = /^#\+([A-Za-z_]+):?(.*)$/;
 const RE_END_SRC = /^\s*#\+END_SRC\s*$/i;
+const RE_NUMBERED_LIST = /^\s*\d+[.)]\s/;
+const RE_BLOCKQUOTE = /^\s*>\s?/;
+const RE_MD_LINK = /\[[^\]\n]*\]\([^)\n]*\)/;
+const RE_OUTPUT_LINE = /^\s*:/;
 
+function normalizeKeyword(raw: string): string {
+  return raw.split('_').map((p) => p[0]!.toUpperCase() + p.slice(1).toLowerCase()).join('');
+}
+
+/** Parse a document, discarding diagnostics (byte-identical rendering). */
 export function parseOrg(src: string): OrgDoc {
+  return parseOrgChecked(src).doc;
+}
+
+/**
+ * Parse a document and report unsupported constructs in document order.
+ * Diagnostics never affect the produced doc.
+ */
+export function parseOrgChecked(src: string): { doc: OrgDoc; diagnostics: OrgDiagnostic[] } {
+  return { doc: parseDoc(src), diagnostics: collectDiagnostics(src) };
+}
+
+function parseDoc(src: string): OrgDoc {
   const nodes: OrgNode[] = [];
   const lines = src.split(/\r?\n/);
   let i = 0;
@@ -33,7 +62,7 @@ export function parseOrg(src: string): OrgDoc {
     if (t.startsWith('#')) {
       const dm = RE_DIRECTIVE.exec(t);
       if (dm === null) { i++; continue; } // plain '# comment' → hidden
-      const kw = dm[1]!.split('_').map((p) => p[0]!.toUpperCase() + p.slice(1).toLowerCase()).join('');
+      const kw = normalizeKeyword(dm[1]!);
       const body = dm[2]!.trim();
       switch (kw) {
         case 'Title':
@@ -145,4 +174,109 @@ export function parseOrg(src: string): OrgDoc {
     nodes.push({ kind: 'para', text: para.join(' ') });
   }
   return nodes;
+}
+
+/**
+ * Line-oriented scan for constructs the subset renderer cannot express.
+ * Mirrors parseDoc's structure enough to know which lines are src code and
+ * which belong to a #+RESULTS block; it never mutates the doc.
+ */
+function collectDiagnostics(src: string): OrgDiagnostic[] {
+  const diagnostics: OrgDiagnostic[] = [];
+  const lines = src.split(/\r?\n/);
+  let inSrc = false;
+  let srcBeginLine = 0;
+  let srcLang = 'text';
+  let inResults = false;
+  let pendingName: { name: string; line: number } | null = null;
+  let seenTitle = false;
+
+  const report = (line: number, severity: OrgDiagnostic['severity'], message: string): void => {
+    diagnostics.push({ line, severity, message });
+  };
+  // A #+NAME: promise is fulfilled only by the immediately following construct
+  // being a src block; anything else (or EOF) reports at the #+NAME line.
+  const flushPendingName = (): void => {
+    if (pendingName !== null) {
+      report(pendingName.line, 'warning', `#+NAME: ${pendingName.name} is not followed by a source block`);
+      pendingName = null;
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const lineNo = i + 1;
+
+    if (inSrc) {
+      if (RE_END_SRC.test(line)) inSrc = false;
+      continue; // no diagnostics inside source code
+    }
+
+    if (inResults) {
+      if (RE_OUTPUT_LINE.test(line)) continue;
+      inResults = false;
+    }
+
+    const t = line.trim();
+    if (t === '') continue;
+
+    if (t.startsWith('#')) {
+      const dm = RE_DIRECTIVE.exec(t);
+      if (dm === null) continue; // plain '# comment' → intentionally hidden
+      const kw = normalizeKeyword(dm[1]!);
+      const body = dm[2]!.trim();
+      switch (kw) {
+        case 'Title':
+          flushPendingName();
+          seenTitle = true;
+          break;
+        case 'Subtitle':
+          flushPendingName();
+          break;
+        case 'Name':
+          flushPendingName();
+          pendingName = { name: body.split(/\s+/)[0] ?? '', line: lineNo };
+          break;
+        case 'BeginSrc': {
+          pendingName = null; // promise fulfilled by this block
+          const lang = (body.split(/\s+/).filter(Boolean)[0] ?? '').toLowerCase();
+          inSrc = true;
+          srcBeginLine = lineNo;
+          srcLang = lang || 'text';
+          break;
+        }
+        case 'EndSrc':
+          flushPendingName();
+          report(lineNo, 'error', '#+END_SRC without #+BEGIN_SRC');
+          break;
+        case 'Results':
+          flushPendingName();
+          inResults = true;
+          break;
+        default:
+          flushPendingName();
+          report(lineNo, 'warning', `unsupported directive #+${dm[1]} — dropped by the renderer`);
+          break;
+      }
+      continue;
+    }
+
+    // Headings, lists, tables, and paragraphs are constructs: they break a
+    // pending #+NAME promise. Line-oriented constructs may still warn.
+    flushPendingName();
+    if (RE_NUMBERED_LIST.test(line)) report(lineNo, 'warning', 'numbered lists are not rendered; use "- "');
+    if (RE_BLOCKQUOTE.test(line)) report(lineNo, 'warning', 'blockquotes are not rendered');
+    if (RE_MD_LINK.test(line)) report(lineNo, 'warning', 'Markdown links are not supported; use [[url][label]]');
+    if (RE_OUTPUT_LINE.test(line)) {
+      report(lineNo, 'warning', '":" output line outside a #+RESULTS block is rendered as prose');
+    }
+  }
+
+  if (inSrc) report(srcBeginLine, 'error', `unclosed #+BEGIN_SRC (${srcLang})`);
+  flushPendingName();
+  if (!seenTitle) report(1, 'warning', 'missing #+TITLE: line');
+
+  // Stable sort keeps same-line diagnostics in rule order.
+  diagnostics.sort((a, b) => a.line - b.line);
+  return diagnostics;
 }

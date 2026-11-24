@@ -176,6 +176,12 @@ The org file must remain valid org-babel source in Emacs.
 - `#+NAME: <id>` names the next block.
 - `#+BEGIN_SRC <lang> [headers]` / `#+END_SRC`; babel headers parsed+ignored.
 - `#+RESULTS:` slot replaced by live output on run (DOM only).
+- Unsupported constructs (unknown `#+` directives, stray `#+END_SRC`,
+  unterminated src blocks, orphan `#+NAME:`, numbered lists, blockquotes,
+  Markdown links, `:` output outside `#+RESULTS:`, missing `#+TITLE:`) are
+  reported by `parseOrgChecked` as `{ line, severity, message }`; the site
+  shows them in a banner and `didact check` reports them. Plain `# ` comments
+  stay hidden.
 - Paragraphs with `*bold*` `/italic/` `=code=` `~verbatim~`; `- ` bullet
   lists; `| a | b |` tables; `# ` comments hidden.
 - Links: `[[file:<page>.org][label]]` (page), `[[file:<page>.org::*Heading][label]]`

@@ -913,3 +913,59 @@ describe('mountSite: document links', () => {
       .toBe('#/target/later');
   });
 });
+
+describe('mountSite: org diagnostics', () => {
+  /** Line 2 carries an unsupported directive; the heading on line 4
+   *  renders normally, so the page still shows a real article. */
+  const WARNED: PageSpec = {
+    title: 'Warned',
+    orgSource: '#+TITLE: Warned\n#+FOO: bar\n\n* Heading\n\nBody.\n',
+  };
+  const CLEAN: PageSpec = {
+    title: 'Clean',
+    orgSource: '#+TITLE: Clean\n\n* Heading\n\nBody.\n',
+  };
+
+  it('reports unsupported org syntax in a banner before the article', () => {
+    const { handle, root } = mount([WARNED]);
+    handles.push(handle);
+
+    expect(root.querySelectorAll("[data-test='org-warnings']")).toHaveLength(1);
+    const warnings = [...root.querySelectorAll("[data-test='org-warning']")];
+    expect(warnings.map((el) => el.textContent)).toEqual([
+      'line 2: unsupported directive #+FOO — dropped by the renderer',
+    ]);
+    expect(warnings[0]!.getAttribute('data-severity')).toBe('warning');
+
+    const docPane = root.querySelector('.lw-doc-pane')!;
+    expect(docPane.firstElementChild!.getAttribute('data-test')).toBe('org-warnings');
+    expect(docPane.firstElementChild!.nextElementSibling!.getAttribute('data-test'))
+      .toBe('page');
+    // the warning is a banner, not a replacement for the rendered page
+    expect(root.querySelector("[data-test='page'] h2")!.textContent).toBe('Heading');
+  });
+
+  it('a clean page has no banner', () => {
+    const { handle, root } = mount([CLEAN]);
+    handles.push(handle);
+    expect(root.querySelectorAll("[data-test='org-warnings']")).toHaveLength(0);
+    expect(root.querySelectorAll("[data-test='org-warning']")).toHaveLength(0);
+    expect(root.querySelector('.lw-doc-pane')!.firstElementChild!.getAttribute('data-test'))
+      .toBe('page');
+  });
+
+  it('switching from a warned page to a clean page removes the banner', () => {
+    const { handle, root } = mount([WARNED, CLEAN]);
+    handles.push(handle);
+    expect(root.querySelectorAll("[data-test='org-warnings']")).toHaveLength(1);
+
+    location.hash = '#/clean';
+    hashChanged();
+
+    expect(handle.activeIndex).toBe(1);
+    expect(root.querySelectorAll("[data-test='org-warnings']")).toHaveLength(0);
+    expect(root.querySelectorAll("[data-test='org-warning']")).toHaveLength(0);
+    expect(root.querySelector('.lw-doc-pane')!.firstElementChild!.getAttribute('data-test'))
+      .toBe('page');
+  });
+});

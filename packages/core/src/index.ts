@@ -6,8 +6,8 @@ import '@fontsource/atkinson-hyperlegible/400-italic.css';
 import '@fontsource/atkinson-hyperlegible/700.css';
 
 export type { Kernel, Session, Panel, Field, ListingRow, LoadResult, RunResult } from './kernel';
-export { parseOrg } from './org';
-export type { OrgDoc, OrgNode } from './org';
+export { parseOrg, parseOrgChecked } from './org';
+export type { OrgDoc, OrgDiagnostic, OrgNode } from './org';
 export { renderDocument, renderInline } from './render';
 export type { RenderedDoc, RenderedBlock } from './render';
 export { BlockRuntime } from './block';

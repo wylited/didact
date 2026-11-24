@@ -556,6 +556,29 @@ code.lw-inline {
 }
 .lw-list li { margin-bottom: 0.35em; }
 
+/* unsupported-construct report: a hairline band above the article, no
+   fill and no accent — errors take the error ink, warnings plain ink */
+.lw-org-warnings {
+  border-top: 1px solid var(--lw-hairline);
+  border-bottom: 1px solid var(--lw-hairline);
+  padding: 0.55em 0;
+  margin: 0 0 1.5em;
+}
+.lw-org-warnings-title {
+  font-variant: small-caps;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  margin: 0 0 0.35em;
+}
+.lw-org-warnings ul {
+  margin: 0;
+  padding-left: 1.5em;
+  font-size: 0.9em;
+}
+.lw-org-warnings li { margin: 0 0 0.2em; }
+.lw-org-warnings li[data-severity='warning'] { color: var(--lw-gray); }
+.lw-org-warnings li[data-severity='error'] { color: var(--lw-error); }
+
 /* tables and listings are not prose: they may run past the reading
    measure up to the doc's 90ch ceiling (wider and the eye loses the
    row across the page), but never past their column */

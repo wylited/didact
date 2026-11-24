@@ -47,8 +47,8 @@
 
 import { BlockRuntime } from './block';
 import type { Kernel } from './kernel';
-import { parseOrg } from './org';
-import type { OrgDoc } from './org';
+import { parseOrgChecked } from './org';
+import type { OrgDiagnostic, OrgDoc } from './org';
 import { renderDocument } from './render';
 import { PanelHost } from './panel';
 import { installTooltips } from './tooltip';
@@ -284,9 +284,21 @@ export function mountSite(opts: MountOptions): SiteHandle {
   let blocks: BlockRuntime[] = [];
   const slugs = pageSlugs(pages);
   // Parsed once: the rendered page and the link index read the same doc.
-  const parsedPages = pages.map((page) => parseOrg(page.orgSource));
+  // Diagnostics are unsupported-construct reports, surfaced per page in
+  // the document column (and logged here, once per page build).
+  const parsedPages = pages.map((page) => {
+    const parsed = parseOrgChecked(page.orgSource);
+    if (parsed.diagnostics.length > 0) {
+      const lines = parsed.diagnostics.map((d) => `  line ${d.line}: ${d.message}`);
+      console.warn(
+        [`didact: ${page.title} has ${parsed.diagnostics.length} org diagnostic(s)`,
+          ...lines].join('\n'),
+      );
+    }
+    return parsed;
+  });
   const linkIndex = pages.map(
-    (page, i) => buildPageLinkIndex(page, parsedPages[i]!, slugs[i]!));
+    (page, i) => buildPageLinkIndex(page, parsedPages[i]!.doc, slugs[i]!));
   const links = pages.map((page, i) => {
     const a = doc.createElement('a');
     a.className = 'lw-nav-link';
@@ -408,6 +420,28 @@ export function mountSite(opts: MountOptions): SiteHandle {
     for (const { heading } of tocEntries) spy.observe(heading);
   }
 
+  /** Unsupported-construct report for one page: a hairline band above
+   *  the article. Real DOM + textContent only (messages are source
+   *  text, never markup); absent entirely when the page is clean. */
+  function warningsBanner(diagnostics: readonly OrgDiagnostic[]): HTMLElement {
+    const box = doc.createElement('div');
+    box.className = 'lw-org-warnings';
+    box.dataset.test = 'org-warnings';
+    const title = doc.createElement('p');
+    title.className = 'lw-org-warnings-title';
+    title.textContent = 'Unsupported Org syntax';
+    const list = doc.createElement('ul');
+    for (const diagnostic of diagnostics) {
+      const item = doc.createElement('li');
+      item.dataset.test = 'org-warning';
+      item.dataset.severity = diagnostic.severity;
+      item.textContent = `line ${diagnostic.line}: ${diagnostic.message}`;
+      list.appendChild(item);
+    }
+    box.append(title, list);
+    return box;
+  }
+
   function show(index: number): void {
     if (index < 0 || index >= pages.length || index === active) return;
     for (const block of blocks) block.dispose();
@@ -416,12 +450,16 @@ export function mountSite(opts: MountOptions): SiteHandle {
     if (active !== -1) panel.detach(); // page switch: panel detaches
     active = index;
 
+    const parsed = parsedPages[index]!;
     const rendered = renderDocument(
-      parsedPages[index]!,
+      parsed.doc,
       (lang) => byLang.has(lang),
       (target) => resolveLinkTarget(target, index, linkIndex, slugs),
     );
     rendered.root.dataset.test = 'page';
+    if (parsed.diagnostics.length > 0) {
+      docPane.appendChild(warningsBanner(parsed.diagnostics));
+    }
     docPane.appendChild(rendered.root);
     buildToc(rendered.root, slugs[index]!);
 
