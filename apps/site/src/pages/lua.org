@@ -65,7 +65,7 @@ print(a, b)
 
 * Truthiness and 1-based indexing
 
-If you mostly write Python, C, or JS, two things in Lua will catch you off guard: =0= and =""= are both truthy (only =nil= and =false= are falsy), and arrays start at index =1= (=t[0]= is just =nil=).
+If you mostly write [[file:python.org][Python]], [[file:c.org][C]], or [[file:javascript.org][JS]], two things in Lua will catch you off guard: =0= and =""= are both truthy (only =nil= and =false= are falsy), and arrays start at index =1= (=t[0]= is just =nil=).
 
 #+NAME: truth-and-one
 #+BEGIN_SRC lua

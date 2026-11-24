@@ -49,6 +49,13 @@ export interface RunResult {
 export interface Session {
   load(src: string): Promise<LoadResult>;
   /**
+   * Continue this session's state with another block's source (org
+   * `:session <name>`): definitions and data from earlier blocks stay
+   * live. Optional — kernels that cannot continue a session omit it and
+   * the site marks their `:session` blocks unsupported.
+   */
+  resume?(src: string): Promise<LoadResult>;
+  /**
    * Run to completion, or stop immediately *before* executing any
    * instruction whose 1-based source line is in `breakpoints`. Kernels
    * that cannot honor breakpoints ignore the argument.
@@ -76,6 +83,7 @@ export interface Kernel {
     | 'lua'
     | 'octave'
     | 'python'
+    | 'prolog'
     | 'regexp'
     | 'scheme'
     | 'sql'

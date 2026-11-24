@@ -29,11 +29,11 @@ the same change.
 | `regex` | `regexp` | Stream (`modes.ts` `regexpMode`) | good | *was `plain`*: now metacharacters, `[]`/`[^]` classes, `{n,m}`, `#` comment lines; test-input lines stay plain |
 | `wasm` | `wat` | Stream (`modes.ts` `watMode`) | good | *was `scheme`* (highlighted as Lisp): nodes `(module`/`(func`, `i32.*` opcodes, `$names`, `;;`/`(; ;)` |
 | `typst` | `typst` | Stream (`modes.ts` `typstMode`) | good | *was `plain`*: headings, list markers, `*strong*`, `_emph_`, `$math$`, `#set`/`#let`, `#{}` code |
-| `prolog` | `plain` | — | missing | no stock mode; a `prologMode` (clauses `:-`, `?-`, quoted atoms, `%` comments) is the obvious next 60-line mode |
+| `prolog` | `prolog` | Stream (`modes.ts` `prologMode`) | good | *was `plain`*: `%` and `/* */` comments, `'atom'`/`"string"`/`` `string` ``, variables, numbers, necks `:-`/`?-`/`-->`, operators `->`/`;`/`!`/`\+`, builtins; plain atoms stay plain |
 
 Superseded ids: the README/AGENTS list of supported syntaxes was stale
-(`lua`/`octave` absent). They are listed now, alongside the three new ids.
-The union gained `regexp`, `typst`, `wat` and lost nothing; all sixteen
+(`lua`/`octave` absent). They are listed now, alongside the four new ids.
+The union gained `prolog`, `regexp`, `typst`, `wat` and lost nothing; all sixteen
 `packages/*/src/types.ts` mirrors were re-synced with `packages/core/src/kernel.ts`.
 
 Verification: `packages/core/test/languages.test.ts` scans every
@@ -86,11 +86,10 @@ data):
 - `packages/kernel-matlab/test/columns-panel.test.ts` — builder over plain
   data + interpreter loop tracking (three columns of a 2x3, `while` passes).
 - `packages/core/test/languages.test.ts` — extended (mode resolution for every
-  registered kernel, exact token classes for sql/regexp/wat/typst).
+  registered kernel, exact token classes for sql/regexp/wat/typst/prolog).
 
 ## 4. Deferred / needs a dependency
 
-- `prolog` editor mode (implementable in ~60 lines of `StreamLanguage`, no dependency).
 - C/C++ disassembly panel: needs a wasm decoder; add
   `@webassemblyjs/disasm@1.14.1` (or vendor `wabt`'s `wasm2wat`) and a
   source-map sidecar from clang (`-g` DWARF parse) to line-map rows.

@@ -88,9 +88,24 @@ export class PythonSession implements Session {
     this.engine = engine;
   }
 
-  // -- load ----------------------------------------------------------------
+  // -- load / resume -------------------------------------------------------
 
   async load(src: string): Promise<LoadResult> {
+    return this.prepare(src, false);
+  }
+
+  /** Continue the live namespace with another block (`:session <name>`). */
+  async resume(src: string): Promise<LoadResult> {
+    return this.prepare(src, true);
+  }
+
+  /**
+   * The shared load path. `keepState` keeps the namespace, so an org
+   * `:session` block sees the definitions and data of earlier blocks.
+   * Every call resets the per-block run state (console, cursor, trace,
+   * failure story), so the next run shows only this block's output.
+   */
+  private async prepare(src: string, keepState: boolean): Promise<LoadResult> {
     let py: PyodideInterface;
     try {
       py = await this.engine();
@@ -108,14 +123,18 @@ export class PythonSession implements Session {
         return null;
       });
     } catch (e) {
+      if (keepState) this.clearBlockView();
       return { ok: false, line: 0, message: `compile check failed: ${message(e)}` };
     }
     if (typeof verdict === 'string') {
       const [line, msg] = JSON.parse(verdict) as [number, string];
+      if (keepState) this.clearBlockView();
       return { ok: false, line, message: msg };
     }
-    this.ns?.destroy();
-    this.ns = py.toPy({ __name__: '__main__' });
+    if (!keepState || this.ns === null) {
+      this.ns?.destroy();
+      this.ns = py.toPy({ __name__: '__main__' });
+    }
     this.src = src;
     this.out = [];
     this.cursor = 0;
@@ -129,7 +148,29 @@ export class PythonSession implements Session {
     this.frames = [];
     this.statements = await this.json<Statement[]>(py, 'lw_split_json(src)', { src });
     await this.refresh(py, null);
-    return { ok: true, summary: `loaded · ${lineCount(src)} lines · ${this.statements.length} statements` };
+    const verb = keepState ? 'resumed' : 'loaded';
+    return { ok: true, summary: `${verb} · ${lineCount(src)} lines · ${this.statements.length} statements` };
+  }
+
+  /**
+   * Drop the per-block view state after a failed resume, so the panels stop
+   * describing the previous block. The namespace and engine stay alive: a
+   * later successful resume continues from them.
+   */
+  private clearBlockView(): void {
+    this.src = null;
+    this.statements = [];
+    this.out = [];
+    this.cursor = 0;
+    this.prevVars = null;
+    this.vars = new Map();
+    this.failure = null;
+    this.locals = new Map();
+    this.annotations = [];
+    this.progress = null;
+    this.trace = null;
+    this.flow = null;
+    this.frames = [];
   }
 
   // -- run / step ----------------------------------------------------------

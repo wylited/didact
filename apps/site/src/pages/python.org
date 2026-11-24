@@ -1,7 +1,7 @@
 #+TITLE: Python in the Browser
 #+SUBTITLE: Real CPython 3.14 running locally on Pyodide
 
-Hit Run on any block and it executes on real CPython compiled to WebAssembly (Pyodide, ~13 MB fetched once and cached). Nothing leaves your browser.
+Hit Run on any block and it executes on real CPython compiled to [[file:wasm.org][WebAssembly]] (Pyodide, ~13 MB fetched once and cached). Nothing leaves your browser.
 
 Each block gets its own clean global namespace, so variables do not leak from one block to another, and re-running starts fresh. There is no single-stepping here; blocks run straight through and dump their globals (with =repr= and type) into the Variables panel on the right.
 
@@ -53,3 +53,21 @@ print("fib(10) =", fib(10))
 : fib(10) = 55
 
 Try dropping a closing parenthesis or adding =1 / 0= to see real CPython syntax errors and tracebacks in the console panel.
+
+* Practice: sum of squares
+
+#+BEGIN_HINT
+A generator expression inside the built-in =sum= does it in one line. The expected console output is a single integer.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC python
+print(sum(n * n for n in range(5)))
+#+END_SRC
+#+END_SOLUTION
+
+#+EXERCISE: Sum the squares of 0 through 4
+#+CHECK: 30
+#+BEGIN_SRC python
+print(sum(n * n for n in range(5)))
+#+END_SRC

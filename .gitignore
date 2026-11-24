@@ -8,3 +8,5 @@ apps/site/public/vendor/
 apps/site/public/vendor-c/
 apps/site/public/vendor-python/
 apps/site/public/vendor-typst/
+# build-time Typst package archives (best-effort disk cache)
+apps/site/.typst-cache/

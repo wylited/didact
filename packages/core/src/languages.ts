@@ -1,7 +1,7 @@
 // languages.ts — maps a kernel's declared `editorSyntax` to a CodeMirror
 // language extension for the block editor. Assembly dialects live in
-// asm.ts, the syntaxes legacy-modes does not cover (sql, regex, WAT, Typst)
-// in modes.ts; c/lua/octave/python/scheme come from
+// asm.ts, the syntaxes legacy-modes does not cover (sql, regex, WAT, Typst,
+// Prolog) in modes.ts; c/lua/octave/python/scheme come from
 // @codemirror/legacy-modes; javascript/cpp from their Lezer grammars.
 // 'plain' (and any unknown id) gets no language extension — plain text,
 // still Ayu Light. Every id of `Kernel['editorSyntax']` resolves here
@@ -23,7 +23,7 @@ import { scheme } from '@codemirror/legacy-modes/mode/scheme';
 import type { Extension } from '@codemirror/state';
 import { intelAsm, mipsAsm, riscvAsm } from './asm';
 import type { Kernel } from './kernel';
-import { regexpMode, sqlMode, typstMode, watMode } from './modes';
+import { prologMode, regexpMode, sqlMode, typstMode, watMode } from './modes';
 
 const LANGUAGES: Record<NonNullable<Kernel['editorSyntax']>, Extension | null> = {
   'asm-intel': intelAsm,
@@ -35,6 +35,7 @@ const LANGUAGES: Record<NonNullable<Kernel['editorSyntax']>, Extension | null> =
   lua: StreamLanguage.define(lua),
   octave: StreamLanguage.define(octave),
   python: StreamLanguage.define(python),
+  prolog: prologMode,
   regexp: regexpMode,
   scheme: StreamLanguage.define(scheme),
   sql: sqlMode,

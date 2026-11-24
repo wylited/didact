@@ -2,8 +2,20 @@
 // point that site.ts fills with a BlockRuntime; read-only languages render
 // as a static listing. Results slots pair with the nearest preceding src
 // block (by #+NAME: when given).
+//
+// Links: `[[target][description]]` (description optional). http(s)/mailto
+// targets become real anchors; every other target goes through the
+// caller's LinkResolver, which returns a site fragment (or null for an
+// unresolved link, rendered inert and visibly broken).
 
 import type { OrgDoc, OrgNode } from './org';
+import {
+  diagramKey,
+  isTypstDiagram,
+  mathKey,
+  splitTypstMath,
+  type TypstRenderOptions,
+} from './typst-source';
 
 export interface RenderedBlock {
   /** 1-based index among executable blocks (for "Block N"). */
@@ -20,6 +32,18 @@ export interface RenderedDoc {
   blocks: RenderedBlock[];
 }
 
+/** Resolve an internal link target (org `[[target]]` without a URL
+ *  scheme) to a site fragment (`#/<page>/<section>`); null means
+ *  unresolved. */
+export type LinkResolver = (target: string) => string | null;
+
+/** Everything the renderer needs from its host. Kept as one object because
+ *  the parameters are orthogonal and both are usually absent. */
+export interface RenderOptions {
+  resolveLink?: LinkResolver;
+  typst?: TypstRenderOptions;
+}
+
 // Inline markup: *bold* /italic/ =code= ~verbatim~. Org emphasis border
 // rules: an opening marker must not follow a word character or `/` (so
 // `add/addu/sub` and `src/core/main.ts` stay plain), and a closing marker
@@ -27,58 +51,196 @@ export interface RenderedDoc {
 const RE_INLINE =
   /(?<![\w/])(\*[^*\s][^*]*\*|\/[^/\s][^/]*\/|=[^=\s][^=]*=|~[^~\s][^~]*~)(?![\w/])/g;
 
-/** Render org inline markup into DOM children of `into`. */
-export function renderInline(text: string, into: HTMLElement): void {
+// Org link: `[[target]]` or `[[target][description]]`. Targets and
+// descriptions cannot contain `[`/`]`; that is org's own limitation.
+const RE_LINK = /\[\[([^\[\]]+)\](?:\[([^\]]*)\])?\]/;
+const RE_EXTERNAL = /^(?:https?:\/\/|mailto:)/i;
+
+/** Missing math keys already reported; pages share one console. */
+const missingMathKeys = new Set<string>();
+
+/** Text node, or one wrapper per math span looked up in the artifacts. */
+function appendText(
+  text: string,
+  into: HTMLElement,
+  typst?: TypstRenderOptions,
+): void {
+  if (typst === undefined) {
+    into.appendChild(document.createTextNode(text));
+    return;
+  }
+  for (const part of splitTypstMath(text)) {
+    if (part.kind === 'text') {
+      into.appendChild(document.createTextNode(part.text));
+      continue;
+    }
+    const wrapper = document.createElement('span');
+    wrapper.className = part.display ? 'lw-math lw-math-block' : 'lw-math';
+    wrapper.dataset.test = 'math';
+    const art = typst.artifacts.math[mathKey(part.src, part.display)];
+    if (art === undefined) {
+      // A missing artifact is a build bug; show the source instead of a hole
+      // and report it once so the console names the exact key.
+      if (!missingMathKeys.has(part.src)) {
+        missingMathKeys.add(part.src);
+        console.error(`typst math not pre-rendered (run pnpm build): ${part.src}`);
+      }
+      wrapper.classList.add('lw-math-missing');
+      wrapper.textContent = part.display ? `$$${part.src}$$` : `$${part.src}$`;
+    } else {
+      // Explicit mode wins; otherwise MathML where the browser has it and
+      // the pixel-exact SVG fallback where it does not (older engines).
+      const svg = typst.math === 'svg'
+        || (typst.math !== 'mathml' && typeof MathMLElement === 'undefined');
+      // Build-time engine output; same trusted-markup rule as panels.
+      wrapper.innerHTML = svg ? art.svg : art.mathml;
+      // MathML has no source annotation from Typst, and the SVG fallback is
+      // an anonymous graphic; both need the formula text as their name.
+      if (svg) {
+        wrapper.setAttribute('role', 'img');
+        wrapper.setAttribute('aria-label', part.src);
+      } else {
+        wrapper.querySelector('math')?.setAttribute('alttext', part.src);
+      }
+    }
+    into.appendChild(wrapper);
+  }
+}
+
+/** Render one link. External targets are real anchors; an internal
+ *  target the resolver does not know stays text, marked broken — it must
+ *  never navigate somewhere unrelated. */
+function renderLink(
+  target: string,
+  label: string,
+  into: HTMLElement,
+  resolveLink: LinkResolver | undefined,
+  typst: TypstRenderOptions | undefined,
+): void {
+  const external = RE_EXTERNAL.test(target);
+  const href = external ? target : resolveLink?.(target) ?? null;
+  if (href === null) {
+    const broken = document.createElement('span');
+    broken.className = 'lw-link lw-link-broken';
+    broken.dataset.test = 'link-broken';
+    broken.title = `Unresolved link: ${target}`;
+    renderInline(label, broken, { resolveLink, typst });
+    into.appendChild(broken);
+    return;
+  }
+  const a = document.createElement('a');
+  a.className = 'lw-link';
+  a.href = href;
+  if (/^https?:\/\//i.test(target)) {
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.classList.add('lw-link-external');
+  }
+  renderInline(label, a, { resolveLink, typst }); // =code=, *bold* inside the label
+  into.appendChild(a);
+}
+
+/** Emphasis inside one link-free run of text (links are extracted first,
+ *  so an emphasis span cannot cross a link). */
+function renderEmphasis(
+  text: string,
+  into: HTMLElement,
+  resolveLink: LinkResolver | undefined,
+  typst: TypstRenderOptions | undefined,
+): void {
   for (const part of text.split(RE_INLINE)) {
     if (part === '') continue;
     const m = /^(\*|\/|=|~)([\s\S]+)\1$/.exec(part);
     if (m === null) {
-      into.appendChild(document.createTextNode(part));
+      appendText(part, into, typst);
       continue;
     }
     const el = document.createElement(
       m[1] === '*' ? 'strong' : m[1] === '/' ? 'em' : 'code');
     el.classList.add('lw-inline');
-    renderInline(m[2]!, el); // markup nests: /see =la= here/
+    // Emphasis nests (/see =la= here/); code and verbatim are literal, so a
+    // `$` inside =…= must never become math.
+    if (m[1] === '*' || m[1] === '/') {
+      renderInline(m[2]!, el, { resolveLink, typst });
+    } else {
+      el.textContent = m[2]!;
+    }
     into.appendChild(el);
   }
 }
 
-export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => boolean): RenderedDoc {
+/** Render org inline markup and links into DOM children of `into`. */
+export function renderInline(
+  text: string,
+  into: HTMLElement,
+  options: RenderOptions = {},
+): void {
+  const { resolveLink, typst } = options;
+  let rest = text;
+  let m: RegExpExecArray | null;
+  while ((m = RE_LINK.exec(rest)) !== null) {
+    renderEmphasis(rest.slice(0, m.index), into, resolveLink, typst);
+    const target = m[1]!;
+    // org's default description hides the file: scheme
+    renderLink(
+      target,
+      m[2] ?? target.replace(/^file:/i, ''),
+      into,
+      resolveLink,
+      typst,
+    );
+    rest = rest.slice(m.index + m[0].length);
+  }
+  renderEmphasis(rest, into, resolveLink, typst);
+}
+
+export function renderDocument(
+  doc: OrgDoc,
+  isExecutable: (lang: string) => boolean,
+  options: RenderOptions = {},
+): RenderedDoc {
+  const { typst } = options;
   const root = document.createElement('article');
   root.className = 'lw-doc';
+  const inline = (text: string, into: HTMLElement): void =>
+    renderInline(text, into, options);
   const blocks: RenderedBlock[] = [];
   let execIndex = 0;
   let lastBlock: RenderedBlock | null = null;
-  for (const node of doc) {
+
+  // Fold bodies append to the same document-order accumulators: executable
+  // indices stay continuous and #+RESULTS: pairs with the nearest preceding
+  // block across fold boundaries.
+  const renderNodes = (nodes: OrgDoc, parent: HTMLElement): void => {
+    for (const node of nodes) {
     switch (node.kind) {
       case 'title': {
         const h = document.createElement('h1');
         h.className = 'lw-title';
-        h.textContent = node.text;
-        root.appendChild(h);
+        inline(node.text, h);
+        parent.appendChild(h);
         break;
       }
       case 'subtitle': {
         const p = document.createElement('p');
         p.className = 'lw-subtitle';
-        renderInline(node.text, p);
-        root.appendChild(p);
+        inline(node.text, p);
+        parent.appendChild(p);
         break;
       }
       case 'para': {
         const p = document.createElement('p');
         p.className = 'lw-para';
-        renderInline(node.text, p);
-        root.appendChild(p);
+        inline(node.text, p);
+        parent.appendChild(p);
         break;
       }
       case 'heading': {
         const h = document.createElement(
           node.level <= 1 ? 'h2' : node.level === 2 ? 'h3' : 'h4');
         h.className = 'lw-heading';
-        renderInline(node.text, h);
-        root.appendChild(h);
+        inline(node.text, h);
+        parent.appendChild(h);
         break;
       }
       case 'list': {
@@ -86,10 +248,10 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
         ul.className = 'lw-list';
         for (const item of node.items) {
           const li = document.createElement('li');
-          renderInline(item, li);
+          inline(item, li);
           ul.appendChild(li);
         }
-        root.appendChild(ul);
+        parent.appendChild(ul);
         break;
       }
       case 'table': {
@@ -100,7 +262,7 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
           const tr = document.createElement('tr');
           for (const cell of node.head) {
             const th = document.createElement('th');
-            renderInline(cell, th);
+            inline(cell, th);
             tr.appendChild(th);
           }
           thead.appendChild(tr);
@@ -111,16 +273,48 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
           const tr = document.createElement('tr');
           for (const cell of row) {
             const td = document.createElement('td');
-            renderInline(cell, td);
+            inline(cell, td);
             tr.appendChild(td);
           }
           tbody.appendChild(tr);
         }
         table.appendChild(tbody);
-        root.appendChild(table);
+        parent.appendChild(table);
         break;
       }
       case 'src': {
+        if (typst !== undefined && isTypstDiagram(node)) {
+          // Static diagram: build-time SVG, never an editor or a kernel.
+          const figure = document.createElement('figure');
+          figure.className = 'lw-figure lw-diagram';
+          const svg = typst.artifacts.diagrams[diagramKey(node.code)];
+          if (svg === undefined) {
+            // A missing artifact is a build bug; keep reader-facing text
+            // neutral and put the diagnostic where authors will see it.
+            const key = diagramKey(node.code);
+            const first = key.split('\n', 1)[0]!;
+            console.error(
+              `typst diagram not pre-rendered (run pnpm build): ` +
+                `${first.length > 80 ? `${first.slice(0, 77)}...` : first}` +
+                (key.length > first.length ? ' (block continues)' : ''),
+            );
+            const miss = document.createElement('pre');
+            miss.className = 'lw-diagram-missing';
+            miss.textContent = 'Figure unavailable.';
+            figure.appendChild(miss);
+          } else {
+            figure.innerHTML = svg; // build-time engine output (trusted)
+          }
+          if (node.caption !== null) {
+            const caption = document.createElement('figcaption');
+            caption.className = 'lw-caption';
+            inline(node.caption, caption);
+            figure.appendChild(caption);
+          }
+          parent.appendChild(figure);
+          lastBlock = null;
+          break;
+        }
         const figure = document.createElement('figure');
         figure.className = 'lw-src';
         if (isExecutable(node.lang)) {
@@ -128,7 +322,7 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
           const mount = document.createElement('div');
           mount.className = 'lw-block-slot';
           figure.appendChild(mount);
-          root.appendChild(figure);
+          parent.appendChild(figure);
           lastBlock = { index: execIndex, node, mount, resultsEl: null };
           blocks.push(lastBlock);
         } else {
@@ -140,9 +334,25 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
           pre.className = 'lw-ro-code';
           pre.textContent = node.code;
           figure.appendChild(pre);
-          root.appendChild(figure);
+          parent.appendChild(figure);
           lastBlock = null;
         }
+        break;
+      }
+      case 'fold': {
+        // Native <details> gives keyboard access and a closed default; the
+        // body is marked like any other document subtree.
+        const details = document.createElement('details');
+        details.className = `lw-fold lw-${node.variant}`;
+        details.dataset.test = `fold-${node.variant}`;
+        const summary = document.createElement('summary');
+        summary.textContent = node.variant === 'hint' ? 'Show hint' : 'Show solution';
+        const body = document.createElement('div');
+        body.className = 'lw-fold-body';
+        details.appendChild(summary);
+        details.appendChild(body);
+        renderNodes(node.doc, body);
+        parent.appendChild(details);
         break;
       }
       case 'results': {
@@ -154,7 +364,7 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
           pre.textContent = node.canned;
           slot.appendChild(pre);
         }
-        root.appendChild(slot);
+        parent.appendChild(slot);
         const target = node.name !== null
           ? blocks.find((b) => b.node.name === node.name) ?? null
           : lastBlock;
@@ -162,6 +372,9 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
         break;
       }
     }
-  }
+    }
+  };
+
+  renderNodes(doc, root);
   return { root, blocks };
 }

@@ -60,14 +60,14 @@ Open the printed URL. (If pnpm blocks esbuild's install script, run
 | `regex` | Regex · NFA engine | `regexp` | `packages/kernel-regex` | none (pure TypeScript Thompson NFA) |
 | `lisp` | Lisp · interpreter | `scheme` | `packages/kernel-lisp` | none (pure TypeScript interpreter) |
 | `elisp` | Emacs Lisp · interpreter | `scheme` | `packages/kernel-elisp` | none (pure TypeScript interpreter) |
-| `prolog` | Prolog · interpreter | `plain` | `packages/kernel-prolog` | none (pure TypeScript SLD engine) |
+| `prolog` | Prolog · interpreter | `prolog` | `packages/kernel-prolog` | none (pure TypeScript SLD engine) |
 | `typst` | Typst · wasm | `typst` | `packages/kernel-typst` | `public/vendor-typst/` (~25 MB, compiler wasm + fonts) |
 
 Syntax modes: each `editorSyntax` id maps to a CodeMirror mode in
 `packages/core/src/languages.ts` (assembly dialects in `asm.ts`, the
-sql/regexp/WAT/Typst modes in `packages/core/src/modes.ts`, the rest from
-`@codemirror/legacy-modes` or Lezer grammars); `plain` means no mode yet —
-`prolog` is the only kernel still there. The full matrix, with each
+sql/regexp/WAT/Typst/Prolog modes in `packages/core/src/modes.ts`, the rest
+from `@codemirror/legacy-modes` or Lezer grammars); `plain` is the no-mode
+fallback, but no kernel currently declares it. The full matrix, with each
 kernel's panel depth, is in [`docs/languages.md`](docs/languages.md).
 
 Engine payloads are npm dependencies pinned by `pnpm-lock.yaml`;
@@ -108,8 +108,61 @@ syscall
 ```
 
 Output replaces the block's `#+RESULTS:` slot when it runs. Lessons stay
-valid org-babel documents in Emacs; the full grammar (headings, `#+NAME:`,
-markup, lists, tables) is in [`docs/design.md`](docs/design.md).
+valid org-babel documents in Emacs. Cross-page prose uses org's file-link
+syntax, `[[file:python.org][Python]]` or a section of another lesson with
+`[[file:python.org::*Loops leave their variable in scope][loops]]`;
+`[[*Heading]]` links within the current page and `[[https://…]]` links out.
+The full grammar (headings, `#+NAME:`, markup, links, lists, tables) is in
+[`docs/design.md`](docs/design.md). Unsupported org constructs are reported
+in a banner on the page and by `didact check`.
+
+## Learner features
+
+- **Saved edits.** Every executable block mirrors its editor text into
+  best-effort `localStorage` and restores it next visit. Drafts follow the
+  block, not its position on the page.
+- **Reset machine vs Revert code.** `⟲ Reset machine` resets that block's
+  session and clears its output but keeps the editor text; `↺ Revert code`
+  restores the org sample and drops the saved draft but leaves the session
+  and its output untouched.
+- **Keys and clipboard.** Cmd/Ctrl+Enter runs the block, Shift+Enter steps
+  one unit where the kernel supports stepping, and `⧉ Copy Code` copies
+  the current editor text.
+- **Hints and solutions.** `#+BEGIN_HINT` and `#+BEGIN_SOLUTION` folds
+  start closed and may hold prose, lists, tables, and executable blocks.
+- **Exercises.** `#+EXERCISE` titles a drill and `#+CHECK` gives the
+  expected console output. Run checks the output; the badge reads
+  pending/running/passed/failed, or unchecked when the block has no check.
+- **Search.** The field above the rail's Contents/Pages switch searches
+  page titles and prose — including fold bodies and code — and replaces the
+  nav list with at most ten hits.
+- **Lesson navigation and completion.** The page footer links Previous and
+  Next in page order and reports `Exercises n/m`. Pages without checked
+  exercises get a manual Mark complete toggle; completed pages carry a ✓
+  in the Pages rail.
+
+## Storage keys and lesson directives
+
+Storage is best-effort: private mode, a sandboxed frame, or a full quota
+never breaks a block; that state simply does not survive a reload.
+
+| key | value |
+| --- | --- |
+| `didact:code:<id>` | one block's edited source (removed again when it matches the sample) |
+| `didact:progress:<page-file-or-slug>` | one page's `{ "passed": [<block id>…], "manual": boolean }` |
+| `didact:nav-side` | the navigator side (`left` / `right`) chosen with the rail's side toggle |
+
+`<id>` is the page key (`PageSpec.file` when present, else the URL slug)
+plus either `:n:<name>` for a block whose `#+NAME:` is unique on the page,
+or `:h:<content-hash>:<occurrence>` for an unnamed or duplicated block.
+Renaming a block or editing its org sample therefore starts a fresh
+identity.
+
+The learner-facing org directives are all optional: `#+BEGIN_HINT` …
+`#+END_HINT`, `#+BEGIN_SOLUTION` … `#+END_SOLUTION`, `#+EXERCISE: <title>`,
+and `#+CHECK: <expected output>` (the two promises apply to the next src
+block and clear after it). The full grammar remains in
+[`docs/design.md`](docs/design.md).
 
 ## Adding a kernel
 

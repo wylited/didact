@@ -1,0 +1,13 @@
+{
+  "name": "@didact/cli",
+  "private": true,
+  "type": "module",
+  "main": "src/check.ts",
+  "types": "src/check.ts",
+  "bin": {
+    "didact": "src/cli.ts"
+  },
+  "dependencies": {
+    "@didact/core": "workspace:*"
+  }
+}

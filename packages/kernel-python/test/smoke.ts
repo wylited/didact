@@ -177,6 +177,49 @@ async function main(): Promise<void> {
   assert(consoleText(s10) === 'second\n',
     `next session sees only its own output (got ${JSON.stringify(consoleText(s10))})`);
 
+  // 10. :session — resume continues the same namespace across blocks.
+  assert(typeof pythonKernel.createSession().resume === 'function',
+    'python kernel sessions expose resume()');
+  const sh = makeSession();
+  const sh1 = await sh.load("x = 41\nprint('first', x)\n");
+  assert(sh1.ok && sh1.summary.startsWith('loaded ·'),
+    `shared block1 loads (${JSON.stringify(sh1)})`);
+  await sh.run();
+  assert(consoleText(sh) === 'first 41\n',
+    `shared block1 console (got ${JSON.stringify(consoleText(sh))})`);
+  const sh2 = await sh.resume("x += 1\nprint('second', x)\n");
+  assert(sh2.ok && sh2.summary.startsWith('resumed ·'),
+    `shared block2 resumes (${JSON.stringify(sh2)})`);
+  await sh.run();
+  assert(consoleText(sh) === 'second 42\n',
+    `resumed block sees x = 41 and shows only its output (got ${JSON.stringify(consoleText(sh))})`);
+  const sh3 = await sh.resume("print('third', x)\n");
+  assert(sh3.ok, `shared block3 resumes (${JSON.stringify(sh3)})`);
+  await sh.run();
+  assert(consoleText(sh) === 'third 42\n',
+    `third block still sees the live namespace (got ${JSON.stringify(consoleText(sh))})`);
+
+  // 11. failed resume: the panels must not keep describing the previous
+  //     block, and the live namespace must survive for the next resume.
+  const sf = makeSession();
+  const sf1 = await sf.load("x = 41\nprint('first', x)\n");
+  assert(sf1.ok, `failed-resume block1 loads (${JSON.stringify(sf1)})`);
+  await sf.run();
+  assert(consoleText(sf) === 'first 41\n',
+    `failed-resume block1 console (got ${JSON.stringify(consoleText(sf))})`);
+  const sfBad = await sf.resume('y =\n');
+  assert(!sfBad.ok && sfBad.line === 1 && /SyntaxError/.test(sfBad.message),
+    `failed resume reports the syntax error (${JSON.stringify(sfBad)})`);
+  assert(consoleText(sf) === '',
+    `failed resume clears the console (got ${JSON.stringify(consoleText(sf))})`);
+  assert(fieldsOf(sf).length === 0,
+    `failed resume leaves no variables panel (got ${JSON.stringify(fieldsOf(sf))})`);
+  const sf2 = await sf.resume('print(x)\n');
+  assert(sf2.ok, `resume after the failure loads (${JSON.stringify(sf2)})`);
+  await sf.run();
+  assert(consoleText(sf) === '41\n',
+    `resume after the failure still sees x = 41 (got ${JSON.stringify(consoleText(sf))})`);
+
   console.log('\nALL PYTHON KERNEL SMOKE CHECKS PASSED');
 }
 

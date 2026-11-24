@@ -7,7 +7,7 @@ import { PrologSession } from './session';
 export const prologKernel: Kernel = {
   id: 'prolog',
   label: 'Prolog · interpreter',
-  editorSyntax: 'plain',
+  editorSyntax: 'prolog',
   features: { breakpoints: true, stepping: true },
   createSession: () => new PrologSession(),
 };

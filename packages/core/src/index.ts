@@ -6,15 +6,39 @@ import '@fontsource/atkinson-hyperlegible/400-italic.css';
 import '@fontsource/atkinson-hyperlegible/700.css';
 
 export type { Kernel, Session, Panel, Field, ListingRow, LoadResult, RunResult } from './kernel';
-export { parseOrg } from './org';
-export type { OrgDoc, OrgNode } from './org';
+export { ORG_DIRECTIVE, normalizeOrgKeyword, parseOrg, parseOrgChecked } from './org';
+export type { OrgDoc, OrgDiagnostic, OrgNode } from './org';
 export { renderDocument, renderInline } from './render';
 export type { RenderedDoc, RenderedBlock } from './render';
 export { BlockRuntime } from './block';
-export type { BlockEvents } from './block';
+export type { BlockEvents, SharedSession } from './block';
+export type {
+  BlockRuntimeOptions,
+  ExerciseOutcome,
+  ExerciseSpec,
+  StorageLike,
+} from './teaching';
+export { parseBabelHeaders } from './babel';
+export type { BabelOptions } from './babel';
 export { PanelHost } from './panel';
 export type { AttachedBlock } from './panel';
 export { installTooltips } from './tooltip';
 export type { Disposer } from './tooltip';
 export { mountSite } from './site';
 export type { MountOptions, SiteHandle, PageSpec } from './site';
+export {
+  collectTypstSources,
+  diagramKey,
+  isTypstDiagram,
+  mathKey,
+  normalizeTypst,
+  splitTypstMath,
+} from './typst-source';
+export type {
+  TypstArtifacts,
+  TypstMathArtifact,
+  TypstMathSource,
+  TypstRenderOptions,
+  TypstSources,
+  TypstTextPart,
+} from './typst-source';

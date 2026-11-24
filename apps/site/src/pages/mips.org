@@ -15,7 +15,7 @@ Every block here assembles to real 32-bit MIPS32 words and runs on a steppable f
 | =$s0=–=$s7=                | callee-saved                                                 |
 | =$gp=, =$sp=, =$fp=, =$ra= | global pointer, stack pointer, frame pointer, return address |
 
-Two things feel different if you come from x86. First, =mult= writes a 64-bit product across two special registers (=hi:lo=), and =div= puts the quotient in =lo= and remainder in =hi=; you pull them back with =mflo= and =mfhi=. Second, MIPS has no condition flags: comparisons write =0= or =1= into a register (=slt=), and branches compare registers directly. Pseudo-instructions like =ble $t1, 10, loop= expand into real machine instructions (=addiu=, =slt=, =beq=) that you can watch in the listing.
+Two things feel different if you come from [[file:x86-64-assembly.org][x86]]. First, =mult= writes a 64-bit product across two special registers (=hi:lo=), and =div= puts the quotient in =lo= and remainder in =hi=; you pull them back with =mflo= and =mfhi=. Second, MIPS has no condition flags: comparisons write =0= or =1= into a register (=slt=), and branches compare registers directly. Pseudo-instructions like =ble $t1, 10, loop= expand into real machine instructions (=addiu=, =slt=, =beq=) that you can watch in the listing.
 
 * Syscalls
 

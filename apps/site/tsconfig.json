@@ -16,7 +16,8 @@
     "forceConsistentCasingInFileNames": true,
     "useDefineForClassFields": true,
     "types": [
-      "vite/client"
+      "vite/client",
+      "node"
     ],
     "paths": {
       "@didact/core": [

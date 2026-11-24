@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import typstPlugin from './typst/vite.ts';
 
 // Engine assets are static files under apps/site/public — vendor/
 // (unicorn/keystone/capstone), vendor-typst/, vendor-python/ and
@@ -9,6 +10,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   base: './',
+  plugins: [typstPlugin()],
   resolve: {
     alias: {
       '@didact/core': new URL('../../packages/core/src', import.meta.url)
