@@ -17,8 +17,6 @@ three boxes, solid forward arrowheads, and a labelled dashed return path.
 
 #+CAPTION: Parser pipeline with a labelled retry loop
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
-#set text(size: 10pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
 #let box(pos, body) = node(
@@ -26,6 +24,7 @@ three boxes, solid forward arrowheads, and a labelled dashed return path.
   shape: rect, corner-radius: 3pt, inset: 6pt, width: 62pt, outset: 2pt,
   stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"),
 )
+
 #let arrow(from, to, label: none, dash: none) = edge(
   from, to, "->",
   stroke: (paint: rgb("#1A9988"), thickness: 0.9pt, dash: dash),
@@ -49,7 +48,6 @@ diamond, one arrow per branch, and `yes`/`no` beside the diagonal edges.
 
 #+CAPTION: Decision branch with labelled exits
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge, shapes
 
@@ -83,7 +81,6 @@ Expect four distinct outlines; labels sit inside each shape.
 
 #+CAPTION: Node shapes: pill, hexagon, parallelogram, circle
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge, shapes
 
@@ -111,13 +108,12 @@ teal curve, and a dashed brown curve sharing one axis pair.
 
 #+CAPTION: Two series with a legend
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
 #import "@preview/lilaq:0.6.0" as lq
 
 #let xs = lq.linspace(0, 2 * calc.pi, num: 61)
 #let a = xs.map(t => calc.sin(t))
-#let b = xs.map(t => 0.7 * calc.cos(2 * t))
+#let b = xs.map(t => calc.cos(t))
 
 #lq.diagram(
   width: 9cm, height: 4.2cm,
@@ -133,7 +129,6 @@ size list while positions stay on a rising slope.
 
 #+CAPTION: Scatter with area-scaled markers
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
 #import "@preview/lilaq:0.6.0" as lq
 
@@ -153,7 +148,6 @@ above the first and third bars, below the second and fourth.
 
 #+CAPTION: Bars with a reference line
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
 #import "@preview/lilaq:0.6.0" as lq
 
@@ -171,7 +165,6 @@ marker at each tip.
 
 #+CAPTION: Stem plot of discrete samples
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
 #import "@preview/lilaq:0.6.0" as lq
 
@@ -190,7 +183,6 @@ the two bounds and a solid line through the middle.
 
 #+CAPTION: Filled confidence band with a centre line
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
 #import "@preview/lilaq:0.6.0" as lq
 
@@ -213,7 +205,6 @@ and one plotted outlier.
 
 #+CAPTION: Box plots with one outlier
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
 #import "@preview/lilaq:0.6.0" as lq
 
@@ -230,7 +221,6 @@ as the others, but `width="100%"` on the `<svg>` so it shrinks with the column.
 
 #+CAPTION: Twenty-centimetre plot (responsive)
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
 #import "@preview/lilaq:0.6.0" as lq
 
@@ -251,7 +241,6 @@ Expect grid lines, three sides, and the square marker at the right angle.
 
 #+CAPTION: Right triangle with a right-angle marker
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
@@ -272,19 +261,18 @@ radius, a tangent line touching at the top, and an angle arc at the centre.
 
 #+CAPTION: Circle with radius, tangent, and angle
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 11pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
 #canvas(length: 1.7cm, {
   import draw: *
   circle((0, 0), radius: 1, stroke: 0.9pt + rgb("#1A9988"))
-  line((0, 0), (0.72, 0.69), stroke: (paint: rgb("#8A5A44"), thickness: 0.7pt, dash: "dashed"))
-  line((-1.35, 1), (1.35, 1), stroke: 0.9pt + rgb("#1A9988"))
-  arc((0, 0), start: 0deg, stop: 44deg, radius: 0.5, stroke: 0.7pt + rgb("#1A9988"))
-  content((0.36, 0.12), [$theta$], anchor: "west")
-  content((0.42, 0.52), [$r$], anchor: "south-east")
-  content((0, 0), [$O$], anchor: "south-west")
+  line((0, 0), (calc.cos(44deg), calc.sin(44deg)), stroke: (paint: rgb("#8A5A44"), thickness: 0.7pt, dash: "dashed"))
+  line((-1.3, 1), (1.3, 1), stroke: 0.9pt + rgb("#1A9988"))
+  arc((0.5, 0), start: 0deg, stop: 44deg, radius: 0.5, stroke: 0.7pt + rgb("#1A9988"))
+  content((0.26, 0.09), [$theta$], anchor: "center")
+  content((0.27, 0.45), [$r$], anchor: "south-east")
+  content((-0.1, -0.1), [$O$], anchor: "north-east")
 })
 #+END_SRC
 
@@ -293,7 +281,6 @@ dashed guide segments through the two control points.
 
 #+CAPTION: Cubic Bézier with its control polygon
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 11pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
@@ -315,7 +302,6 @@ under the outline and the grid to show through it.
 
 #+CAPTION: Filled polygon over a grid
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 11pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
@@ -336,7 +322,6 @@ matrix equation, but as outlines: this is the SVG path, not MathML.
 
 #+CAPTION: Matrix equation as SVG outlines
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 11pt)
 
 $ mat(1, 2; 3, 4) vec(x, y) = vec(5, 11) $
@@ -347,7 +332,6 @@ four formula nodes and four labelled edges, one per side.
 
 #+CAPTION: Commutative square with math labels
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
@@ -390,7 +374,7 @@ gutter than the default case above.
 
 #+CAPTION: Overridden 18 pt margin
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 18pt)
+#set page(margin: 18pt)
 #set text(size: 8pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 #canvas(length: 1cm, {
@@ -400,12 +384,12 @@ gutter than the default case above.
 })
 #+END_SRC
 
-Text-only output. The gate treats real text as ink, so this should render the
-words without any shapes.
+Text-only output. Typst exports text as glyph outlines (`<use>` + `<symbol>`),
+so the gate counts this through its `<use>` rule, not its `<text>` rule: no
+drawn shapes, only letterforms.
 
 #+CAPTION: Text-only output
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 6pt)
 #set text(size: 10pt)
 #text(fill: rgb("#1A9988"))[a diagram may be entirely text]
 #+END_SRC
@@ -415,7 +399,6 @@ intrinsic width and does not collapse into the responsive rule.
 
 #+CAPTION: Tall narrow flow
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 6pt)
 #set text(size: 8pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
@@ -437,7 +420,6 @@ flat colour — this checks that Typst gradients survive the SVG path.
 
 #+CAPTION: Gradient fill
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 6pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 #canvas(length: 1cm, {
   import draw: *
@@ -447,12 +429,12 @@ flat colour — this checks that Typst gradients survive the SVG path.
 })
 #+END_SRC
 
-Non-ASCII labels and math. Expect Greek, subscripts, and arrows to render with
-the bundled fonts, with no fallback boxes.
+Non-ASCII math. Expect Greek letters, a subscripted variable, and a sum
+operator; glyphs are outlined, so a missing glyph would show as a box rather
+than as missing text.
 
 #+CAPTION: Non-ASCII math and arrows
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 6pt)
 #set text(size: 10pt)
 $ alpha -> beta, quad x_i >= 0, quad sum_(i=1)^n x_i = 1 $
 #+END_SRC

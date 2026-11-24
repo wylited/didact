@@ -81,7 +81,6 @@ A typst block with =:results svg= is a diagram, not an editor: the build compile
 
 #+CAPTION: Four-stage pipeline with feedback
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
@@ -114,7 +113,6 @@ A plot is the same mechanism with a different package: =@preview/lilaq= computes
 
 #+CAPTION: Damped oscillation plot
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
 #import "@preview/lilaq:0.6.0" as lq
 
@@ -133,7 +131,6 @@ A third package, a third output style: =@preview/cetz= draws the same page with 
 
 #+CAPTION: Geometry on a Cartesian canvas
 #+BEGIN_SRC typst :results svg
-#set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 

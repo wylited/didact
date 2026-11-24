@@ -62,6 +62,14 @@ export function parseOrg(src: string): OrgDoc {
           pendingCaption = body === '' ? null : body;
           i++;
           continue;
+        case 'BeginComment': {
+          // org block comment: hide everything up to (and including) the
+          // closing marker. No nesting; unterminated blocks run to EOF.
+          i++;
+          while (i < lines.length && lines[i]!.trim().toUpperCase() !== '#+END_COMMENT') i++;
+          if (i < lines.length) i++; // consume #+END_COMMENT
+          continue;
+        }
         case 'BeginSrc': {
           const parts = body.split(/\s+/).filter(Boolean);
           const lang = (parts[0] ?? '').toLowerCase();

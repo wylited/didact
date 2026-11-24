@@ -140,6 +140,18 @@ it only serves browsers without `MathMLElement`.
 | `#+CAPTION: text` | `<figcaption>` for the next static diagram (org's caption convention) |
 | `:results svg` | static diagram |
 | `:file x.svg` | static diagram (the path is otherwise ignored) |
+| `#+BEGIN_COMMENT` … `#+END_COMMENT` | hides every line between the markers at parse time; markers are case-insensitive, and the block may contain anything, including `#+BEGIN_SRC` |
+| `// …` / `/* … */` | Typst line and block comments inside a `#+BEGIN_SRC typst` block |
+
+Use the comment block for page prose you want to keep in the source but hide
+from the rendered page: drafts, notes, a removed section. It is a parse-time
+cut, so nothing inside is parsed or rendered, and `#+BEGIN_SRC` inside it stays
+inert. An unterminated `#+BEGIN_COMMENT` hides the rest of the page — a missing
+`#+END_COMMENT` silently empties everything after it.
+
+Inside a `#+BEGIN_SRC typst` block, comment the code with Typst syntax, not org
+syntax: `// …` to the end of the line, `/* … */` across lines. A line starting
+with `#` there is Typst code, not an org comment, and usually a syntax error.
 
 A diagram block owns its own layout. `compileDiagram` prepends
 
@@ -147,8 +159,11 @@ A diagram block owns its own layout. `compileDiagram` prepends
 #set page(width: auto, height: auto, margin: 6pt)
 ```
 
-so a block that says nothing is tightly cropped; a later `#set page(...)` in
-the block overrides it (both demos set `margin: 8pt` and `text(size: 10pt)`).
+so a block that says nothing is tightly cropped. Examples need no page setup at
+all: every gallery and demo block relies on the prepend, and only the margin
+override block adds `#set page(margin: 18pt)` — a set rule merges, so width and
+height stay `auto`. `#set text(size: …)` is the one line worth keeping when
+labels need to be smaller or larger.
 The formula SVG fallback uses the same auto-size rule with `margin: 0pt` and
 `fill: none`, and removes Typst's page-sized white background path.
 

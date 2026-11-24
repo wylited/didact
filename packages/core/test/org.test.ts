@@ -19,6 +19,51 @@ describe('parseOrg: directives', () => {
     const doc = parseOrg('# a hidden comment\nvisible\n');
     expect(doc).toEqual([{ kind: 'para', text: 'visible' }]);
   });
+
+  it('drops a #+BEGIN_COMMENT block between two paragraphs', () => {
+    const src = 'before\n#+BEGIN_COMMENT\nhidden words\nmore hidden\n#+END_COMMENT\nafter\n';
+    expect(parseOrg(src)).toEqual([
+      { kind: 'para', text: 'before' },
+      { kind: 'para', text: 'after' },
+    ]);
+  });
+
+  it('accepts lowercase comment markers', () => {
+    const src = 'before\n#+begin_comment\nhidden\n#+end_comment\nafter\n';
+    expect(parseOrg(src)).toEqual([
+      { kind: 'para', text: 'before' },
+      { kind: 'para', text: 'after' },
+    ]);
+  });
+
+  it('skips src-block text inside a comment block as plain hidden lines', () => {
+    const src = [
+      'before',
+      '#+BEGIN_COMMENT',
+      '#+BEGIN_SRC asm',
+      'ret',
+      '#+END_SRC',
+      '#+END_COMMENT',
+      'after',
+    ].join('\n');
+    expect(parseOrg(src)).toEqual([
+      { kind: 'para', text: 'before' },
+      { kind: 'para', text: 'after' },
+    ]);
+  });
+
+  it('an unterminated comment block swallows the rest of the document', () => {
+    const src = 'before\n#+BEGIN_COMMENT\nhidden\n\n* not a heading\nmore\n';
+    expect(parseOrg(src)).toEqual([{ kind: 'para', text: 'before' }]);
+  });
+
+  it('parses text after #+END_COMMENT', () => {
+    const src = '#+BEGIN_COMMENT\nhidden\n#+END_COMMENT\nafter\n\n* Heading\n';
+    expect(parseOrg(src)).toEqual([
+      { kind: 'para', text: 'after' },
+      { kind: 'heading', level: 1, text: 'Heading' },
+    ]);
+  });
 });
 
 describe('parseOrg: headings and prose', () => {
