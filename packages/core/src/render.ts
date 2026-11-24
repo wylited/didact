@@ -25,6 +25,11 @@ export interface RenderedDoc {
   blocks: RenderedBlock[];
 }
 
+/** Resolve an internal link target (org `[[target]]` without a URL
+ *  scheme) to a site fragment (`#/<page>/<section>`); null means
+ *  unresolved. */
+export type LinkResolver = (target: string) => string | null;
+
 // Inline markup: *bold* /italic/ =code= ~verbatim~. Org emphasis border
 // rules: an opening marker must not follow a word character or `/` (so
 // `add/addu/sub` and `src/core/main.ts` stay plain), and a closing marker
@@ -32,8 +37,50 @@ export interface RenderedDoc {
 const RE_INLINE =
   /(?<![\w/])(\*[^*\s][^*]*\*|\/[^/\s][^/]*\/|=[^=\s][^=]*=|~[^~\s][^~]*~)(?![\w/])/g;
 
-/** Render org inline markup into DOM children of `into`. */
-export function renderInline(text: string, into: HTMLElement): void {
+// Org link: `[[target]]` or `[[target][description]]`. Targets and
+// descriptions cannot contain `[`/`]`; that is org's own limitation.
+const RE_LINK = /\[\[([^\[\]]+)\](?:\[([^\]]*)\])?\]/;
+const RE_EXTERNAL = /^(?:https?:\/\/|mailto:)/i;
+
+/** Render one link. External targets are real anchors; an internal
+ *  target the resolver does not know stays text, marked broken — it must
+ *  never navigate somewhere unrelated. */
+function renderLink(
+  target: string,
+  label: string,
+  into: HTMLElement,
+  resolveLink: LinkResolver | undefined,
+): void {
+  const external = RE_EXTERNAL.test(target);
+  const href = external ? target : resolveLink?.(target) ?? null;
+  if (href === null) {
+    const broken = document.createElement('span');
+    broken.className = 'lw-link lw-link-broken';
+    broken.dataset.test = 'link-broken';
+    broken.title = `Unresolved link: ${target}`;
+    renderInline(label, broken, resolveLink);
+    into.appendChild(broken);
+    return;
+  }
+  const a = document.createElement('a');
+  a.className = 'lw-link';
+  a.href = href;
+  if (/^https?:\/\//i.test(target)) {
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.classList.add('lw-link-external');
+  }
+  renderInline(label, a, resolveLink); // =code=, *bold* inside the label
+  into.appendChild(a);
+}
+
+/** Emphasis inside one link-free run of text (links are extracted first,
+ *  so an emphasis span cannot cross a link). */
+function renderEmphasis(
+  text: string,
+  into: HTMLElement,
+  resolveLink: LinkResolver | undefined,
+): void {
   for (const part of text.split(RE_INLINE)) {
     if (part === '') continue;
     const m = /^(\*|\/|=|~)([\s\S]+)\1$/.exec(part);
@@ -49,7 +96,29 @@ export function renderInline(text: string, into: HTMLElement): void {
   }
 }
 
-export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => boolean): RenderedDoc {
+/** Render org inline markup and links into DOM children of `into`. */
+export function renderInline(
+  text: string,
+  into: HTMLElement,
+  resolveLink?: LinkResolver,
+): void {
+  let rest = text;
+  let m: RegExpExecArray | null;
+  while ((m = RE_LINK.exec(rest)) !== null) {
+    renderEmphasis(rest.slice(0, m.index), into, resolveLink);
+    const target = m[1]!;
+    // org's default description hides the file: scheme
+    renderLink(target, m[2] ?? target.replace(/^file:/i, ''), into, resolveLink);
+    rest = rest.slice(m.index + m[0].length);
+  }
+  renderEmphasis(rest, into, resolveLink);
+}
+
+export function renderDocument(
+  doc: OrgDoc,
+  isExecutable: (lang: string) => boolean,
+  resolveLink?: LinkResolver,
+): RenderedDoc {
   const root = document.createElement('article');
   root.className = 'lw-doc';
   const blocks: RenderedBlock[] = [];
@@ -67,14 +136,14 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
       case 'subtitle': {
         const p = document.createElement('p');
         p.className = 'lw-subtitle';
-        renderInline(node.text, p);
+        renderInline(node.text, p, resolveLink);
         root.appendChild(p);
         break;
       }
       case 'para': {
         const p = document.createElement('p');
         p.className = 'lw-para';
-        renderInline(node.text, p);
+        renderInline(node.text, p, resolveLink);
         root.appendChild(p);
         break;
       }
@@ -82,7 +151,7 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
         const h = document.createElement(
           node.level <= 1 ? 'h2' : node.level === 2 ? 'h3' : 'h4');
         h.className = 'lw-heading';
-        renderInline(node.text, h);
+        renderInline(node.text, h, resolveLink);
         root.appendChild(h);
         break;
       }
@@ -91,7 +160,7 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
         ul.className = 'lw-list';
         for (const item of node.items) {
           const li = document.createElement('li');
-          renderInline(item, li);
+          renderInline(item, li, resolveLink);
           ul.appendChild(li);
         }
         root.appendChild(ul);
@@ -105,7 +174,7 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
           const tr = document.createElement('tr');
           for (const cell of node.head) {
             const th = document.createElement('th');
-            renderInline(cell, th);
+            renderInline(cell, th, resolveLink);
             tr.appendChild(th);
           }
           thead.appendChild(tr);
@@ -116,7 +185,7 @@ export function renderDocument(doc: OrgDoc, isExecutable: (lang: string) => bool
           const tr = document.createElement('tr');
           for (const cell of row) {
             const td = document.createElement('td');
-            renderInline(cell, td);
+            renderInline(cell, td, resolveLink);
             tr.appendChild(td);
           }
           tbody.appendChild(tr);

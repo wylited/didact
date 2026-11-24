@@ -136,3 +136,81 @@ describe('renderDocument: HTML safety', () => {
     expect(root.querySelector('li')!.textContent).toBe('item with <b>literal</b> markup');
   });
 });
+
+describe('renderDocument: links', () => {
+  const resolve = (target: string): string | null => {
+    if (target === 'file:other.org') return '#/other-page';
+    if (target === 'file:other.org::*Loops') return '#/other-page/loops';
+    if (target === '*Local') return '#/this-page/local';
+    return null;
+  };
+
+  it('renders an internal link through the resolver as a fragment anchor', () => {
+    const { root } = renderDocument(
+      parseOrg('See [[file:other.org][the other page]].'), () => true, resolve);
+    const a = root.querySelector('a.lw-link')!;
+    expect(a.textContent).toBe('the other page');
+    expect(a.getAttribute('href')).toBe('#/other-page');
+    expect(a.getAttribute('target')).toBeNull();
+  });
+
+  it('renders a page + heading link and the inline markup inside its description', () => {
+    const { root } = renderDocument(
+      parseOrg('Read [[file:other.org::*Loops][the =while= loop]] next.'), () => true, resolve);
+    const a = root.querySelector('a.lw-link')!;
+    expect(a.getAttribute('href')).toBe('#/other-page/loops');
+    expect(a.querySelector('code.lw-inline')!.textContent).toBe('while');
+    expect(a.textContent).toBe('the while loop');
+  });
+
+  it('falls back to the target text with the file: scheme hidden', () => {
+    const { root } = renderDocument(
+      parseOrg('See [[file:other.org]] and [[*Local]].'), () => true, resolve);
+    const anchors = [...root.querySelectorAll('a.lw-link')];
+    expect(anchors.map((a) => a.textContent)).toEqual(['other.org', '*Local']);
+    expect(anchors.map((a) => a.getAttribute('href')))
+      .toEqual(['#/other-page', '#/this-page/local']);
+  });
+
+  it('renders emphasis inside a link label', () => {
+    const { root } = renderDocument(
+      parseOrg('Go [[*Local][=here= now]].'), () => true, resolve);
+    const a = root.querySelector('a.lw-link')!;
+    expect(a.textContent).toBe('here now');
+    expect(a.querySelector('code.lw-inline')!.textContent).toBe('here');
+  });
+
+  it('external http(s) links open in a new tab with a safe rel', () => {
+    const { root } = renderDocument(
+      parseOrg('Read [[https://example.org/a][the docs]].'), () => true, resolve);
+    const a = root.querySelector('a.lw-link')!;
+    expect(a.getAttribute('href')).toBe('https://example.org/a');
+    expect(a.getAttribute('target')).toBe('_blank');
+    expect(a.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(a.textContent).toBe('the docs');
+  });
+
+  it('mailto: works without a new tab', () => {
+    const { root } = renderDocument(
+      parseOrg('Mail [[mailto:a@b.c][us]].'), () => true, resolve);
+    const a = root.querySelector('a.lw-link')!;
+    expect(a.getAttribute('href')).toBe('mailto:a@b.c');
+    expect(a.getAttribute('target')).toBeNull();
+  });
+
+  it('an unresolved internal link is inert, never an anchor that navigates', () => {
+    const { root } = renderDocument(
+      parseOrg('Go [[file:missing.org][nowhere]].'), () => true, resolve);
+    expect(root.querySelector('a')).toBeNull();
+    const broken = root.querySelector("[data-test='link-broken']")!;
+    expect(broken.textContent).toBe('nowhere');
+    expect(broken.getAttribute('title')).toBe('Unresolved link: file:missing.org');
+  });
+
+  it('without a resolver every internal link is broken (render is site-agnostic)', () => {
+    const { root } = renderDocument(
+      parseOrg('See [[file:other.org][other]].'), () => true);
+    expect(root.querySelector('a')).toBeNull();
+    expect(root.querySelectorAll("[data-test='link-broken']")).toHaveLength(1);
+  });
+});
