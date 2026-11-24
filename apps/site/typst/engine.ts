@@ -279,9 +279,11 @@ export function compileMath(
       const css = extractCss(html);
       if (css !== '' && !cssChunks.includes(css)) cssChunks.push(css);
 
+      // Same inline/display wrapper as the HTML compile: Typst uses the
+      // spaces inside the dollars to pick display style.
       const svgSource =
         `#set page(width: auto, height: auto, margin: 0pt, fill: none)\n` +
-        `$${src}$`;
+        (display ? `$ ${src} $` : `$${src}$`);
       const svg = stripWhiteBackground(await compileSvg(compiler, svgSource));
       return { mathml, svg };
     } catch (error) {
@@ -296,7 +298,9 @@ export function compileDiagram(src: string): Promise<string> {
     try {
       // The user's own `#set page` later in the block overrides this.
       const doc = `#set page(width: auto, height: auto, margin: 6pt)\n${src}`;
-      return responsiveSvg(await compileSvg(compiler, doc));
+      // The page's white background is invisible on the page; dropping it
+      // keeps figures transparent for print and forced-colors rendering.
+      return responsiveSvg(stripWhiteBackground(await compileSvg(compiler, doc)));
     } catch (error) {
       throw typstFailure(error);
     }
@@ -339,9 +343,15 @@ async function compileSvg(
   await compiler.addSource(MAIN, src);
   const result = await compiler.compile({ main: MAIN, format: 'svg' });
   assertNoErrors(result.diagnostics);
-  const page = result.pages[0];
-  if (page === undefined) throw new Error('typst produced no SVG page');
-  return page.output;
+  // A figure is one page. Dropping the rest would silently truncate a
+  // diagram that overflowed its page box.
+  if (result.pages.length !== 1) {
+    throw new Error(
+      `typst produced ${result.pages.length} SVG pages for one figure; ` +
+        'add a page size or remove the page break',
+    );
+  }
+  return result.pages[0]!.output;
 }
 
 function assertNoErrors(diagnostics: readonly TypstDiagnostic[]): void {
@@ -366,9 +376,17 @@ function extractCss(html: string): string {
  * origin (`d="M 0 0v …"`). Other white-filled shapes are left alone.
  */
 function stripWhiteBackground(svg: string): string {
-  return svg.replace(/<path\b[^>]*\/>/g, (tag) =>
-    /\bfill="#ffffff"/.test(tag) && /\bd="M 0 0v /.test(tag) ? '' : tag,
-  );
+  // Typst draws the page as the first top-level path. Node boxes are also
+  // white-filled `M 0 0v …` paths, but they live inside `<g transform>`, so
+  // only a path before the first group and sized to the viewBox is the page.
+  const firstGroup = svg.indexOf('<g');
+  const path = /<path\b[^>]*\/>/.exec(svg);
+  if (path === null) return svg;
+  if (firstGroup !== -1 && path.index > firstGroup) return svg;
+  if (!/\bfill="#ffffff"/.test(path[0]) || !/\bd="M 0 0v /.test(path[0])) {
+    return svg;
+  }
+  return svg.slice(0, path.index) + svg.slice(path.index + path[0].length);
 }
 
 /** Same width rule as packages/kernel-typst/src/session.ts. */

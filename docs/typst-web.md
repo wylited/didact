@@ -50,16 +50,17 @@ interface TypstArtifacts {
 | `diagrams` | `diagramKey(src)` = `normalizeTypst(block code)` | `<svg>…</svg>` |
 | `mathCss` | none, one string | unique `<style>` payloads from HTML compiles |
 
-`normalizeTypst` is `src.trim().replace(/\s+/g, ' ')`. Keys are stable across
-whitespace/newline edits; both sides call the same function, never reimplement
-it.
+`normalizeTypst` is `src.trim()` only. Keys must not collapse inner whitespace:
+two blocks can differ only inside a string literal (`#text("a  b")` vs
+`#text("a b")`) and collapsing would make the second figure silently reuse the
+first one's SVG. Both sides call the same function, never reimplement it.
 
 Lookup and fallback (`packages/core/src/render.ts`):
 
 | site | found | missing |
 |---|---|---|
 | inline/display math (`appendText`) | `span.lw-math` gets `mathml`, or `svg` when `typst.math === 'svg'` or the browser lacks `MathMLElement` | `span.lw-math.lw-math-missing` with literal `$src$` (display: `$$src$$`) |
-| diagram (`renderDocument`) | `figure.lw-figure.lw-diagram` with the SVG | `pre.lw-diagram-missing` reading `typst diagram not pre-rendered (run pnpm build)` + block source |
+| diagram (`renderDocument`) | `figure.lw-figure.lw-diagram` with the SVG, plus `figcaption` when the block has `#+CAPTION:` | `pre.lw-diagram-missing` reading `Figure unavailable.` and a `console.error` carrying the key |
 
 `mathCss` is injected once per mounted document by `packages/core/src/site.ts`
 as a `<style data-test="typst-math-css">`; formulas are unstyled but readable
@@ -114,6 +115,19 @@ cold **5.2 s**, warm **4.5 s**. The difference is the package downloads; the
 rest is 25 sequential document compiles, so a larger page set scales with
 compiles, not with the cache.
 
+## Artifact delivery and size
+
+`virtual:didact-typst` is one static module, so every page's artifacts land in
+the entry chunk: measured 25 diagrams ≈ 561 KB, 4 MathML ≈ 1.2 KB, 4 SVG math
+fallbacks ≈ 41 KB (the fallbacks alone are 33× the MathML they back up), plus
+the 1.5 KB layout CSS — 648 KB raw, ≈ 99 KB gzip. Visiting the x86 page still
+downloads the gallery's figures.
+
+The next step, if size matters, is one artifact module per page selected on
+navigation (Vite code-splits the dynamic import), or emitting each diagram as
+a standalone `.svg` asset. Dropping the SVG math fallback is the cheap win:
+it only serves browsers without `MathMLElement`.
+
 ## Authoring rules
 
 | syntax | meaning |
@@ -123,6 +137,7 @@ compiles, not with the cache.
 | `=code=` / `~verbatim~` | literal; a `$` inside never becomes math |
 | `\$` | literal dollar |
 | unmatched `$`, `$ x $` (space inside) | literal text, no compile |
+| `#+CAPTION: text` | `<figcaption>` for the next static diagram (org's caption convention) |
 | `:results svg` | static diagram |
 | `:file x.svg` | static diagram (the path is otherwise ignored) |
 
@@ -146,7 +161,8 @@ SVG width in points is converted at 96 dpi (`pt * 4/3`); above **680 px** the
 
 `apps/site/src/pages/typst-gallery.org` holds one figure per supported pattern.
 Open the page after `pnpm build` (or in `pnpm dev`) and check each row; the
-source is directly above its figure. The build compiles all of them on every
+source is directly above its figure. Every block carries a `#+CAPTION:` line,
+so each figure has a `<figcaption>` and therefore an accessible name. The build compiles all of them on every
 build, so the page is also a regression suite: a broken block fails with
 `typst diagram in typst-gallery.org:<line> (source line):` and Typst's own
 `file:line` diagnostic.

@@ -79,6 +79,7 @@ No engine download, no JavaScript, no font fetch: this paragraph is static HTML.
 
 A typst block with =:results svg= is a diagram, not an editor: the build compiles it once and inlines the vector result. Everything else about the block is ordinary Typst, including package imports — any =@preview= package name resolves from the registry with no allowlist.
 
+#+CAPTION: Four-stage pipeline with feedback
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
@@ -111,6 +112,7 @@ A typst block with =:results svg= is a diagram, not an editor: the build compile
 
 A plot is the same mechanism with a different package: =@preview/lilaq= computes the samples at compile time, and the SVG reaches the page as geometry.
 
+#+CAPTION: Damped oscillation plot
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
@@ -129,6 +131,7 @@ A plot is the same mechanism with a different package: =@preview/lilaq= computes
 
 A third package, a third output style: =@preview/cetz= draws the same page with a Cartesian canvas, so a geometry figure is a handful of coordinates rather than a plotted function.
 
+#+CAPTION: Geometry on a Cartesian canvas
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)

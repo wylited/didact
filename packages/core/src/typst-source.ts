@@ -55,19 +55,24 @@ export type TypstTextPart =
   | { kind: 'text'; text: string }
   | { kind: 'math'; src: string; display: boolean };
 
-/** Stable key for a formula: display flag plus whitespace-normalized source. */
+/** Stable key for a formula: display flag plus the exact (trimmed) source. */
 export function mathKey(src: string, display: boolean): string {
   return `${display ? 'D' : 'I'}:${normalizeTypst(src)}`;
 }
 
-/** Stable key for a diagram: whitespace-normalized block source. */
+/** Stable key for a diagram: the exact (trimmed) block source. */
 export function diagramKey(src: string): string {
   return normalizeTypst(src);
 }
 
-/** The one normalization both sides use; never change without the pipeline. */
+/**
+ * The one normalization both sides use; never change without the pipeline.
+ * Only surrounding whitespace is dropped: collapsing inner runs would merge
+ * sources that differ inside string literals (`"a  b"` vs `"a b"`) and make
+ * two distinct figures share one artifact.
+ */
 export function normalizeTypst(src: string): string {
-  return src.trim().replace(/\s+/g, ' ');
+  return src.trim();
 }
 
 /** True when a src block is a static diagram rather than a kernel block. */
@@ -121,7 +126,7 @@ export function splitTypstMath(text: string): TypstTextPart[] {
     }
     // Inline math may not be space-padded ($ x $ is not math); display math
     // conventionally is ($$ x $$), so only trim its source at the end.
-    if (!display && /\s/.test(text[open]!)) {
+    if (!display && ORG_MATH_OPEN_BLOCKED.test(text[open]!)) {
       buf += c;
       i++;
       continue;
@@ -144,6 +149,18 @@ export function splitTypstMath(text: string): TypstTextPart[] {
   return parts;
 }
 
+/**
+ * Org's delimiter rules for `$…$` (org-element.el
+ * `org-element-latex-fragment-parser`): the character after the opening `$`
+ * may not be whitespace or `, . ;`, and the closing `$` must follow a
+ * non-space, non-`, .` character and be followed by whitespace, punctuation,
+ * a bracket, a quote, or end of line. Without the trailing rule, `$x$y` and
+ * `a$x$b` would be math here but literal text in Emacs.
+ */
+const ORG_MATH_OPEN_BLOCKED = /[\s,.;]/;
+const ORG_MATH_CLOSE_BEFORE = /[\s,.]/;
+const ORG_MATH_AFTER = /^$|[\s.,;:!?'"()[\]{}<>]/;
+
 /** Index of the closing `$`/`$$` for a math span starting at `from`. */
 function findMathClose(text: string, from: number, display: boolean): number {
   let i = from;
@@ -159,7 +176,15 @@ function findMathClose(text: string, from: number, display: boolean): number {
         i++;
         continue;
       }
-      if (i > from && !/\s/.test(text[i - 1]!)) return i;
+      // Org takes the next `$` as the close and rejects the whole fragment
+      // if either neighbour fails; it never retries a later dollar.
+      const before = text[i - 1]!;
+      const after = text[i + 1] ?? '';
+      return i > from &&
+        !ORG_MATH_CLOSE_BEFORE.test(before) &&
+        ORG_MATH_AFTER.test(after)
+        ? i
+        : -1;
     }
     i++;
   }

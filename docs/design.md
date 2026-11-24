@@ -173,7 +173,9 @@ The org file must remain valid org-babel source in Emacs.
 ### Org-subset grammar
 
 - `*`… headings (depth = stars); `#+TITLE:`/`#+SUBTITLE:` page header.
-- `#+NAME: <id>` names the next block.
+- `#+NAME: <id>` names the next block; `#+CAPTION: <text>` captions the next
+  block's figure (rendered as `<figcaption>`, which also names it for
+  assistive technology).
 - `#+BEGIN_SRC <lang> [headers]` / `#+END_SRC`; babel headers are parsed
   (they distinguish the two Typst layers, below) and otherwise ignored.
 - `#+RESULTS:` slot replaced by live output on run (DOM only).

@@ -53,6 +53,35 @@ describe('assertDiagramQuality', () => {
     );
   });
 
+  it('rejects a zero-length path that returns to its start', () => {
+    const svg = page('<path fill="none" stroke="#000000" d="M 10 10 L 10 10 Z"/>');
+    expect(() => assertDiagramQuality(svg, SOURCE)).toThrow(
+      /^typst diagram rejected: no non-trivial geometry/,
+    );
+  });
+
+  it('rejects a figure whose only geometry lives in <defs>', () => {
+    const svg = page(
+      '<defs><clipPath id="c"><rect width="40" height="20"/></clipPath></defs>' +
+        '<path fill="none" stroke="#000000" d="M 0 0 L 0 0"/>',
+    );
+    expect(() => assertDiagramQuality(svg, SOURCE)).toThrow(
+      /^typst diagram rejected: no non-trivial geometry/,
+    );
+  });
+
+  it('rejects fully transparent shapes', () => {
+    const svg = page('<rect width="40" height="20" fill="#000000" opacity="0"/>');
+    expect(() => assertDiagramQuality(svg, SOURCE)).toThrow(
+      /^typst diagram rejected: no drawable elements/,
+    );
+  });
+
+  it('accepts a shape with fill none and a visible stroke', () => {
+    const svg = page('<rect width="40" height="20" fill="none" stroke="#000000"/>');
+    expect(() => assertDiagramQuality(svg, SOURCE)).not.toThrow();
+  });
+
   it('accepts real text', () => {
     const svg = page('<text x="0" y="10" font-size="10">Hello</text>');
     expect(() => assertDiagramQuality(svg, SOURCE)).not.toThrow();

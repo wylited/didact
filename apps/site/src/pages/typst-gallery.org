@@ -13,8 +13,9 @@ the source directly above it.
 * Flowcharts (fletcher)
 
 A rounded-rect pipeline with a labelled arrow and a dashed retry edge. Expect
-four boxes, solid forward arrowheads, and a labelled dashed return path.
+three boxes, solid forward arrowheads, and a labelled dashed return path.
 
+#+CAPTION: Parser pipeline with a labelled retry loop
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
@@ -43,9 +44,10 @@ four boxes, solid forward arrowheads, and a labelled dashed return path.
 )
 #+END_SRC
 
-A decision node from =fletcher.shapes= with two labelled exits and a merge.
-Expect a diamond, one arrow per branch, and labels above the edges.
+A decision node from =fletcher.shapes= with two labelled exits. Expect a
+diamond, one arrow per branch, and `yes`/`no` beside the diagonal edges.
 
+#+CAPTION: Decision branch with labelled exits
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
@@ -79,6 +81,7 @@ Expect a diamond, one arrow per branch, and labels above the edges.
 Shape vocabulary from the same package: pill, hexagon, parallelogram, circle.
 Expect four distinct outlines; labels sit inside each shape.
 
+#+CAPTION: Node shapes: pill, hexagon, parallelogram, circle
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
@@ -106,6 +109,7 @@ Expect four distinct outlines; labels sit inside each shape.
 Two series, one legend, dashed comparison line. Expect a boxed legend, a solid
 teal curve, and a dashed brown curve sharing one axis pair.
 
+#+CAPTION: Two series with a legend
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
@@ -127,6 +131,7 @@ teal curve, and a dashed brown curve sharing one axis pair.
 Scatter with a per-point size array. Expect markers whose area grows with the
 size list while positions stay on a rising slope.
 
+#+CAPTION: Scatter with area-scaled markers
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
@@ -134,7 +139,7 @@ size list while positions stay on a rising slope.
 
 #let xs = (1, 2, 3, 4, 5, 6, 7)
 #let ys = (1.2, 1.8, 1.4, 2.6, 3.4, 3.1, 4.2)
-#let sizes = (9, 16, 12, 25, 49, 30, 64)
+#let sizes = (16, 36, 25, 64, 100, 49, 144)
 
 #lq.diagram(
   width: 8cm, height: 3.8cm,
@@ -144,16 +149,17 @@ size list while positions stay on a rising slope.
 #+END_SRC
 
 Bars with a reference line. Expect four filled bars and a dashed target line
-that sits above the third bar and below the first.
+above the first and third bars, below the second and fourth.
 
+#+CAPTION: Bars with a reference line
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
 #import "@preview/lilaq:0.6.0" as lq
 
 #lq.diagram(
-  width: 7cm, height: 3.6cm,
-  ylabel: [count],
+  width: 7cm, height: 3.8cm,
+  ylabel: [count], ylim: (0, 8),
   lq.bar((1, 2, 3, 4), (3, 5, 2, 6), fill: rgb("#1A9988").transparentize(35%), label: [runs]),
   lq.hlines(4, stroke: (paint: rgb("#C2553F"), thickness: 0.8pt, dash: "dashed"), label: [budget]),
   legend: (position: top + right),
@@ -163,6 +169,7 @@ that sits above the third bar and below the first.
 Stem plot for discrete samples. Expect vertical stems from a baseline with a
 marker at each tip.
 
+#+CAPTION: Stem plot of discrete samples
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
@@ -181,6 +188,7 @@ marker at each tip.
 Filled confidence band with a centre line. Expect a translucent band between
 the two bounds and a solid line through the middle.
 
+#+CAPTION: Filled confidence band with a centre line
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
@@ -203,6 +211,7 @@ the two bounds and a solid line through the middle.
 Box plots for two small samples. Expect two boxes with median lines, whiskers,
 and one plotted outlier.
 
+#+CAPTION: Box plots with one outlier
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 9pt)
@@ -219,6 +228,7 @@ and one plotted outlier.
 A 20 cm figure, above the 680 px responsive threshold. Expect the same rendering
 as the others, but `width="100%"` on the `<svg>` so it shrinks with the column.
 
+#+CAPTION: Twenty-centimetre plot (responsive)
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
@@ -239,6 +249,7 @@ as the others, but `width="100%"` on the `<svg>` so it shrinks with the column.
 A right triangle on a unit grid, with a right-angle marker and vertex labels.
 Expect grid lines, three sides, and the square marker at the right angle.
 
+#+CAPTION: Right triangle with a right-angle marker
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
@@ -259,6 +270,7 @@ Expect grid lines, three sides, and the square marker at the right angle.
 A circle, radius, tangent, and central angle. Expect one circle, a dashed
 radius, a tangent line touching at the top, and an angle arc at the centre.
 
+#+CAPTION: Circle with radius, tangent, and angle
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 11pt)
@@ -276,9 +288,10 @@ radius, a tangent line touching at the top, and an angle arc at the centre.
 })
 #+END_SRC
 
-A cubic Bézier with its control polygon. Expect a smooth curve and two dashed
-guide segments meeting the control points.
+A cubic Bézier with its control polygon. Expect a smooth curve and three
+dashed guide segments through the two control points.
 
+#+CAPTION: Cubic Bézier with its control polygon
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 11pt)
@@ -300,6 +313,7 @@ guide segments meeting the control points.
 A closed polygon with a translucent fill over a grid. Expect the fill to sit
 under the outline and the grid to show through it.
 
+#+CAPTION: Filled polygon over a grid
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 11pt)
@@ -320,6 +334,7 @@ under the outline and the grid to show through it.
 Display math compiled to SVG on a diagram page. Expect a selectable-looking
 matrix equation, but as outlines: this is the SVG path, not MathML.
 
+#+CAPTION: Matrix equation as SVG outlines
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 11pt)
@@ -328,8 +343,9 @@ $ mat(1, 2; 3, 4) vec(x, y) = vec(5, 11) $
 #+END_SRC
 
 The same fletcher mechanism with math labels on every node and arrow. Expect
-four formula nodes and four diagonal arrows, one per side.
+four formula nodes and four labelled edges, one per side.
 
+#+CAPTION: Commutative square with math labels
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 8pt)
 #set text(size: 10pt)
@@ -359,6 +375,7 @@ four formula nodes and four diagonal arrows, one per side.
 No `#set page` line: the pipeline prepends a 6 pt margin, so the figure is
 tightly cropped with a small uniform gutter.
 
+#+CAPTION: Default 6 pt margin (no page setup)
 #+BEGIN_SRC typst :results svg
 #import "@preview/cetz:0.5.2": canvas, draw
 #canvas(length: 1cm, {
@@ -371,6 +388,7 @@ tightly cropped with a small uniform gutter.
 A block that overrides the page margin and text size. Expect a visibly wider
 gutter than the default case above.
 
+#+CAPTION: Overridden 18 pt margin
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 18pt)
 #set text(size: 8pt)
@@ -385,15 +403,17 @@ gutter than the default case above.
 Text-only output. The gate treats real text as ink, so this should render the
 words without any shapes.
 
+#+CAPTION: Text-only output
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 6pt)
 #set text(size: 10pt)
 #text(fill: rgb("#1A9988"))[a diagram may be entirely text]
 #+END_SRC
 
-A tall, narrow figure. Expect a vertical stack that keeps its 3 cm width and
-does not collapse into the responsive rule.
+A tall, narrow figure. Expect a vertical stack that keeps its narrow
+intrinsic width and does not collapse into the responsive rule.
 
+#+CAPTION: Tall narrow flow
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 6pt)
 #set text(size: 8pt)
@@ -415,6 +435,7 @@ does not collapse into the responsive rule.
 A gradient fill. Expect a smooth teal-to-white ramp inside the shape, not a
 flat colour — this checks that Typst gradients survive the SVG path.
 
+#+CAPTION: Gradient fill
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 6pt)
 #import "@preview/cetz:0.5.2": canvas, draw
@@ -429,6 +450,7 @@ flat colour — this checks that Typst gradients survive the SVG path.
 Non-ASCII labels and math. Expect Greek, subscripts, and arrows to render with
 the bundled fonts, with no fallback boxes.
 
+#+CAPTION: Non-ASCII math and arrows
 #+BEGIN_SRC typst :results svg
 #set page(width: auto, height: auto, margin: 6pt)
 #set text(size: 10pt)

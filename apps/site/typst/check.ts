@@ -44,7 +44,14 @@ export function assertDiagramQuality(svg: string, source: string): void {
   let textDrawn = false;
   let geometry = false;
 
-  for (const match of svg.matchAll(DRAWABLE_TAG)) {
+  // Definitions inside these containers are never painted directly, so a
+  // clip path or symbol must not satisfy the gate on its own.
+  const painted = svg.replace(
+    /<(defs|clipPath|mask|pattern|symbol|marker)\b[^>]*>[\s\S]*?<\/\1>/gi,
+    '',
+  );
+
+  for (const match of painted.matchAll(DRAWABLE_TAG)) {
     const tag = (match[1] ?? '').toLowerCase();
     const attrs = attributes(match[2] ?? '');
 
@@ -53,6 +60,8 @@ export function assertDiagramQuality(svg: string, source: string): void {
     if (tag === 'rect' && isBackgroundRect(attrs, page.width, page.height)) {
       continue;
     }
+    // A transparent or unpainted element leaves no mark.
+    if (invisible(attrs)) continue;
 
     drawables += 1;
 
@@ -93,7 +102,7 @@ export function assertDiagramQuality(svg: string, source: string): void {
   }
 
   if (textNodes > 0 && !textDrawn) {
-    for (const match of svg.matchAll(/<text\b[^>]*>([\s\S]*?)<\/text>/gi)) {
+    for (const match of painted.matchAll(/<text\b[^>]*>([\s\S]*?)<\/text>/gi)) {
       if (textContent(match[1] ?? '') !== '') {
         textDrawn = true;
         geometry = true;
@@ -199,10 +208,28 @@ function attributes(raw: string): Map<string, string> {
   return attrs;
 }
 
-/** A drawable path needs a coordinate and at least one drawing command. */
+/** A drawable path needs a coordinate, a drawing command, and real extent. */
 function drawnPath(d: string | undefined): boolean {
-  if (d === undefined || !/\d/.test(d)) return false;
-  return DRAW_COMMAND.test(d);
+  if (d === undefined || !/\d/.test(d) || !DRAW_COMMAND.test(d)) return false;
+  // `M 10 10 L 10 10 Z` paints nothing; a visible path spans two coordinates.
+  const coords = d.match(/-?(?:\d+\.?\d*|\.\d+)/g) ?? [];
+  return new Set(coords.map(Number)).size > 1;
+}
+
+/** True for elements that are provably invisible (no paint or opacity 0). */
+function invisible(attrs: Map<string, string>): boolean {
+  const zero = (name: string): boolean => {
+    const raw = attrs.get(name);
+    return raw !== undefined && Number(raw.trim()) === 0;
+  };
+  if (attrs.get('display') === 'none') return true;
+  if (attrs.get('visibility') === 'hidden') return true;
+  if (zero('opacity') || zero('fill-opacity') || zero('stroke-opacity')) {
+    return true;
+  }
+  const fill = (attrs.get('fill') ?? '').trim().toLowerCase();
+  const stroke = (attrs.get('stroke') ?? '').trim().toLowerCase();
+  return fill === 'none' && (stroke === '' || stroke === 'none');
 }
 
 /** An attribute parsed as a number, defaulting to 0 like SVG does. */

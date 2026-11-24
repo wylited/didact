@@ -3,7 +3,7 @@
 // what counts as math/diagram, how it is keyed, and how a missing artifact
 // degrades. These tests pin the contract, not the engine.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseOrg } from '../src/org';
 import { renderDocument, renderInline } from '../src/render';
 import {
@@ -49,6 +49,25 @@ describe('splitTypstMath', () => {
     ]);
   });
 
+  it('follows org dollar bounds; trailing word characters kill the formula', () => {
+    expect(splitTypstMath('$x$y')).toEqual([{ kind: 'text', text: '$x$y' }]);
+    expect(splitTypstMath('a$x$b')).toEqual([{ kind: 'text', text: 'a$x$b' }]);
+    // The first `$` fails org's neighbour rules; the scanner then re-reads
+    // the later `$b$` as its own formula, exactly as org's object lexer does.
+    expect(splitTypstMath('$a $b$')).toEqual([
+      { kind: 'text', text: '$a ' },
+      { kind: 'math', src: 'b', display: false },
+    ]);
+    expect(splitTypstMath('$5 and $6')).toEqual([{ kind: 'text', text: '$5 and $6' }]);
+    expect(splitTypstMath('($x$) and $y$.')).toEqual([
+      { kind: 'text', text: '(' },
+      { kind: 'math', src: 'x', display: false },
+      { kind: 'text', text: ') and ' },
+      { kind: 'math', src: 'y', display: false },
+      { kind: 'text', text: '.' },
+    ]);
+  });
+
   it('allows spaces inside display delimiters and normalizes the key', () => {
     const parts = splitTypstMath('before $$ y = 1 $$ after');
     expect(parts).toEqual([
@@ -62,9 +81,14 @@ describe('splitTypstMath', () => {
     expect(mathKey(mathPart.src, mathPart.display)).toBe('D:y = 1');
   });
 
-  it('normalizes whitespace inside the key, not inside the source', () => {
-    expect(mathKey(' x  +\n y ', false)).toBe('I:x + y');
+  it('keys on the trimmed source, so inner whitespace stays significant', () => {
+    expect(mathKey(' x  +\n y ', false)).toBe('I:x  +\n y');
     expect(mathKey('x', true)).toBe('D:x');
+    // Two figures differing only inside a string literal must not collide.
+    const tight = '#text("hello world")';
+    const loose = '#text("hello  world")';
+    expect(diagramKey(`  ${tight}\n`)).toBe(tight);
+    expect(diagramKey(loose)).not.toBe(diagramKey(tight));
   });
 });
 
@@ -122,7 +146,7 @@ describe('renderInline math', () => {
       }),
     });
     expect(html).toBe(
-      'before <span class="lw-math" data-test="math"><math><msup><mi>x</mi></msup></math></span> after',
+      'before <span class="lw-math" data-test="math"><math alttext="x^2"><msup><mi>x</mi></msup></math></span> after',
     );
   });
 
@@ -133,7 +157,7 @@ describe('renderInline math', () => {
       artifacts: artifacts({ math: { [key]: { mathml: '<math/>', svg: '<svg id="s"/>' } } }),
     });
     expect(html).toBe(
-      '<span class="lw-math lw-math-block" data-test="math"><svg id="s"></svg></span>',
+      '<span class="lw-math lw-math-block" data-test="math" role="img" aria-label="y"><svg id="s"></svg></span>',
     );
   });
 
@@ -164,8 +188,52 @@ describe('renderInline math', () => {
       artifacts: artifacts({ math: { [mathKey('x', false)]: { mathml: '<math/>', svg: '' } } }),
     });
     expect(html).toBe(
-      '<code class="lw-inline">mov $v0</code> <span class="lw-math" data-test="math"><math></math></span>',
+      '<code class="lw-inline">mov $v0</code> <span class="lw-math" data-test="math"><math alttext="x"></math></span>',
     );
+  });
+});
+
+describe('#+CAPTION on src blocks', () => {
+  it('parses the caption onto the next src block and clears it', () => {
+    const doc = parseOrg(
+      [
+        '#+CAPTION: First figure',
+        '#+NAME: one',
+        '#+BEGIN_SRC typst :results svg',
+        '#let a = 1',
+        '#+END_SRC',
+        '#+BEGIN_SRC typst :results svg',
+        '#let b = 2',
+        '#+END_SRC',
+      ].join('\n'),
+    );
+    const [first, second] = doc.filter((n) => n.kind === 'src');
+    expect(first!.kind === 'src' && first!.caption).toBe('First figure');
+    expect(second!.kind === 'src' && second!.caption).toBeNull();
+  });
+
+  it('renders the caption as a figcaption, with inline markup resolved', () => {
+    const svg = '<svg viewBox="0 0 10 10"><path d="M0 0L1 1"/></svg>';
+    const org = [
+      '#+CAPTION: A $x$ and =code= diagram',
+      '#+BEGIN_SRC typst :results svg',
+      '#let a = 1',
+      '#+END_SRC',
+    ].join('\n');
+    const { root } = renderDocument(parseOrg(org), () => true, {
+      math: 'mathml',
+      artifacts: artifacts({
+        diagrams: { [diagramKey('#let a = 1')]: svg },
+        math: { [mathKey('x', false)]: { mathml: '<math><mi>x</mi></math>', svg: '' } },
+      }),
+    });
+    const figure = root.querySelector('figure.lw-diagram');
+    const caption = figure?.querySelector('figcaption.lw-caption');
+    expect(caption?.textContent).toBe('A x and code diagram');
+    expect(caption?.querySelector('math')).not.toBeNull();
+    expect(caption?.querySelector('code.lw-inline')?.textContent).toBe('code');
+    // The caption names the figure for assistive tech.
+    expect(figure?.textContent).toContain('A x and code diagram');
   });
 });
 
@@ -190,12 +258,14 @@ describe('renderDocument static diagrams', () => {
     expect(root.querySelectorAll('.lw-block-slot')).toHaveLength(1);
   });
 
-  it('reports a missing diagram artifact with the source', () => {
+  it('reports a missing diagram artifact without dumping source at readers', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { root } = renderDocument(parseOrg(org), () => true, {
       artifacts: artifacts(),
     });
     const miss = root.querySelector('.lw-diagram-missing');
-    expect(miss?.textContent).toContain('not pre-rendered');
-    expect(miss?.textContent).toContain('#let x = 1');
+    expect(miss?.textContent).toBe('Figure unavailable.');
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('#let x = 1'));
+    error.mockRestore();
   });
 });

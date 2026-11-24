@@ -80,6 +80,7 @@ describe('parseOrg: src blocks', () => {
         kind: 'src',
         lang: 'asm',
         name: 'add',
+        caption: null,
         headers: '-n',
         code: '  mov rax, 1\n\n  ret',
       },
@@ -89,7 +90,14 @@ describe('parseOrg: src blocks', () => {
   it('lowercases the language and defaults name to null without #+NAME', () => {
     const src = '#+BEGIN_SRC ASM\nret\n#+END_SRC\n';
     expect(parseOrg(src)).toEqual([
-      { kind: 'src', lang: 'asm', name: null, headers: '', code: 'ret' },
+      {
+        kind: 'src',
+        lang: 'asm',
+        name: null,
+        caption: null,
+        headers: '',
+        code: 'ret',
+      },
     ]);
   });
 });
@@ -110,8 +118,8 @@ describe('parseOrg: #+RESULTS pairing', () => {
       ': ok',
     ].join('\n');
     expect(parseOrg(src)).toEqual([
-      { kind: 'src', lang: 'asm', name: 'a', headers: '', code: 'ret' },
-      { kind: 'src', lang: 'asm', name: 'b', headers: '', code: 'ret' },
+      { kind: 'src', lang: 'asm', name: 'a', caption: null, headers: '', code: 'ret' },
+      { kind: 'src', lang: 'asm', name: 'b', caption: null, headers: '', code: 'ret' },
       { kind: 'results', name: 'b', canned: '42\nok' },
     ]);
   });

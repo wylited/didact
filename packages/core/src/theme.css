@@ -825,6 +825,7 @@ code.lw-inline {
 /* ---- Typst math and static diagrams (build-time artifacts) */
 
 .lw-math { font-size: 1.02em; }
+.lw-math svg { vertical-align: middle; }
 .lw-math math {
   font-family: "New Computer Modern Math", "Latin Modern Math",
                "STIX Two Math", "DejaVu Math TeX Gyre", math;
@@ -842,6 +843,13 @@ code.lw-inline {
 }
 .lw-diagram { margin: 1.5em 0; text-align: center; }
 .lw-diagram svg { max-width: 100%; height: auto; }
+.lw-caption {
+  margin-top: 0.45em;
+  font-size: 0.86rem;
+  line-height: 1.4;
+  color: var(--lw-ink);
+  opacity: 0.72;
+}
 .lw-diagram-missing {
   font-family: var(--lw-mono);
   font-size: 0.82rem;

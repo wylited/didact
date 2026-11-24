@@ -88,6 +88,14 @@ function appendText(
         || (typst.math !== 'mathml' && typeof MathMLElement === 'undefined');
       // Build-time engine output; same trusted-markup rule as panels.
       wrapper.innerHTML = svg ? art.svg : art.mathml;
+      // MathML has no source annotation from Typst, and the SVG fallback is
+      // an anonymous graphic; both need the formula text as their name.
+      if (svg) {
+        wrapper.setAttribute('role', 'img');
+        wrapper.setAttribute('aria-label', part.src);
+      } else {
+        wrapper.querySelector('math')?.setAttribute('alttext', part.src);
+      }
     }
     into.appendChild(wrapper);
   }
@@ -182,12 +190,23 @@ export function renderDocument(
           figure.className = 'lw-figure lw-diagram';
           const svg = typst.artifacts.diagrams[diagramKey(node.code)];
           if (svg === undefined) {
+            // A missing artifact is a build bug; keep reader-facing text
+            // neutral and put the diagnostic where authors will see it.
+            console.error(
+              `typst diagram not pre-rendered (run pnpm build): ${diagramKey(node.code)}`,
+            );
             const miss = document.createElement('pre');
             miss.className = 'lw-diagram-missing';
-            miss.textContent = `typst diagram not pre-rendered (run pnpm build)\n${node.code}`;
+            miss.textContent = 'Figure unavailable.';
             figure.appendChild(miss);
           } else {
             figure.innerHTML = svg; // build-time engine output (trusted)
+          }
+          if (node.caption !== null) {
+            const caption = document.createElement('figcaption');
+            caption.className = 'lw-caption';
+            inline(node.caption, caption);
+            figure.appendChild(caption);
           }
           root.appendChild(figure);
           lastBlock = null;

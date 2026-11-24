@@ -146,11 +146,21 @@ export function mountSite(opts: MountOptions): SiteHandle {
   // Typst emits its MathML layout rules with each HTML compile; the build
   // pipeline keeps one copy, injected once per mounted document.
   const mathCss = opts.typst?.artifacts.mathCss ?? '';
+  let mathStyle: HTMLStyleElement | null = null;
   if (mathCss !== '') {
-    const style = doc.createElement('style');
-    style.dataset.test = 'typst-math-css';
-    style.textContent = mathCss;
-    (doc.head ?? root).appendChild(style);
+    const existing = doc.head?.querySelector<HTMLStyleElement>(
+      'style[data-test="typst-math-css"]',
+    );
+    if (existing != null) {
+      existing.textContent = mathCss;
+      mathStyle = existing;
+    } else {
+      const style = doc.createElement('style');
+      style.dataset.test = 'typst-math-css';
+      style.textContent = mathCss;
+      (doc.head ?? root).appendChild(style);
+      mathStyle = style;
+    }
   }
 
   // ---- navigator rail: ONE list at a time (contents | pages) ----
@@ -529,6 +539,8 @@ export function mountSite(opts: MountOptions): SiteHandle {
       for (const block of blocks) block.dispose();
       blocks = [];
       disposeToc();
+      mathStyle?.remove();
+      mathStyle = null;
       root.replaceChildren();
       root.classList.remove(
         'lw-site', 'lw-no-fonts', 'lw-panel-attached', 'lw-nav-left', 'lw-nav-right');
