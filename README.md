@@ -31,13 +31,16 @@ cons-heap, and MATLAB's column-major memory — live in
 
 ## Quickstart
 
+Requires Node 24+ and pnpm 12 (pinned in `package.json`: `engines`,
+`packageManager`).
+
 ```sh
 pnpm install
 pnpm dev
 ```
 
-Open the printed URL. (If pnpm blocks esbuild's install script, run
-`pnpm approve-builds --all -y` once.)
+Open the printed URL. (esbuild's build script is pre-approved in
+`pnpm-workspace.yaml`; if pnpm asks anyway, run `pnpm approve-builds` once.)
 
 `pnpm build` emits a fully static site to `apps/site/dist` — `base` is
 `'./'`, so it hosts anywhere, at any path. `pnpm preview` checks the build.
@@ -49,7 +52,7 @@ Open the printed URL. (If pnpm blocks esbuild's install script, run
 | `asm` | x86-64 · Unicorn | `asm-intel` | `packages/kernel-asm64` | `public/vendor/` (~8.6 MB, unicorn/keystone/capstone wasm) |
 | `riscv` | RV32IM · interpreter | `asm-riscv` | `packages/kernel-riscv` | none (pure TypeScript CPU) |
 | `mips` | MIPS32 · interpreter | `asm-mips` | `packages/kernel-mips` | none (pure TypeScript CPU) |
-| `c` | C · clang wasm | `c` | `packages/kernel-c` | `public/vendor-c/` (~105 MB, clang → wasm32-wasi) |
+| `c` | C · clang wasm | `c` | `packages/kernel-c` | `public/vendor-c/` (~105 MB, clang → wasm32-wasip1) |
 | `cpp` | C++ · clang wasm | `cpp` | `packages/kernel-cpp` | shares `public/vendor-c/` with `c` (same clang engine) |
 | `python` | Python · Pyodide | `python` | `packages/kernel-python` | `public/vendor-python/` (~13 MB, CPython 3.14 wasm) |
 | `wasm` | WebAssembly · interpreter | `wat` | `packages/kernel-wasm` | none (pure TypeScript interpreter) |
@@ -71,7 +74,7 @@ fallback, but no kernel currently declares it. The full matrix, with each
 kernel's panel depth, is in [`docs/languages.md`](docs/languages.md).
 
 Engine payloads are npm dependencies pinned by `pnpm-lock.yaml`;
-`scripts/sync-vendors.mjs` copies them into `public/` at build time — the
+`scripts/sync-vendors.mjs` copies them into `public/` on `pnpm dev`/`pnpm build` — the
 repository itself is source-only.
 
 ## Authoring a page
@@ -175,7 +178,8 @@ contract those steps implement is specified in
 ## Deploy to GitHub Pages
 
 The repo ships [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
-which builds and publishes the site on every push to `main`. One-time
+which builds and publishes the site on every push to `main` (and on manual
+`workflow_dispatch`). One-time
 setup: repo Settings → Pages → Build and deployment → Source:
 **GitHub Actions**. The site then lives at
 `https://<owner>.github.io/didact/`; no other config needed.
@@ -185,4 +189,7 @@ setup: repo Settings → Pages → Build and deployment → Source:
 - `pnpm test` — vitest suite plus kernel smoke scripts (the smokes need
   [bun](https://bun.sh) on PATH)
 - `pnpm lint` — eslint across the repo
-- `pnpm typecheck` — `tsc --noEmit` covering all packages
+- `pnpm typecheck` — two `tsc --noEmit` runs: the apps/site DOM config
+  (covers `packages/*/src`) and `tsconfig.typst.json` (build pipeline)
+- `pnpm typst:check` — compiles every page's Typst math/diagrams and runs
+  the structural gate

@@ -85,8 +85,8 @@ pipeline prepends a page size and a 6 pt margin.
 
 ** Fletcher: flowcharts and shapes
 
-A four-stage pipeline with a labelled arrow and a dashed retry edge. Expect
-three solid forward arrows and a labelled dashed return path.
+A four-stage pipeline with a labelled retry edge. Expect three solid forward
+arrows and a labelled solid return path with one arrowhead entering the source.
 
 #+CAPTION: Four-stage pipeline with feedback
 #+BEGIN_SRC typst :results svg

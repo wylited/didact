@@ -9,7 +9,7 @@ packages/core              @didact/core             org parser, block runtime, p
 packages/kernel-asm64      @didact/kernel-asm64      x86-64 via Unicorn/Keystone/Capstone wasm
 packages/kernel-riscv      @didact/kernel-riscv      RV32IM interpreter (pure TypeScript)
 packages/kernel-mips       @didact/kernel-mips       MIPS32 interpreter (pure TypeScript)
-packages/kernel-c          @didact/kernel-c          C via vendored clang wasm (wasm32-wasi)
+packages/kernel-c          @didact/kernel-c          C via vendored clang wasm (wasm32-wasip1)
 packages/kernel-cpp        @didact/kernel-cpp        C++ via the same clang engine (libc++, -fno-exceptions)
 packages/kernel-wasm       @didact/kernel-wasm       WebAssembly WAT-subset stack machine (pure TypeScript)
 packages/kernel-python     @didact/kernel-python     Python via vendored Pyodide
@@ -22,13 +22,14 @@ packages/kernel-lisp       @didact/kernel-lisp       Scheme-flavored Lisp interp
 packages/kernel-elisp      @didact/kernel-elisp      Emacs Lisp: Lisp-2 cells, dynamic/lexical binding, buffers, hooks, keymaps (pure TypeScript)
 packages/kernel-prolog     @didact/kernel-prolog     SLD-resolution Prolog, choice-point panels (pure TypeScript)
 packages/kernel-typst      @didact/kernel-typst      Typst via vendored compiler wasm + fonts
-apps/site                  @didact/site             the website (src/pages/*.org + kernel registration)
+apps/site                  @didact/site             the website (src/pages/*.org, kernel registration, typst/ build pipeline)
 ```
 
 Wiring: app aliases `@didact/core` and each `@didact/kernel-*` →
 `../../packages/*/src` (tsconfig `paths` + vite `resolve.alias`); one
 `tsc --noEmit` in `apps/site` covers all packages (include
-`../../packages/*/src`).
+`../../packages/*/src`), and a second `tsc -p tsconfig.typst.json`
+typechecks the Node-side `apps/site/typst` pipeline.
 
 ## Kernel contract (owned by core)
 
@@ -37,8 +38,9 @@ The single source of truth is `packages/core/src/kernel.ts`: `Kernel`,
 `console`, `html`), plus `Field`, `ListingRow`, `LoadResult`, `RunResult`.
 Read that file before touching how blocks run or render panels.
 
-Every kernel package keeps a byte-identical mirror at `src/types.ts` (so it
-typechecks standalone); `packages/core/test/mirror.test.ts` fails on drift.
+Every kernel package keeps a mirror at `src/types.ts` (so it typechecks
+standalone): from `/** One rendered under-the-hood section. */` to EOF it is
+byte-identical to core, and `packages/core/test/mirror.test.ts` fails on drift.
 
 Rules: sessions are single-tenant (one per block), except for org-babel
 named sessions — `#+BEGIN_SRC <lang> :session <name>` — where every block
@@ -66,7 +68,8 @@ never a host-supplied named session.
   `navView`, `show(index)`, `setNavSide(side)`, `setNavView(view)`,
   `dispose()`.
 - Block runtime: CodeMirror 6 editor (Ayu Light), per-block controls +
-  status + error box + results slot; running/attached highlights; current
+  status + error box + results slot; running highlight (panel attachment is
+  the site-root `lw-panel-attached` layout state); current
   line decoration on step and breakpoint pause; gutter breakpoints when
   `features.breakpoints` (Step button hidden when `features.stepping ===
   false`); `data-test` hooks.
@@ -174,8 +177,10 @@ isolated, so one reset can never invalidate another block's output.
 - unicorn/keystone/capstone wasm come from npm deps (`@alexaltea/*`,
   licenses in THIRD-PARTY.md + `vendor/` texts), copied to
   `apps/site/public/vendor/` for serving by `scripts/sync-vendors.mjs`
-  (run automatically by `pnpm dev`/`pnpm build`); load via ES imports the
-  app can code-split; loading must stay fetch-free where possible.
+  (run automatically by `pnpm dev`/`pnpm build`); `loadEngines()` injects
+  classic-script tags and passes a pre-fetched `wasmBinary` for
+  Keystone/Capstone (Unicorn's wasm is embedded in its JS), so runtime
+  network use stays same-origin static-asset fetches only.
 - Two-pass keystone label resolution, syscall interception, budget,
   stepping (HOOK_CODE), context restore — shaped to `Kernel`/`Session`.
 - Panel data: registers fields, EFLAGS fields, disassembly listing
@@ -217,8 +222,9 @@ diagram; a plain `typst` block stays a kernel block.
 - Failure: an unknown package or invalid Typst aborts the build with the
   page, the block's first non-prelude code line, then `file:line` and hints;
   every failing block is listed in one error. A blank diagram is rejected by
-  `apps/site/typst/check.ts`; a missing artifact renders the literal `$src$`
-  (math) or `Figure unavailable.` in `pre.lw-diagram-missing` (diagram), never
+  `apps/site/typst/check.ts`; a missing artifact renders the literal source
+  (`$src$`, or `$$src$$` for display math) or `Figure unavailable.` in
+  `pre.lw-diagram-missing` (diagram), never
   a hole.
 - Review surface: the diagram section of `apps/site/src/pages/typst.org` has
   one figure per supported pattern (23 at present). The structural gate's unit tests live in
@@ -236,10 +242,11 @@ Authoring rules, package policy, HTML-export trade-off, and verification:
   `PAGE_ORDER` array in `src/main.ts` (stems of the page files; the nav
   title comes from each file's `#+TITLE:` line), register
   `[asm64Kernel, riscvKernel, mipsKernel, cKernel, cppKernel, wasmKernel,
-  pythonKernel, sqlKernel, matlabKernel, luaKernel, jsKernel,
-  regexKernel, lispKernel, prologKernel, typstKernel]`, mount with `pages`.
+  pythonKernel, sqlKernel, matlabKernel, jsKernel, regexKernel,
+  lispKernel, elispKernel, prologKernel, luaKernel, typstKernel]`, mount
+  with `pages`.
 - `src/pages/*.org`: one lesson per kernel (`x86-64-assembly`, `riscv`,
   `mips`, `c`, `cpp`, `wasm`, `python`, `sql`, `matlab`, `lua`,
-  `javascript`, `regex`, `lisp`, `prolog`, `typst`), with per-block
+  `javascript`, `regex`, `lisp`, `elisp`, `prolog`, `typst`), with per-block
   controls, breakpoints, panel attach/detach, pages.
 - index.html (noscript in body), favicon optional, title plain text.

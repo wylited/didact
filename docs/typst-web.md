@@ -5,11 +5,11 @@ nothing else: different packages, different engines, different lifetimes.
 
 | | content pipeline | executable kernel |
 |---|---|---|
-| code | `apps/site/typst/{engine,prerender,vite,cli}.ts` | `packages/kernel-typst` |
+| code | `apps/site/typst/{engine,prerender,check,vite,cli}.ts` | `packages/kernel-typst` |
 | runs | Node, once at build/dev | browser, per block, on Run |
 | output | `virtual:didact-typst` → `TypstArtifacts` | SVG page in the block panel |
 | state | one serialized compiler for the whole build | one `Session` per block |
-| shipped engine | none | 24 MB wasm, JSPI |
+| shipped engine | none | 22.8 MB wasm + five fonts, JSPI |
 
 The content layer is described in `docs/architecture.md` under "Typst content
 layer (build time)". This file is the authoring and operations reference.
@@ -60,7 +60,7 @@ Lookup and fallback (`packages/core/src/render.ts`):
 | site | found | missing |
 |---|---|---|
 | inline/display math (`appendText`) | `span.lw-math` gets `mathml`, or `svg` when `typst.math === 'svg'` or the browser lacks `MathMLElement` | `span.lw-math.lw-math-missing` with literal `$src$` (display: `$$src$$`) |
-| diagram (`renderDocument`) | `figure.lw-figure.lw-diagram` with the SVG, plus `figcaption` when the block has `#+CAPTION:` | `pre.lw-diagram-missing` reading `Figure unavailable.` and a `console.error` carrying the key |
+| diagram (`renderDocument`) | `figure.lw-figure.lw-diagram` with the SVG, plus `figcaption` when the block has `#+CAPTION:` | `pre.lw-diagram-missing` reading `Figure unavailable.` and a `console.error` naming the block's first line |
 
 `mathCss` is injected once per mounted document by `packages/core/src/site.ts`
 as a `<style data-test="typst-math-css">`; formulas are unstyled but readable
@@ -191,7 +191,8 @@ takes the centre — mixing them draws the arc around the wrong point.
 
 `apps/site/src/pages/typst.org` is both the reference and the regression
 surface: its diagram section holds one figure per supported pattern, grouped
-by package, and each figure sits directly above its source. There is no
+by package, and each figure is the rendered SVG plus its `#+CAPTION:`; the
+block's Typst source is not echoed on the page. There is no
 separate gallery page — a figure that teaches a mechanism belongs where the
 mechanism is explained.
 
@@ -204,7 +205,7 @@ diagnostic.
 
 | # | figure | expected result |
 |---|---|---|
-| 1 | four-stage pipeline (fletcher) | four square-cornered boxes, solid arrows, labelled dashed retry loop |
+| 1 | four-stage pipeline (fletcher) | four square-cornered boxes, three solid forward arrows, a labelled solid retry path with one arrowhead entering the source |
 | 2 | decision branch | diamond with `no`/`yes` exits; arrowheads stop short of the box borders |
 | 3 | shape vocabulary | pill, hexagon, parallelogram, circle; four distinct outlines |
 | 4 | C++ build pipeline | eight boxes in two rows, left-to-right then right-to-left arrows, executable highlighted |
@@ -265,7 +266,7 @@ lose diagrams.
 |---|---|---|
 | build/module load fails | unknown package, invalid Typst | `typst diagram in <page>.org:<line> (\`<code line>\`):` (math failures say `typst math in …`), then `file:line: message` plus `hint:` lines; all failing blocks are listed in one error |
 | diagram rejected | blank page, zero-size shapes, no drawables | `typst diagram rejected: <reason>` with the same page prefix |
-| formula renders as `$…$` | artifact missing (stale dev server, skipped build) | `span.lw-math-missing`, plus one `console.error` naming the key |
+| formula renders as `$…$` | artifact missing (stale dev server, skipped build) | `span.lw-math-missing`, plus one `console.error` naming the formula source |
 | figure reads `Figure unavailable.` | artifact missing | `pre.lw-diagram-missing`, plus one `console.error` carrying the block's first line |
 | page works but kernel block errors | browser lacks JSPI | kernel load error; content layer is unaffected |
 

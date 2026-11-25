@@ -49,7 +49,7 @@ the control-flow/state story *of that language*.
 
 | # | kernel | depth | what it shows | what would make it useful |
 | --- | --- | --- | --- | --- |
-| 1 | `asm` | deep | registers (+tip), EFLAGS, disassembly w/ source lines + `;` comment tips, `.data` hexdump, console | unit: a per-step "what changed" trace |
+| 1 | `asm` | deep | registers (changed flag + signed decimal), EFLAGS, disassembly w/ source lines + `;` comment tips, `.data` hexdump, console | unit: a per-step "what changed" trace |
 | 2 | `regex` | deep | NFA listing (live states), state set as meaning, input caret/brackets, captures | unit: per-transition epsilon closure explanation |
 | 3 | `lisp` | deep | cons heap (fresh cells), env frames w/ chain titles, control stack (continuation text), output | unit: put mutating GC on the map |
 | 4 | `javascript` | deep | scopes (kind tip), call stack, event loop (micro/macro), console | unit: closure captured-variable view |
@@ -63,14 +63,14 @@ the control-flow/state story *of that language*.
 | 12 | `c` | mediocre | console (clang diagnostics), exit/size/compile fields, wasm hexdump | missing: a disassembly listing of the compiled module with source-line mapping (no decoder offline); at least a globals/data hexdump |
 | 13 | `cpp` | mediocre | same as `c` | same as `c` |
 | 14 | `python` | deep | **Progress** (new), **Trace · executed lines** (counts, source text, failure row, flow sentence), **Call stack**, **Traceback**, **Variables · grouped** (scalars/collections/functions/classes, previews + lengths), **Locals · failing frame**, **Types · declared vs observed**, console (traceback: the lesson's frames only) | unit: per-line "what changed" (needs a resumable run); see §5 |
-| 15 | `typst` | shallow | rendered page (html), diagnostics, page count | unit: layout boxes; it is a compiler, so "fetch/compile/render" is its story |
+| 15 | `typst` | shallow | rendered page (html), diagnostics/warnings console, page count + compile time | unit: layout boxes; it is a compiler, so "fetch/compile/render" is its story |
 | 16 | `elisp` | good | control stack, buffer fields/text, lexical and dynamic environments, Lisp-2 symbol cells, hooks, keymaps, output | unit: dynamic vs lexical closure; macro expansion is steppable |
 
 ## 3. Implemented this round
 
 | kernel | panel | files | why it was the highest-value cheap addition |
 | --- | --- | --- | --- |
-| `prolog` | **Search** (`fields`): last transition (resolve/mismatch/backtrack/redo/cut/builtin/solution/no) with a tip per kind, the clause line the cursor tries next, choice-point depth | `packages/kernel-prolog/src/session.ts` | SLD's story is *the transition*; the goal stack shows state but never says what just happened. Uses `Machine.lastKind`/`nextClauseLine()` that existed but were unshown |
+| `prolog` | **Search** (`fields`): last transition (resolve/mismatch/backtrack/redo/cut/builtin/builtin-fail/solution/no) with a tip per kind, the clause line the cursor tries next, choice-point depth | `packages/kernel-prolog/src/session.ts` | SLD's story is *the transition*; the goal stack shows state but never says what just happened. Uses `Machine.lastKind`/`nextClauseLine()` that existed but were unshown |
 | `lua` | **Values** (`fields`): every assigned name, block order, with type tag (integer vs float, local vs _G key, assigned-nil, scope ended) and a tip per type | `packages/kernel-lua/src/state-panel.ts` (pure builder), `interp.ts` (`assignments` map fed at `local`/`=`), `session.ts` | dynamic typing is the language's story; Locals/Globals split by scope, not by type, so `1/2 → 0.5` and "global = _G key" were invisible |
 | `matlab` | **Columns** (`fields`): innermost loop variable, current column of `k`, walked matrix shape, where that column starts in column-major memory, `while` pass count | `packages/kernel-matlab/src/columns-panel.ts` (pure builder), `interp.ts` (`LoopState`/`loopSource`), `session.ts` | `for v = M` walking COLUMNS is MATLAB's named trap; Matrices shows layout, nothing showed iteration |
 

@@ -11,9 +11,12 @@ org `#+BEGIN_SRC` language tag. Each kernel contributes an **under-the-hood
 view** (machine panel); the only tooltips are source-line comments on
 listing rows.
 
-Kernels: x86-64 assembly via Unicorn/Keystone/Capstone WASM (from v0.1
-`apps/x64-unicorn`), RV32IM and MIPS32 interpreters, C via clang wasm,
-Python via Pyodide, and Typst via its compiler wasm. The system must make
+Kernels: `asm` (x86-64 via Unicorn/Keystone/Capstone wasm,
+`packages/kernel-asm64`), `riscv` (RV32I+M) and `mips` (MIPS32) interpreters,
+`c`/`cpp` via `@yowasp/clang`, `python` via Pyodide, `typst` via its compiler
+wasm, and pure-TypeScript `wasm`, `sql`, `matlab`, `lua`, `javascript`,
+`regex`, `lisp`, `elisp`, `prolog` — sixteen ids, all registered in
+`apps/site/src/main.ts`. The system must make
 adding kernels a matter of implementing one package against
 `docs/architecture.md`.
 
@@ -24,11 +27,15 @@ adding kernels a matter of implementing one package against
    `⧉ Copy Code`, and a monospace status text. Kernels may opt out of
    stepping (`features.stepping === false` hides the Step button
    entirely).
-2. **Run** = assemble + execute to completion (kernel budget bounded). The
-   block being executed gets a visible *running* highlight; when finished,
-   status shows `finished · exit summary · N steps` (kernels with
-   `features.stepping === false` omit the `· N steps` suffix — the count
-   is meaningless without instructions). On a breakpoint pause,
+2. **Run** = assemble + execute to completion (kernel budget bounded); if the
+   session is paused or mid-step and the editor text is unchanged, Run
+   continues from that point instead of restarting. The block being executed
+   gets a visible *running* highlight; when finished, status shows
+   `finished · exit summary · N steps` (or `halted` when the run did not reach
+   an exit; `1 step` is singular; kernels with `features.stepping === false`
+   omit the `· N steps` suffix — the count is meaningless without
+   instructions). Status also shows `working…`, `running…`, `stepping…`,
+   `reset · ready`, and `halted · nothing left to execute`. On a breakpoint pause,
    status shows `paused · line N` (mono, normal ink — not error red), the
    paused line gets the current-line decoration, and the panel shows the
    paused machine state. Load errors: red status + line-mapped message
@@ -39,18 +46,21 @@ adding kernels a matter of implementing one package against
    corresponding listing row in the under-the-hood view is highlighted
    and scrolled to.
 4. **Breakpoints.** In blocks whose kernel declares
-   `features.breakpoints`, clicking a line number in the editor gutter
-   toggles a breakpoint on that 1-based line — a filled black square
+   `features.breakpoints`, pressing a line number in the editor gutter
+   (mousedown) toggles a breakpoint on that 1-based line — a filled black square
    marker in a slim gutter, textbook style. Breakpoints are stored per
    block and mapped through document edits. Reset clears pause state but
    keeps breakpoints. Kernels without the feature get no gutter click
    behavior.
-5. **Reset machine vs Revert code.** Reset restores that block's machine
-   to its just-assembled state and clears its output; code, saved draft,
-   and breakpoints are kept. Revert code restores the org sample and
-   drops the saved draft, leaving the session and its output running.
-6. **Under-the-hood panel** is the third zone: a right rail that is
-   zero-width (and hairline-invisible) until a panel attaches, then
+5. **Reset machine vs Revert code.** Reset machine resets that block's
+   session to its initial state, clears the current-line mark and the
+   results-slot output, and forces the next Run to re-assemble from the
+   current editor text; code, saved draft, and breakpoints are kept; status
+   shows `reset · ready`. Revert code restores the org sample and drops the
+   saved draft, leaving the session and its output running.
+6. **Under-the-hood panel** is the third zone: a rail between the document
+   and the navigation rail (the page's right edge while the navigator stays
+   left) that is zero-width (and hairline-invisible) until a panel attaches, then
    slides wide to `clamp(420px, 42vw, 720px)` over 300ms (all motion
    disabled under `prefers-reduced-motion: reduce`). At most ONE panel
    at a time — the last block that ran/stepped. Its header shows the
@@ -67,18 +77,21 @@ adding kernels a matter of implementing one package against
    renders in the panel and alongside console output in the results slot.
 8. **Tooltips are comments only.** No hardcoded teaching tooltips:
    registers, flags, section titles, status, and controls carry none. A
-   listing row shows its source line's trailing `;` comment on hover
-   (kernel-supplied); rows without a comment get no tooltip. Hovering a
+   listing row shows its kernel-supplied source-line tip on hover (`;`
+   comments for asm64); rows without a tip get no tooltip. Hovering a
    register/flag row instead highlights it: pure-CSS neutral tint + gray
    2px left rule — the changed-marking language in neutral gray, so it
    can't be read as a change.
-9. Machine state UI renders zeroed / idle states before first execution
-   (visible once the panel is attached).
-10. **Pages.** One mount renders several org documents in a two-zone
-    layout at rest — a left navigation rail (contents above, rule 11;
-    pages below) around the document column — plus the panel zone
-    (rule 6) when attached. Page titles appear as links in the rail's
-    Pages section (active underlined and near-black, others gray).
+9. Machine state renders the session's current values (zeroed / idle before
+   anything executes) whenever the panel attaches. The panel is mounted only
+   by a run/step, a Reset, or a failed load (rule 6), so nothing is painted at
+   mount.
+10. **Pages.** One mount renders one org document at a time in a layout with
+    a single navigation rail at either edge (left by default) beside the
+    document column, plus the panel zone (rule 6) when attached. The rail
+    shows one list — this page's Contents, the Pages list (rule 11), or live
+    search results — never more than one. Page titles appear as links in the
+    Pages list (active underlined and near-black, others gray).
     Routing is hash-based and uniform: a page's fragment is
     `#/<page-slug>`, a section's is `#/<page-slug>/<section-slug>`
     (slugs kebab-cased: lowercased, non-alphanumeric runs collapsed
@@ -92,8 +105,8 @@ adding kernels a matter of implementing one package against
     scrolls to its heading — smooth within a page, instant after a
     page swap; a page-level hash (or an unknown section) means the
     top of the page.
-11. **Left-rail contents.** The h2/h3 headings (org depth 1/2) of the
-    rendered page build the navigation rail's Contents section: one
+11. **Rail contents.** The h2/h3 headings (org depth 1/2) of the
+    rendered page build the navigation rail's Contents view: one
     small gray link per heading (h3 indented), each a real deep link
     `#/<page-slug>/<section-slug>` with the heading's id
     `lw-h-<section-slug>` (slugged, deduplicated with `-2` suffixes,
@@ -126,7 +139,9 @@ adding kernels a matter of implementing one package against
   between the left edge and the right one on demand) and the document
   center — plus a third zone, the panel rail, sliding from 0 to
   `clamp(420px, 42vw, 720px)` when attached (28vw < 1420px, where it
-  would squeeze the document). The rail shows **one list at a time**:
+  would squeeze the document); while attached at 900-1199px the panel is
+  `clamp(400px, 40vw, 460px)`, and below 900px it is full-width under the
+  document. The rail shows **one list at a time**:
   a header bar carries a small-caps `Contents | Pages` switch and a
   compact side toggle, and below it either this page's section tree or
   the page list renders in the same rhythm — never both, never split
@@ -149,15 +164,16 @@ adding kernels a matter of implementing one package against
   panel; right = document, panel, rail. The grid template matches that
   order, so the rail always keeps its 232px track and the panel never
   rides over it. At 900-1199px with a panel attached the rail moves to
-  a header strip (its lists wrap horizontally) and document + panel
-  stay side by side, so the panel is not pushed below the fold and the
-  document keeps ~40-65ch.
+  a header strip (the page list wraps horizontally; the section list stays
+  a column) and document + panel stay side by side, so the panel is not
+  pushed below the fold and the document keeps ~40-65ch.
   Hairline separators, rails sticky and internally scrolling (the
   one shown list — Contents, Pages, or live search results — scrolls on
   its own when the viewport is short); zones
-  stack vertically < 900px, where the rail header still shows both
-  switches and the shown list wraps horizontally, and the panel
-  (full-width, under the document) appears only while attached.
+  stack vertically < 900px, where the rail header still shows the
+  Contents | Pages switch and the side toggle, the page list wraps
+  horizontally, and the panel (full-width, under the document) appears only
+  while attached.
   Page-level chrome is the rail's wordmark/search masthead and small-caps
   switch, the plain document title header, and the lesson footer; there
   is no global toolbar. The navigator remembers which side it
@@ -220,8 +236,9 @@ Passed outcomes persist; failed outcomes live only in the session.
 Org-first content: lessons are real `.org` files imported via Vite `?raw`,
 parsed client-side by the core org-subset parser (grammar in this file).
 `#+BEGIN_SRC <lang>` blocks are executable when `lang` matches a registered
-kernel id (`asm`, `riscv`, `mips`, `c`, `python`, `typst`); other languages
-render read-only.
+kernel id (`asm`, `riscv`, `mips`, `c`, `cpp`, `python`, `typst`, `wasm`,
+`sql`, `matlab`, `lua`, `javascript`, `regex`, `lisp`, `elisp`, `prolog`);
+other languages render read-only.
 The org file must remain valid org-babel source in Emacs.
 
 ### Org-subset grammar
@@ -289,9 +306,11 @@ the kernel registry and every `.org` in `apps/site/src/pages/` (imported via
 Vite `import.meta.glob('./pages/*.org', { query: '?raw', eager: true })`).
 Drop a new `<name>.org` there and add its stem to the `PAGE_ORDER` list in
 `main.ts` — a nav entry appears at that position, titled from the file's
-`#+TITLE:` line (file name as fallback). A globbed file missing from
-`PAGE_ORDER` logs a console warning and is skipped; zero resolvable pages
-is a hard error. A block is executable when its
+`#+TITLE:` line (file name as fallback; non-ASCII or colliding titles fall
+back to `page-<n>` for the URL). A globbed file missing from `PAGE_ORDER`
+logs a console warning and is skipped, and a `PAGE_ORDER` stem with no
+matching file is skipped the same way; zero resolvable pages is a hard
+error. A block is executable when its
 `#+BEGIN_SRC <lang>` language matches a registered kernel id; anything else
 renders read-only.
 
@@ -306,11 +325,16 @@ Per block: `block-run`, `block-step`, `block-reset`, `block-revert`,
 `fold-solution`. Panel: `uth` (root),
 `uth-title`, `uth-detach`; panel sections `uth-sections`; register cells
 `reg-<name>`; disassembly current row `current-instr`; console `output`;
-trusted markup sections `html-panel`. Site: `nav` (left rail), `brand`,
-`search`, `search-results` (one result link per hit), `nav-item` (one per
-page link), `org-warnings` (diagnostics banner root, one `org-warning` per
-item), `page` (rendered document root), `toc`
-(the rail's Contents section), `toc-item` (one per h2/h3 heading deep
+trusted markup sections `html-panel`; the block's restore link
+`restore-sample`. Site: `nav` (the navigation rail, left or right), `brand`,
+`search`, `search-results` (one result link per hit),
+`rail-view-contents` / `rail-view-pages` (the Contents | Pages switch
+buttons, `aria-pressed`), `rail-side` (the side toggle), `nav-list` (the
+pages list, present only in the Pages view), `nav-item` (one per page link;
+the active page also carries `lw-nav-active` and `aria-current="page"`),
+`org-warnings` (diagnostics banner root, one `org-warning` per item), `page`
+(rendered document root), `toc` (the rail's Contents container, hidden
+while the Pages view shows), `toc-item` (one per h2/h3 heading deep
 link; the active entry carries `lw-toc-active`), `page-footer`,
 `prevnext`, `page-progress`, `page-complete`, `link-broken` (an
 unresolved internal link, inert text). Vite `base: './'`.

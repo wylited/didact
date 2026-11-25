@@ -24,7 +24,7 @@ build pipeline, and `vite build` cover everything. No per-package build step.
 - `packages/kernel-lua` — `@didact/kernel-lua`: Lua teaching-subset interpreter kernel (pure TypeScript).
 - `packages/kernel-regex` — `@didact/kernel-regex`: Thompson-NFA regex engine with state-set panels (pure TypeScript).
 - `packages/kernel-prolog` — `@didact/kernel-prolog`: SLD-resolution Prolog engine with choice-point panels (pure TypeScript).
-- `apps/site` — `@didact/site`: the website; `src/pages/*.org` + kernel registration only.
+- `apps/site` — `@didact/site`: the website — `src/pages/*.org` + kernel registration in `src/main.ts`, the Node build pipeline in `typst/` (see `docs/architecture.md`), `vite.config.ts`, `index.html`.
 
 ## Kernel contract
 
@@ -39,8 +39,10 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
    `packages/kernel-*/package.json` as a pattern). Add a local
    `src/types.ts` mirror of the `Kernel`/`Session` contract so the package
    typechecks standalone (see `packages/kernel-mips/src/types.ts` for the
-   pattern); it MUST stay byte-identical to `packages/core/src/kernel.ts`
-   (enforced by `packages/core/test/mirror.test.ts`).
+   pattern); the contract text from `/** One rendered under-the-hood
+   section. */` to EOF MUST stay byte-identical to
+   `packages/core/src/kernel.ts` (each mirror keeps its own short header;
+   enforced by `packages/core/test/mirror.test.ts`).
 2. Implement the `Kernel` interface in `src/kernel.ts` and export it from
    `src/index.ts` (see the contract in `packages/core/src/kernel.ts`). The
    kernel's `id` must match the org `#+BEGIN_SRC <lang>` word; declare
@@ -50,11 +52,12 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
    `scheme`, `sql`, `typst`, `wat`, `plain`; missing/unknown → plain text).
 3. Declare the wasm engine as an npm dependency of the kernel package
    (exact version, no caret) and record licenses in `THIRD-PARTY.md`;
-   keep license texts under `packages/kernel-<name>/vendor/`. Add the
-   `node_modules → public` file mapping to `GROUPS` in
-   `scripts/sync-vendors.mjs`; it copies the files into
+   keep upstream license texts under `packages/kernel-<name>/vendor/` when
+   the upstream ships them. Add the `node_modules → public` file mapping to
+   `GROUPS` in `scripts/sync-vendors.mjs`; it copies the files into
    `apps/site/public/vendor-<name>/` automatically on `pnpm dev`/`pnpm
-   build` (git-ignored build inputs). Engine payload never lives in git —
+   build` (git-ignored build inputs; naming follows `GROUPS` — asm64 keeps
+   the historical `vendor/`, c/cpp share `vendor-c/clang/`). Engine payload never lives in git —
    `pnpm-lock.yaml` pins versions and integrity.
 4. Add `"@didact/kernel-<name>": "workspace:*"` to `apps/site/package.json`
    dependencies.
@@ -63,6 +66,10 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
    `resolve.alias`.
 6. Register it in `apps/site/src/main.ts`: import the kernel and add it to
    the `kernels` array passed to `mountSite`.
+7. Add `test/` (vitest; the root config globs `packages/*/test/**`) and, for
+   headless-capable kernels, `test/smoke.ts` plus a
+   `bun packages/kernel-<name>/test/smoke.ts` clause in the root
+   `test:smoke` script.
 
 ## Recipe: add a page
 
@@ -83,13 +90,15 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
   (`packages/core/src/theme.css` owns the tokens).
 - Site chrome: one navigation rail (left by default, movable to the right
   with the header's side toggle, remembered in localStorage), the document,
-  and the panel rail at the other end, which goes wide while a block's panel
-  is attached. The navigation rail shows ONE list at a time — the page's
-  contents or the page list — chosen by the `Contents | Pages` switch in its
-  header; both lists stay tree-shaped and share one rhythm
+  and the panel rail beside the document (the page's right edge while the
+  navigator stays left), which goes wide while a block's panel is attached.
+  The navigation rail shows ONE list at a time — the page's contents, the
+  page list, or live search results — chosen by the `Contents | Pages`
+  switch in its header; both lists stay tree-shaped and share one rhythm
   (`packages/core/src/site.ts`, `theme.css`).
 - DOM hooks for tests/tools use `data-test` attributes
-  (e.g. `data-test="results"` on results slots, `.lw-block-slot` mounts).
+  (e.g. `data-test="results"` on results slots) and `.lw-*` classes for
+  mount points (`.lw-block-slot`).
 - No UI framework; hand-written DOM in `packages/core/src/*.ts`.
 
 ## Gates
@@ -99,11 +108,13 @@ Run from the repo root before handing off:
 ```
 pnpm typecheck   # apps/site tsc --noEmit (DOM) + tsconfig.typst.json (Node)
 pnpm build       # apps/site production build
-pnpm test        # vitest run (packages/*/test)
+pnpm test        # vitest run (packages/*/test + apps/site/typst) then test:smoke (needs bun)
 pnpm lint        # eslint .
+pnpm typst:check # typst content gate (apps/site/typst/cli.ts)
 ```
 
-If pnpm blocks a postinstall (e.g. esbuild), run `pnpm approve-builds --all -y`.
+esbuild's build script is pre-approved in `pnpm-workspace.yaml`; if pnpm asks
+about another postinstall, run `pnpm approve-builds`.
 
 ## Test policy
 
@@ -118,6 +129,9 @@ environment is node. The assembler tests inject a deterministic fake
 
 Runtime assets are npm dependencies pinned by `pnpm-lock.yaml`;
 `scripts/sync-vendors.mjs` materializes them as static files under the
-app's `public/` at build time. Licenses are recorded in each package's
-`THIRD-PARTY.md`, with texts under `vendor/`. No CDN and no network
-requests at runtime beyond same-origin asset fetches.
+app's `public/` on `pnpm dev`/`pnpm build`. Licenses for vendored engines are
+recorded in that package's `THIRD-PARTY.md` (`kernel-asm64`, `kernel-c`,
+`kernel-cpp`, `kernel-python`, `kernel-typst`), with upstream license texts
+under `vendor/` where the package ships one (`kernel-python` links them by
+URL instead). No CDN and no network requests at runtime beyond same-origin
+asset fetches.
