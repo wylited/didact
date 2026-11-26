@@ -1,55 +1,121 @@
 #+TITLE: x86-64 Assembly, Stepped Live
-#+SUBTITLE: Keystone assembler, Unicorn CPU emulator, and Capstone disassembler running in your browser
+#+SUBTITLE: Real Keystone assembly, Unicorn CPU execution, and Capstone disassembly in your browser
 
-Hit Run or Step on any block to assemble real x86-64 code and run it on the Unicorn emulator right in this tab. The panel on the right shows all 16 general-purpose registers (changes light up in blue), CPU flags, a Capstone disassembly listing, a hex dump of =.data=, and console output. Hover any row in the disassembly to read the =;= comment from that source line.
+Every block on this page assembles real 64-bit x86-64 machine code with Keystone and executes it on the Unicorn CPU emulator right in this tab. Click *Step* to advance one instruction at a time, or click a line number in the editor gutter to drop a breakpoint and *Run* straight to it. The right-hand panel exposes *Registers* (changed values highlight after every step), *EFLAGS*, a Capstone *Disassembly* listing (hover any row to read its =;= source comment), a live hex dump of =.data=, and *Output*.
 
-* Registers and Linux syscalls
+* Linux syscalls and the register ABI
 
-On Linux x86-64, =rax= holds the syscall number before =syscall= and the return value afterward. =rdi=, =rsi=, and =rdx= carry the first three arguments, and =rsp= points to the top of a 1 MiB stack.
+On Linux x86-64, user code asks the kernel to perform I/O through =syscall=. Before executing =syscall=, you place the service number in =rax= and up to three arguments in =rdi=, =rsi=, and =rdx=. When the kernel returns, the result replaces =rax=, while =rip= advances past the 2-byte =0f 05= instruction.
 
-| Syscall | =rax= | Arguments                      |
-|---------+-------+--------------------------------|
-| =write= | 1     | =rdi= fd, =rsi= buf, =rdx= len |
-| =exit=  | 60    | =rdi= exit code                |
+#+CAPTION: x86-64 Linux syscall register interface and memory layout
+#+BEGIN_SRC typst :results svg
+#set text(size: 9.5pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
 
-* Writing to stdout
+#let reg(pos, name, role, hl: false) = node(
+  pos,
+  [#text(font: "DejaVu Sans Mono", weight: "bold")[#name] #linebreak() #text(size: 8pt, fill: luma(80))[#role]],
+  shape: rect, inset: 6pt, width: 92pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(140) },
+  fill: if hl { rgb("#F2F8F6") } else { white },
+)
+#let mem(pos, body) = node(
+  pos, body,
+  shape: rect, inset: 6pt, width: 108pt,
+  stroke: 0.8pt + luma(110), fill: rgb("#FAFAFA"),
+)
 
-=section .data= places =msg= at =0x601000=, and =msg_len equ $ - msg= computes the byte length at assembly time. Step up to =syscall= and watch =rax=, =rsi=, and =rdx= get loaded; one step past =syscall=, =rip= moves 2 bytes forward and =rax= becomes =14= (the byte count returned by =write=).
+#diagram(
+  spacing: (22pt, 10pt),
+  reg((0, 0), [rax], [syscall num / return], hl: true),
+  reg((0, 1), [rdi], [arg 1 (fd / code)]),
+  reg((0, 2), [rsi], [arg 2 (buffer ptr)]),
+  reg((0, 3), [rdx], [arg 3 (byte count)]),
+  node(
+    (1.4, 1.5),
+    [*syscall* #linebreak() #text(size: 8pt, font: "DejaVu Sans Mono")[0f 05]],
+    shape: rect, inset: 8pt, width: 76pt,
+    stroke: 1pt + rgb("#1A9988"), fill: rgb("#F2F8F6"),
+  ),
+  mem((2.9, 0.7), [*.data* #text(font: "DejaVu Sans Mono", size: 8pt)[0x601000] #linebreak() #text(size: 8pt)[static bytes (=msg=)]]),
+  mem((2.9, 2.3), [*stack* #text(font: "DejaVu Sans Mono", size: 8pt)[rsp] #linebreak() #text(size: 8pt)[grows downward]]),
+  edge((0, 0), (1.4, 1.5), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((0, 1), (1.4, 1.5), "->", stroke: 0.7pt + luma(120)),
+  edge((0, 2), (1.4, 1.5), "->", stroke: 0.7pt + luma(120)),
+  edge((0, 3), (1.4, 1.5), "->", stroke: 0.7pt + luma(120)),
+  edge((1.4, 1.5), (2.9, 0.7), "->", stroke: 0.8pt + luma(120), label: [#text(size: 8pt)[reads]], label-fill: white),
+)
+#+END_SRC
+
+| Syscall | =rax= | Arguments                      | Return in =rax= |
+|---------+-------+--------------------------------+-----------------|
+| =write= | 1     | =rdi= fd, =rsi= buf, =rdx= len | bytes written   |
+| =exit=  | 60    | =rdi= exit code                | does not return |
+
+Step through =hello= below. Watch =rax=, =rdi=, =rsi=, and =rdx= populate one by one in *Registers*, then step across =syscall=: *Output* prints the string and =rax= becomes =14= (the byte length computed at assembly time by =msg_len equ $ - msg=).
 
 #+NAME: hello
 #+BEGIN_SRC asm
-; hello.asm — your first syscall
-; Linux x86-64: syscall number in rax, args in rdi, rsi, rdx.
-
+; hello.asm — Linux x86-64 write + exit syscalls
 section .text
 start:
     mov rax, 1            ; sys_write
     mov rdi, 1            ; fd 1 = stdout
-    mov rsi, msg          ; rsi <- address of the string
-    mov rdx, msg_len      ; rdx <- how many bytes to write
+    mov rsi, msg          ; rsi <- address of msg in .data (0x601000)
+    mov rdx, msg_len      ; rdx <- 14 bytes (including '\n')
     syscall               ; write(1, msg, 14) -> rax = 14
 
     mov rax, 60           ; sys_exit
-    xor rdi, rdi          ; exit code 0
-    syscall               ; the machine stops here
+    xor rdi, rdi          ; exit code 0 (shorter encoding than mov rdi, 0)
+    syscall               ; halts the emulator
 
 section .data
-msg:     db "Hello, world!", 10    ; 10 = '\n'
+msg:     db "Hello, world!", 10    ; 10 = ASCII '\n'
 msg_len  equ $ - msg
 #+END_SRC
 
 #+RESULTS:
 : Hello, world!
 
-* Loops, flags, and turning numbers into ASCII
+*Try editing:* replace =mov rdx, msg_len= with =mov rdx, 5= and hit *Run* — *Output* truncates to =Hello= and =rax= returns =5=, even though all 14 bytes still sit untouched in *.data*. Check *Disassembly* too: notice =xor rdi, rdi= encodes in 3 bytes (=48 31 ff=), shorter than =mov rdi, 0=.
 
-To print =55= without libc, you divide by =10= and add ='0'= (=0x30=) to each digit. Here =rax= sums =1..10= while =rbx= counts up; watch =ZF= and =CF= update on =cmp rbx, 10= before =jbe next= branches. Then =div rcx= splits =rdx:rax= into quotient (=rax = 5=) and remainder (=rdx = 5=) and writes both ASCII digits into =digits=.
+* Flags, loops, and turning integers into ASCII
+
+Unlike [[file:riscv.org][RISC-V]] or [[file:mips.org][MIPS]], x86-64 splits comparison from branching through *EFLAGS*. =cmp rbx, 10= subtracts $10$ from =rbx=, discards the numeric difference, and records zero (=ZF=) and borrow (=CF=). The following =jbe next= jumps whenever =CF= or =ZF= is set (unsigned $"rbx" <= 10$).
+
+To print the sum $sum_(i=1)^10 i = 55$ without libc, =div rcx= divides the 128-bit pair =rdx:rax= by =rcx=, placing the quotient in =rax= and the remainder in =rdx=. Adding ='0'= (=0x30=) converts each digit into ASCII, and two stores overwrite =digits= in *.data*.
+
+#+CAPTION: Flag-driven loop exit and 128-bit division dataflow
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let boxnode(pos, body, hl: false) = node(
+  pos, body, shape: rect, inset: 6pt, width: 88pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+  fill: if hl { rgb("#F2F8F6") } else { white },
+)
+
+#diagram(
+  spacing: (18pt, 14pt),
+  boxnode((0, 0), [*cmp rbx, 10* #linebreak() #text(size: 8pt)[computes rbx - 10]]),
+  boxnode((1.5, 0), [*EFLAGS* #linebreak() #text(size: 8pt)[ZF=1 if =10, CF=1 if \<10]], hl: true),
+  boxnode((3, 0), [*jbe next* #linebreak() #text(size: 8pt)[branch if CF or ZF]]),
+  boxnode((0, 1.3), [*rdx:rax* #linebreak() #text(size: 8pt)[0 : 55 (128-bit)]]),
+  boxnode((1.5, 1.3), [*div rcx* #linebreak() #text(size: 8pt)[rcx = 10]], hl: true),
+  boxnode((3, 1.3), [*rax=5, rdx=5* #linebreak() #text(size: 8pt)[+'0' -> "55" in .data]]),
+  edge((0, 0), (1.5, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((1.5, 0), (3, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((0, 1.3), (1.5, 1.3), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((1.5, 1.3), (3, 1.3), "->", stroke: 0.8pt + rgb("#1A9988")),
+)
+#+END_SRC
+
+Set a breakpoint on line 10 (=cmp rbx, 10=) by clicking its gutter number, then click *Run* repeatedly to watch =rax= accumulate and *EFLAGS* change when =rbx= reaches =10= and then =11=.
 
 #+NAME: sum-loop
 #+BEGIN_SRC asm
-; sum.asm — sum 1..10 and print the result
-; 1 + 2 + ... + 10 = 55, which is exactly two ASCII digits.
-
+; sum.asm — sum 1..10 = 55, convert to ASCII, and write to stdout
 section .text
 start:
     xor rax, rax          ; sum = 0
@@ -57,18 +123,17 @@ start:
 next:
     add rax, rbx          ; sum += i
     inc rbx               ; i++
-    cmp rbx, 10           ; flags: i vs 10
-    jbe next              ; loop while i <= 10 (short backward jump)
+    cmp rbx, 10           ; set ZF/CF from (i - 10)
+    jbe next              ; loop while i <= 10
 
-    ; split 55 into digits: 55 / 10 = 5 remainder 5
-    mov rcx, 10
-    xor rdx, rdx          ; rdx must be 0 before div (rdx:rax / rcx)
+    mov rcx, 10           ; divisor = 10
+    xor rdx, rdx          ; clear high 64 bits of rdx:rax before div
     div rcx               ; rax = 5 (tens), rdx = 5 (ones)
-    add al, '0'           ; 5 -> ASCII '5'
+    add al, '0'           ; 5 -> 0x35 ('5')
     add dl, '0'
-    mov [digits], al      ; store tens digit into the buffer
-    mov [digits+1], dl    ; store ones digit
-    mov byte [digits+2], 10   ; newline
+    mov [digits], al      ; overwrite .data[0]
+    mov [digits+1], dl    ; overwrite .data[1]
+    mov byte [digits+2], 10
 
     mov rax, 1            ; write(1, digits, 3)
     mov rdi, 1
@@ -81,22 +146,136 @@ next:
     syscall
 
 section .data
-digits:  db "00", 10      ; scratch buffer, overwritten at run time
+digits:  db "00", 10      ; starts as 30 30 0a; becomes 35 35 0a at runtime
 #+END_SRC
 
 #+RESULTS:
 : 55
 
-After running, look at *Memory · .data* at =0x601000=: =30 30 0a= (="00\n"=) turned into =35 35 0a= (="55\n"=). Hit Reset to watch it revert.
+*Try editing:* inspect *.data* at =0x601000= after running — =30 30 0a= (="00\n"=) became =35 35 0a= (="55\n"=). Now hit *Reset* and watch *.data* snap back to =30 30 0a=. Then change =cmp rbx, 10= to =cmp rbx, 9= and re-run to see =45= (=34 35 0a=).
 
-* Syntax reference
+* The stack, =call=, and =ret=
 
-- Intel syntax, destination first (=mov rax, 42=)
-- Labels (=name:=) and NASM-style =.local= labels
-- Sections: =section .text= / =section .data= (or =.text= / =.data=)
-- Data: =db=, =dw=, =dd=, =dq= with numbers, chars, and strings
-- Constants & math: =name equ expr= (or =name = expr=), =+ - * /=, =0x=, =0b=, ='a'=
-- Memory operands: =[digits+1]=, =byte [digits+2]=, =[rax]=, =[rsp+8]=
-- Comments start with =;=
+=call square= decrements =rsp= by 8 bytes, writes the return address onto the stack, and jumps to =square=. =ret= pops that 8-byte address back into =rip=. Following the System V AMD64 ABI, the first integer argument arrives in =rdi= and the return value goes back in =rax=.
 
-Assembler errors highlight the exact line in red.
+#+NAME: stack-call
+#+BEGIN_SRC asm
+; stack-call.asm — watch rsp move by 8 bytes across call / ret
+section .text
+start:
+    mov rdi, 9            ; argument n = 9
+    call square           ; pushes return address (rsp -= 8), jumps to square
+
+    ; rax is now 81 -> split into two ASCII digits
+    mov rcx, 10
+    xor rdx, rdx
+    div rcx               ; rax = 8, rdx = 1
+    add al, '0'
+    add dl, '0'
+    mov [out], al
+    mov [out+1], dl
+
+    mov rax, 1
+    mov rdi, 1
+    mov rsi, out
+    mov rdx, 3
+    syscall
+
+    mov rax, 60
+    xor rdi, rdi
+    syscall
+
+square:
+    mov rax, rdi          ; rax = n
+    imul rax, rdi         ; rax = n * n
+    ret                   ; pops return address into rip (rsp += 8)
+
+section .data
+out:     db "00", 10
+#+END_SRC
+
+#+RESULTS:
+: 81
+
+*Try editing:* step across =call square= and =ret= while watching =rsp= and =rip= in *Registers*. Change =mov rdi, 9= to =mov rdi, 7= to verify =49=, or add =push rbx= / =pop rbx= inside =square= and watch =rsp= dip by another 8 bytes.
+
+* Exercise: sum 1 through 12
+
+Modify the loop bound below so the program prints the sum $sum_(i=1)^12 i = 78$, then inspect *.data* to confirm the bytes =37 38 0a=.
+
+#+NAME: ex-sum-12
+#+EXERCISE: Sum 1 through 12 and print 78
+#+CHECK: 78
+#+BEGIN_SRC asm
+section .text
+start:
+    xor rax, rax
+    mov rbx, 1
+next:
+    add rax, rbx
+    inc rbx
+    cmp rbx, 10           ; change this bound so the sum is 78
+    jbe next
+
+    mov rcx, 10
+    xor rdx, rdx
+    div rcx
+    add al, '0'
+    add dl, '0'
+    mov [digits], al
+    mov [digits+1], dl
+    mov byte [digits+2], 10
+
+    mov rax, 1
+    mov rdi, 1
+    mov rsi, digits
+    mov rdx, 3
+    syscall
+
+    mov rax, 60
+    xor rdi, rdi
+    syscall
+
+section .data
+digits:  db "00", 10
+#+END_SRC
+
+#+BEGIN_HINT
+Only one immediate operand needs to change: the upper bound in =cmp rbx, 10=. Since 78 still fits in two ASCII digits, the =div rcx= conversion works unchanged.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC asm
+section .text
+start:
+    xor rax, rax
+    mov rbx, 1
+next:
+    add rax, rbx
+    inc rbx
+    cmp rbx, 12
+    jbe next
+
+    mov rcx, 10
+    xor rdx, rdx
+    div rcx
+    add al, '0'
+    add dl, '0'
+    mov [digits], al
+    mov [digits+1], dl
+    mov byte [digits+2], 10
+
+    mov rax, 1
+    mov rdi, 1
+    mov rsi, digits
+    mov rdx, 3
+    syscall
+
+    mov rax, 60
+    xor rdi, rdi
+    syscall
+
+section .data
+digits:  db "00", 10
+#+END_SRC
+#+END_SOLUTION

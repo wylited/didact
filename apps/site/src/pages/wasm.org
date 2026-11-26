@@ -1,11 +1,44 @@
 #+TITLE: WebAssembly, Stepped Live
-#+SUBTITLE: The i32 core of WAT: operand stack, locals, structured control flow, and linear memory
+#+SUBTITLE: The i32 core of WAT: operand stack, binary opcodes, structured branches, and linear memory
+
+This page runs a pure-TypeScript WebAssembly Text (WAT) interpreter for the =i32= core. Click *Step* or set gutter breakpoints to watch *Instructions* (showing real binary WebAssembly opcode bytes like =0x41= and =0x6a=), *Operand stack*, *Globals*, *Call stack*, *Memory*, and *Output*. These are the same binary opcodes emitted by clang in [[file:c.org][C]] and [[file:cpp.org][C++]].
 
 * Arithmetic on an operand stack
 
-WebAssembly has no registers. Instructions push values onto an operand stack and pop them back off: =i32.const= pushes a 32-bit integer, and =i32.add= pops two and pushes their sum. The nested syntax =(i32.add (i32.const 20) (i32.const 22))= flattens to pushing =20=, pushing =22=, then running =i32.add=.
+WebAssembly has no CPU registers. Every instruction pushes onto or pops from a typed operand stack: =(i32.add (i32.const 20) (i32.const 22))= is just folded notation for pushing =20=, pushing =22=, then executing =i32.add= (=0x6a=).
 
-Step through the block below and watch *Instructions* (which shows the real binary opcodes: =0x41= for =i32.const=, =0x6a= for =i32.add=) alongside *Operand stack*. Overflow wraps modulo =2^32= (=65536 * 65536 = 0=), and signed division =i32.div_s= truncates toward zero (=-7 / 2 = -3=).
+#+CAPTION: Operand stack transitions for (i32.add (i32.const 20) (i32.const 22))
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1cm, {
+  import draw: *
+  let cols = (
+    (x: 0.0, op: "start", items: ()),
+    (x: 2.3, op: "i32.const 20", items: ("20",)),
+    (x: 4.9, op: "i32.const 22", items: ("20", "22")),
+    (x: 7.5, op: "i32.add", items: ("42",)),
+  )
+  for c in cols {
+    rect((c.x, 0.2), (c.x + 1.7, 1.9), stroke: 0.7pt + luma(160), fill: rgb("#FAFAFA"))
+    content((c.x + 0.85, -0.15), text(font: "DejaVu Sans Mono", size: 8pt)[#c.op])
+    for (idx, val) in c.items.enumerate() {
+      let y = 0.3 + idx * 0.7
+      let hl = val == "42"
+      rect((c.x + 0.15, y), (c.x + 1.55, y + 0.58),
+        stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(110) },
+        fill: if hl { rgb("#F2F8F6") } else { white })
+      content((c.x + 0.85, y + 0.29), text(font: "DejaVu Sans Mono", weight: "bold")[#val])
+    }
+  }
+  for x in (1.75, 4.05, 6.65) {
+    line((x, 1.05), (x + 0.5, 1.05), stroke: 0.8pt + rgb("#1A9988"), mark: (end: ">"))
+  }
+})
+#+END_SRC
+
+Step through =stack-arith= below and watch *Operand stack* grow and shrink. Notice =i32= multiplication wraps modulo $2^(32)$ ($65536^2 equiv 0 (mod 2^(32))$), and signed division =i32.div_s= truncates toward zero ($-7 / 2 = -3$).
 
 #+NAME: stack-arith
 #+BEGIN_SRC wasm
@@ -22,9 +55,11 @@ Step through the block below and watch *Instructions* (which shows the real bina
 : 0
 : -3
 
-* Locals and recursive calls
+*Try editing:* change =i32.const 2= on the last line to =i32.const 0= and run — WebAssembly traps cleanly on divide-by-zero instead of producing =Infinity= or =NaN=.
 
-Function parameters and =(local ...)= declarations give you named per-call variables (zero-initialized). =local.get= pushes a local onto the stack and =local.set= pops the top value into it. Each =call= pushes a fresh frame onto the *Call stack* panel; step into =$fact= below to watch ten frames stack up and then unwind as each multiply finishes.
+* Locals and recursive frames on *Call stack*
+
+Parameters and =(local ...)= slots are zero-initialized per call frame. Set a breakpoint on line 6 below and press *Run* repeatedly: watch *Call stack* stack up frames for =$n = 10, 9, \dots, 1= and then unwind as each =i32.mul= finishes.
 
 #+NAME: factorial
 #+BEGIN_SRC wasm
@@ -41,9 +76,31 @@ Function parameters and =(local ...)= declarations give you named per-call varia
 #+RESULTS:
 : 3628800
 
-* =block=, =loop=, and =br=
+* Structured control flow: =block=, =loop=, and =br=
 
-WebAssembly has no arbitrary jumps. Control flow is built from nested =block= and =loop= labels, and =br= means opposite things depending on which one you name: =br $done= (a =block=) jumps to the end like =break=, while =br $again= (a =loop=) jumps back to the top like =continue=. =br_if= branches only when the top of the stack is nonzero.
+WebAssembly forbids arbitrary =goto= so bytecode can be validated in a single linear pass. Instead, =br $label= jumps to opposite ends depending on the container: targeting a =block= exits forward (like =break=), while targeting a =loop= jumps backward to the header (like =continue=).
+
+#+CAPTION: Opposite branch directions for block (exit forward) vs loop (repeat backward)
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let boxnode(pos, body, hl: false) = node(
+  pos, body, shape: rect, inset: 6pt, width: 108pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+  fill: if hl { rgb("#F2F8F6") } else { white },
+)
+
+#diagram(
+  spacing: (20pt, 12pt),
+  boxnode((0, 0), [*loop \$again* #linebreak() #text(size: 8pt)[check i > 5 -> br_if \$done]], hl: true),
+  boxnode((0, 1.2), [*body* #linebreak() #text(size: 8pt)[sum += i; i += 1; br \$again]]),
+  boxnode((2.1, 0.6), [*end of block \$done* #linebreak() #text(size: 8pt)[call \$print(sum)]]),
+  edge((0, 0), (0, 1.2), "->", stroke: 0.8pt + luma(120)),
+  edge((0, 1.2), (0, 0), "->", bend: -55deg, stroke: 0.9pt + rgb("#1A9988"), label: [#text(size: 8pt)[br \$again]], label-fill: white),
+  edge((0, 0), (2.1, 0.6), "->", stroke: 0.9pt + rgb("#C2553F"), label: [#text(size: 8pt)[br_if \$done]], label-fill: white),
+)
+#+END_SRC
 
 #+NAME: counted-loop
 #+BEGIN_SRC wasm
@@ -64,9 +121,11 @@ WebAssembly has no arbitrary jumps. Control flow is built from nested =block= an
 #+RESULTS:
 : 15
 
-* Linear memory is just bytes
+*Try editing:* change =br $again= to =br $done= and step through — the loop now exits after one pass and prints =0=.
 
-=(memory 1)= allocates one 64 KiB page of flat byte-addressed memory. =i32.store8= writes the low byte, =i32.load8_u= reads it back unsigned (=0..255=), and =i32.load8_s= sign-extends it. Four-byte loads and stores are little-endian. Here =0x2A= (42, ASCII =*=) is stored at address =0= and printed once as a char and once as an integer. Check the *Memory* panel to see byte =2a= at =0x0000=.
+* Linear memory is a flat byte array
+
+=(memory 1)= allocates one 64 KiB page of zero-initialized bytes. Multi-byte stores like =i32.store= write little-endian bytes, while =i32.load8_u= and =i32.load8_s= read a single byte unsigned or sign-extended (just like =lbu= and =lb= in [[file:riscv.org][RISC-V]]).
 
 #+NAME: memory-bytes
 #+BEGIN_SRC wasm
@@ -83,4 +142,47 @@ WebAssembly has no arbitrary jumps. Control flow is built from nested =block= an
 #+RESULTS:
 : *42
 
-This kernel implements the =i32= core (stack, locals, globals, calls, structured branches, linear memory, and traps for divide-by-zero, =unreachable=, and out-of-bounds memory). =i64=, =f32=, and =f64= fail cleanly at load time. The opcode bytes in *Instructions* are the real binary spec encodings emitted by clang in the [[file:c.org][C]] and [[file:cpp.org][C++]] lessons.
+*Try editing:* replace =0x2A= with =0xFF= and compare =i32.load8_u= (=255=) against =i32.load8_s= (=-1=) while watching byte =ff= appear at =0x0000= in *Memory*.
+
+* Exercise: sum 1 through 10 in WAT
+
+Update the loop bound in =counted-loop= below so it prints $sum_(i=1)^10 i = 55$.
+
+#+NAME: ex-wasm-sum
+#+EXERCISE: Sum 1 through 10 and print 55
+#+CHECK: 55
+#+BEGIN_SRC wasm
+(module
+  (import "didact" "print" (func $print (param i32)))
+  (func (export "main")
+    (local $i i32)
+    (local $sum i32)
+    (block $done
+      (loop $again
+        (br_if $done (i32.gt_s (local.get $i) (i32.const 5)))
+        (local.set $sum (i32.add (local.get $sum) (local.get $i)))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $again)))
+    (call $print (local.get $sum))))
+#+END_SRC
+
+#+BEGIN_HINT
+Change =(i32.const 5)= inside =br_if $done= to =(i32.const 10)=.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC wasm
+(module
+  (import "didact" "print" (func $print (param i32)))
+  (func (export "main")
+    (local $i i32)
+    (local $sum i32)
+    (block $done
+      (loop $again
+        (br_if $done (i32.gt_s (local.get $i) (i32.const 10)))
+        (local.set $sum (i32.add (local.get $sum) (local.get $i)))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $again)))
+    (call $print (local.get $sum))))
+#+END_SRC
+#+END_SOLUTION

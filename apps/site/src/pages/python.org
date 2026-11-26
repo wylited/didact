@@ -1,63 +1,135 @@
-#+TITLE: Python in the Browser
-#+SUBTITLE: Real CPython 3.14 running locally on Pyodide
+#+TITLE: Python, X-Rayed Live
+#+SUBTITLE: Real CPython 3.14 on Pyodide with execution traces, grouped variables, type drift, and shared sessions
 
-Hit Run on any block and it executes on real CPython compiled to [[file:wasm.org][WebAssembly]] (Pyodide, ~13 MB fetched once and cached). Nothing leaves your browser.
+Every Python block runs on real CPython 3.14 compiled to [[file:wasm.org][WebAssembly]] (Pyodide, ~13 MB cached locally). Instead of single-stepping, each run instruments the block and returns a full x-ray snapshot in the right-hand panel: *Trace · executed lines* (per-line hit counts and loop summaries), *Variables · grouped* (scalars, collections with lengths, functions, classes), *Types · declared vs observed* (catching annotation drift), *Traceback* / *Locals · failing frame* on errors, and *Console · stdout + stderr*.
 
-Each block gets its own clean global namespace, so variables do not leak from one block to another, and re-running starts fresh. There is no single-stepping here; blocks run straight through and dump their globals (with =repr= and type) into the Variables panel on the right.
+* Execution traces and loop-variable scope
 
-* Basic output and precedence
+In Python, a =for= loop does not create its own block scope: the loop variable =n= stays bound in the enclosing namespace after the loop finishes, right alongside =squares=.
 
-Standard CPython =print= and arithmetic precedence (=3 * 4= binds tighter than =+=).
+#+CAPTION: Python names live in a namespace dict pointing to heap objects; for-loops do not isolate n
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
 
-#+NAME: hello
-#+BEGIN_SRC python
-print("Hello, Python!")
-print("2 + 3 * 4 =", 2 + 3 * 4)
+#let slot(pos, body, hl: false) = node(
+  pos, body, shape: rect, inset: 6pt, width: 92pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+  fill: if hl { rgb("#F2F8F6") } else { white },
+)
+
+#diagram(
+  spacing: (22pt, 10pt),
+  slot((0, 0), [*globals* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[squares]]),
+  slot((0, 1.05), [*globals* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[n (still live!)]], hl: true),
+  slot((1.8, 0), [*list (len 5)* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[[1, 4, 9, 16, 25]]]),
+  slot((1.8, 1.05), [*int* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[5]], hl: true),
+  edge((0, 0), (1.8, 0), "->", stroke: 0.8pt + luma(120)),
+  edge((0, 1.05), (1.8, 1.05), "->", stroke: 0.9pt + rgb("#1A9988")),
+)
 #+END_SRC
 
-#+RESULTS:
-: Hello, Python!
-: 2 + 3 * 4 = 14
-
-* Loops leave their variable in scope
-
-Run this loop and look at the Variables panel afterward. You will see both =squares= and =n= (=5=), because a Python =for= loop does not create a separate block scope for its loop variable.
+Run =squares= and inspect *Trace · executed lines*: line 3 executes 5 times while lines 1 and 4 execute once. Then check *Variables · grouped* to see both =squares= (=list · len 5=) and ~n = 5~.
 
 #+NAME: squares
 #+BEGIN_SRC python
 squares = []
 for n in range(1, 6):
     squares.append(n * n)
-print("squares:", squares)
+print("squares:", squares, "last n:", n)
 #+END_SRC
 
 #+RESULTS:
-: squares: [1, 4, 9, 16, 25]
+: squares: [1, 4, 9, 16, 25] last n: 5
 
-* Functions live in the same globals dict
+*Try editing:* replace =n * n= with =10 // (n - 3)= and hit *Run*. The x-ray switches to failure mode: *Trace · executed lines* highlights the exact failing row, *Traceback* hides Pyodide's internals to show only your lesson frame, and *Locals · failing frame* reveals ~n = 3~ at the moment =ZeroDivisionError= fired.
 
-Iterative Fibonacci in two rolling variables. After running, =fib= shows up in the Variables panel as a =function= object, right alongside any other global.
+* Type annotations vs runtime values
 
-#+NAME: fib
+Python annotations are not enforced at runtime — dividing an =int= with =/= always produces a =float= even when the variable was declared as =int=. The *Types · declared vs observed* panel compares every annotation against =type(value)= and flags mismatches automatically.
+
+#+CAPTION: Declared annotations vs observed runtime types checked after execution
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let card(pos, body, warn: false) = node(
+  pos, body, shape: rect, inset: 6pt, width: 108pt,
+  stroke: 0.8pt + if warn { rgb("#C2553F") } else { rgb("#1A9988") },
+  fill: if warn { rgb("#FDF3F1") } else { rgb("#F2F8F6") },
+)
+
+#diagram(
+  spacing: (18pt, 10pt),
+  card((0, 0), [*declared* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[total: int = 10]]),
+  card((1.65, 0), [*rebound* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[total = total / 2]], warn: true),
+  card((3.3, 0), [*observed* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[int -> float (5.0)]], warn: true),
+  edge((0, 0), (1.65, 0), "->", stroke: 0.8pt + luma(120)),
+  edge((1.65, 0), (3.3, 0), "->", stroke: 0.9pt + rgb("#C2553F")),
+)
+#+END_SRC
+
+#+NAME: type-drift
 #+BEGIN_SRC python
-def fib(n):
+total: int = 10
+count: int = 2
+total = total / count
+print(total, type(total).__name__)
+#+END_SRC
+
+#+RESULTS:
+: 5.0 float
+
+*Try editing:* change =total / count= to =total // count= (integer floor division) and re-run — watch the mismatch badge in *Types · declared vs observed* disappear as =total= stays =int=.
+
+* Shared sessions across blocks (=:session=)
+
+Ordinary blocks run in an isolated namespace. Adding =:session fib-lab= shares one live CPython session across blocks on the same page, just like org-babel or a Jupyter notebook: definitions from the first block stay alive for the second.
+
+#+NAME: session-define
+#+BEGIN_SRC python :session fib-lab
+def fib(n: int) -> int:
     a, b = 0, 1
     for _ in range(n):
         a, b = b, a + b
     return a
 
+cache = {k: fib(k) for k in range(1, 8)}
+print("cached:", cache)
+#+END_SRC
+
+#+RESULTS:
+: cached: {1: 1, 2: 1, 3: 2, 4: 3, 5: 5, 6: 8, 7: 13}
+
+Run the block above first, then run the block below — =fib= and =cache= are already in the shared session's *Variables · grouped* panel.
+
+#+NAME: session-use
+#+BEGIN_SRC python :session fib-lab
 print("fib(10) =", fib(10))
+print("fib(15) =", fib(15))
+print("cache size =", len(cache))
 #+END_SRC
 
 #+RESULTS:
 : fib(10) = 55
+: fib(15) = 610
+: cache size = 7
 
-Try dropping a closing parenthesis or adding =1 / 0= to see real CPython syntax errors and tracebacks in the console panel.
+*Try editing:* modify ~cache[10] = fib(10)~ in the second block and re-run to watch =cache= grow in place across runs. Click *Reset* to wipe the shared session cleanly.
 
-* Practice: sum of squares
+* Exercise: sum of squares
+
+Verify the formula $sum_(n=0)^4 n^2 = 30$ with a generator expression, then experiment by changing =range(5)= to =range(11)= (watch *Trace · executed lines* count the extra iterations) and clicking *Revert* when ready.
+
+#+NAME: ex-sum-squares
+#+EXERCISE: Sum the squares of 0 through 4
+#+CHECK: 30
+#+BEGIN_SRC python
+print(sum(n * n for n in range(5)))
+#+END_SRC
 
 #+BEGIN_HINT
-A generator expression inside the built-in =sum= does it in one line. The expected console output is a single integer.
+=sum(n * n for n in range(5))= computes $0^2 + 1^2 + 2^2 + 3^2 + 4^2 = 30$ without allocating an intermediate list.
 #+END_HINT
 
 #+BEGIN_SOLUTION
@@ -65,9 +137,3 @@ A generator expression inside the built-in =sum= does it in one line. The expect
 print(sum(n * n for n in range(5)))
 #+END_SRC
 #+END_SOLUTION
-
-#+EXERCISE: Sum the squares of 0 through 4
-#+CHECK: 30
-#+BEGIN_SRC python
-print(sum(n * n for n in range(5)))
-#+END_SRC

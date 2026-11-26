@@ -65,6 +65,8 @@ export type NavView = 'contents' | 'pages';
 
 /** localStorage key holding the user's navigator side ('left' | 'right'). */
 const NAV_SIDE_KEY = 'didact:nav-side';
+/** localStorage key holding whether the navigator rail is hidden ('1'). */
+const NAV_HIDDEN_KEY = 'didact:nav-hidden';
 
 /** One lesson page: nav title plus its org source. */
 export interface PageSpec {
@@ -141,6 +143,23 @@ function writeStoredNavSide(side: NavSide): void {
   }
 }
 
+function readStoredNavHidden(): boolean {
+  try {
+    return window.localStorage.getItem(NAV_HIDDEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredNavHidden(hidden: boolean): void {
+  try {
+    if (hidden) window.localStorage.setItem(NAV_HIDDEN_KEY, '1');
+    else window.localStorage.removeItem(NAV_HIDDEN_KEY);
+  } catch {
+    /* storage denied */
+  }
+}
+
 /** Typst math styles are per document, not per mount: live mounts that
  *  need the sheet share one `<style>` reference, and the last owner to
  *  dispose removes it. `owned` is false when the mount adopted a sheet it
@@ -213,6 +232,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
   // ---- navigator rail: ONE list at a time (contents | pages) ----
   const navSideDefault: NavSide = opts.navSide === 'right' ? 'right' : 'left';
   let navSide: NavSide = readStoredNavSide() ?? navSideDefault;
+  let navHidden: boolean = readStoredNavHidden();
   let navView: NavView = opts.navView === 'pages' ? 'pages' : 'contents';
 
   const rail = doc.createElement('nav');
@@ -224,6 +244,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
   brand.className = 'lw-brand';
   brand.dataset.test = 'brand';
   brand.href = `#/${slugs[0]}`;
+  brand.title = 'Home — return to first lesson';
   brand.textContent = opts.brand ?? 'Didact';
 
   // Lesson search sits above the CONTENTS | PAGES switch; results replace
@@ -268,7 +289,14 @@ export function mountSite(opts: MountOptions): SiteHandle {
   sideBtn.className = 'lw-nav-side';
   sideBtn.dataset.test = 'rail-side';
 
-  railHead.append(navSwitch, sideBtn);
+  const hideBtn = doc.createElement('button');
+  hideBtn.type = 'button';
+  hideBtn.className = 'lw-nav-hide';
+  hideBtn.dataset.test = 'rail-hide';
+  hideBtn.title = 'Hide sidebar';
+  hideBtn.setAttribute('aria-label', 'Hide sidebar');
+
+  railHead.append(navSwitch, sideBtn, hideBtn);
 
   // the contents container: always in the rail, hidden while pages show
   const contents = doc.createElement('nav');
@@ -285,6 +313,14 @@ export function mountSite(opts: MountOptions): SiteHandle {
 
   rail.append(brand, searchInput, railHead, contents, pageSlot, searchResults);
 
+  // Floating reveal button shown only while the sidebar is hidden.
+  const revealBtn = doc.createElement('button');
+  revealBtn.type = 'button';
+  revealBtn.className = 'lw-nav-reveal';
+  revealBtn.dataset.test = 'rail-show';
+  revealBtn.title = 'Show sidebar';
+  revealBtn.setAttribute('aria-label', 'Show sidebar');
+
   // ---- document column
   const docPane = doc.createElement('div');
   docPane.className = 'lw-doc-pane';
@@ -299,7 +335,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
   const layout = doc.createElement('div');
   layout.className = 'lw-layout';
   layout.append(rail, docPane, railRight);
-  root.appendChild(layout);
+  root.append(layout, revealBtn);
 
   /** Apply the side: root classes + which end of the grid the rail takes.
    *  Right mode appends the navigator after the panel rail, so the rail
@@ -309,13 +345,18 @@ export function mountSite(opts: MountOptions): SiteHandle {
     root.classList.toggle('lw-nav-left', navSide === 'left');
     root.classList.toggle('lw-nav-right', navSide === 'right');
     const target: NavSide = navSide === 'left' ? 'right' : 'left';
-    // the label names the ACTION (where a click moves the rail), not the
-    // current side; the current side is visible in the layout itself
-    sideBtn.textContent = target === 'left' ? '← Left' : 'Right →';
+    sideBtn.textContent = target === 'left' ? '←' : '→';
     sideBtn.title = `Move navigation to the ${target}`;
     sideBtn.setAttribute('aria-label', `Move navigation to the ${target}`);
+    hideBtn.textContent = navSide === 'left' ? '⇤' : '⇥';
+    revealBtn.textContent = navSide === 'left' ? '⇥' : '⇤';
     if (navSide === 'left') layout.prepend(rail);
     else layout.append(rail);
+  }
+
+  function applyNavHidden(): void {
+    root.classList.toggle('lw-nav-hidden', navHidden);
+    revealBtn.hidden = !navHidden;
   }
 
   function setNavSide(side: NavSide): void {
@@ -325,8 +366,22 @@ export function mountSite(opts: MountOptions): SiteHandle {
     writeStoredNavSide(side);
   }
 
+  function setNavHidden(hidden: boolean): void {
+    navHidden = hidden;
+    applyNavHidden();
+    writeStoredNavHidden(hidden);
+  }
+
   sideBtn.addEventListener('click', () => {
     setNavSide(navSide === 'left' ? 'right' : 'left');
+  });
+  hideBtn.addEventListener('click', () => {
+    setNavHidden(true);
+    revealBtn.focus();
+  });
+  revealBtn.addEventListener('click', () => {
+    setNavHidden(false);
+    hideBtn.focus();
   });
 
   /** ALWAYS-ONE-LIST, or the search results: exactly ONE list paints in
@@ -961,6 +1016,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
   syncViewButtons();
   renderNav();          // …painted before the first route build
   applyNavSide();
+  applyNavHidden();
   const onHashChange = (): void => routeAndScroll(false);
   window.addEventListener('hashchange', onHashChange);
   routeAndScroll(true); // builds the first page (and its contents)
@@ -1004,7 +1060,7 @@ export function mountSite(opts: MountOptions): SiteHandle {
       }
       root.replaceChildren();
       root.classList.remove(
-        'lw-site', 'lw-no-fonts', 'lw-panel-attached', 'lw-nav-left', 'lw-nav-right');
+        'lw-site', 'lw-no-fonts', 'lw-panel-attached', 'lw-nav-left', 'lw-nav-right', 'lw-nav-hidden');
       // the persisted side is deliberately kept: the next mount restores it
     },
   };

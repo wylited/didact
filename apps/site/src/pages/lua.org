@@ -1,11 +1,35 @@
 #+TITLE: Lua, Stepped Live
-#+SUBTITLE: Tables, multiple returns, 1-based arrays, and metatables in a steppable Lua 5.4 subset
+#+SUBTITLE: Dual-part tables, multiple returns, integer vs float types, and metatable chains
 
-* Everything is a table
+This page runs a steppable pure-TypeScript Lua 5.4 interpreter. Click *Step* or set gutter breakpoints to inspect *Values* (every assigned name tagged with its runtime type — integer vs float, local vs =_G=), *Locals*, *Globals (_G)*, *Tables* (array slots first, hash entries below, =Δ= marking the latest write), *Call stack*, and *Console*.
 
-Lua has no separate list, dict, or object type. Everything is a /table/: an associative map that also stores consecutive integer keys starting at =1= as an array. A single table like ={10, 20, 30, name = "xs"}= holds both at the same time.
+* One data structure: the dual-part table
 
-Step through the block below with the *Tables* panel open. Array slots appear first (=t[1]=, =t[2]=, ...), hash entries below them, and =Δ= marks whatever the last step wrote. (There is no garbage collector in this interpreter, so allocated tables stay visible in the panel.) The =#= operator counts consecutive integer keys from =1= and ignores the hash part.
+Lua has no separate list, dictionary, or object type — every compound structure is a *table* with an array part for consecutive integer keys starting at =1= and a hash part for everything else. The length operator =#t= measures only the array border and ignores hash keys.
+
+#+CAPTION: Anatomy of one Lua table holding both array slots (1..4) and hash keys
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1cm, {
+  import draw: *
+  content((2.4, 2.15), [*Array part* (#text(font: "DejaVu Sans Mono", size: 8pt)[\#t = 4])])
+  let arr = ("10", "20", "30", "40")
+  for i in range(4) {
+    let x = i * 1.2
+    rect((x, 1.15), (x + 1.1, 1.8), stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
+    content((x + 0.55, 1.48), text(font: "DejaVu Sans Mono", weight: "bold")[#arr.at(i)])
+    content((x + 0.55, 0.9), text(font: "DejaVu Sans Mono", size: 7.5pt, fill: luma(90))[t[#(i + 1)]])
+  }
+
+  content((7.4, 2.15), [*Hash part* (ignored by #text(font: "DejaVu Sans Mono", size: 8pt)[\#t])])
+  rect((5.5, 1.15), (9.3, 1.8), stroke: 0.8pt + luma(130), fill: white)
+  content((7.4, 1.48), text(font: "DejaVu Sans Mono", size: 8.5pt)[name -> "xs",  lang -> "lua"])
+})
+#+END_SRC
+
+Step through =tables-101= with *Tables* open: watch ~t[4] = 40~ extend the array part and ~t.lang = "lua"~ add a hash entry, each tagged with =Δ= on the step it changes.
 
 #+NAME: tables-101
 #+BEGIN_SRC lua
@@ -13,32 +37,21 @@ local t = {10, 20, 30, name = "xs"}
 t[4] = 40
 t.lang = "lua"
 print(#t, t[1], t.name, t.lang)
+for i, v in ipairs(t) do print("ipairs", i, v) end
 #+END_SRC
 
 #+RESULTS:
 : 4	10	xs	lua
+: ipairs	1	10
+: ipairs	2	20
+: ipairs	3	30
+: ipairs	4	40
 
-=ipairs(t)= walks integer keys =1, 2, 3, ...= until the first =nil=. =pairs(t)= walks everything in the table, array entries first and hash keys after.
+*Try editing:* replace =ipairs(t)= with =pairs(t)= and re-run — =pairs= visits both the array slots and the hash keys (=name= and =lang=). Try setting ~t[2] = nil~ and watch =ipairs= stop at index =1=.
 
-#+NAME: tables-pairs
-#+BEGIN_SRC lua
-local t = {10, 20, name = "xs"}
-for i, v in ipairs(t) do print(i, v) end
-for k, v in pairs(t) do print(k, v) end
-#+END_SRC
+* Multiple returns, parallel assignment, and truthiness
 
-#+RESULTS:
-: 1	10
-: 2	20
-: 1	10
-: 2	20
-: name	xs
-
-* Multiple returns and parallel assignment
-
-Functions in Lua can return several values directly. If a call is the last thing on the right side of an assignment (=local lo, hi = minmax(xs)=), it expands to all its return values. If there is only one variable on the left (=local only = minmax(xs)=), the extra return values are dropped. Wrapping a call in parentheses =(minmax(xs))= forces it down to one value even in a list like =print(...)=.
-
-Since Lua evaluates the entire right-hand side before writing anything on the left, swapping two variables is just =a, b = b, a=.
+Functions return multiple values directly without allocating a tuple. A call in the last position of an assignment expands to all its return values (~local lo, hi = minmax(xs)~); wrapping it in parentheses =(minmax(xs))= truncates it to one value. Because Lua evaluates the entire right-hand side before writing the left, ~a, b = b, a~ swaps in place.
 
 #+NAME: multiple-returns
 #+BEGIN_SRC lua
@@ -50,11 +63,12 @@ local function minmax(t)
   end
   return lo, hi
 end
+
 local xs = {3, 1, 4, 1, 5}
 local lo, hi = minmax(xs)
 local only = minmax(xs)
 print(lo, hi, only, (minmax(xs)))
-a, b = 1, 2
+local a, b = 1, 2
 a, b = b, a
 print(a, b)
 #+END_SRC
@@ -63,63 +77,71 @@ print(a, b)
 : 1	5	1	1
 : 2	1
 
-* Truthiness and 1-based indexing
+*Try editing:* set a breakpoint on line 4 and inspect *Locals* and *Call stack* as =minmax= scans =xs=. Also test Lua's truthiness rule: unlike [[file:python.org][Python]], [[file:c.org][C]], or [[file:javascript.org][JavaScript]], both =0= and =""= are truthy — only =nil= and =false= are falsy.
 
-If you mostly write [[file:python.org][Python]], [[file:c.org][C]], or [[file:javascript.org][JS]], two things in Lua will catch you off guard: =0= and =""= are both truthy (only =nil= and =false= are falsy), and arrays start at index =1= (=t[0]= is just =nil=).
+* Integers vs floats in *Values*
 
-#+NAME: truth-and-one
-#+BEGIN_SRC lua
-if 0 then print("0 is truthy") end
-if "" then print("the empty string is truthy") end
-if nil or false then print("never") else print("only nil and false are falsy") end
-local t = {"a", "b", "c"}
-print(t[1], t[0], #t)
-#+END_SRC
-
-#+RESULTS:
-: 0 is truthy
-: the empty string is truthy
-: only nil and false are falsy
-: a	nil	3
-
-* Integers vs floats
-
-Lua 5.4 tracks integers (=1=) and floats (=1.0=) separately. =/= always gives a float (=7 / 2 = 3.5=). =//= is floor division toward negative infinity, so =-7 // 2= is =-4=, not =-3=. Modulo =%= takes the sign of the divisor (=5 % -3 = -1=). Numerically equal values still compare equal (=1 == 1.0= is =true=).
-
-Because this interpreter runs on JavaScript numbers instead of 64-bit C integers, literals past =2^53= are rejected at load time rather than silently rounded.
+Lua 5.4 keeps integer and float subtypes distinct: =/= always yields a float (~7 / 2 = 3.5~), while =//= performs floor division toward $-oo$ (so ~-7 // 2 = -4~, not =-3=). Modulo =%= takes the sign of the divisor. Run =ints-and-floats= and inspect *Values* to see each binding's exact subtype tag.
 
 #+NAME: ints-and-floats
 #+BEGIN_SRC lua
-print(1, 1.0, 7 / 2)
-print(7 // 2, 7.0 // 2, -7 // 2)
-print(5 % 3, 5 % -3, -5 % 3)
-print(1 == 1.0)
+local exact = 7 / 2
+local floored = 7 // 2
+local neg_floor = -7 // 2
+global_tag = 1 == 1.0
+print(exact, floored, neg_floor, global_tag)
 #+END_SRC
 
 #+RESULTS:
-: 1	1.0	3.5
-: 3	3.0	-4
-: 2	-1	1
-: true
+: 3.5	3	-4	true
 
-* Inheritance with metatables
+*Try editing:* remove =local= from =exact= and re-run — watch *Values* re-tag it from =local= to =_G= and move it into the *Globals (_G)* panel.
 
-Lua has no =class= keyword. Instead, you attach a metatable with an =__index= field. When a key lookup misses on a table, Lua checks =__index=: if it is another table, lookup continues there (and can chain multiple levels up); if it is a function, Lua calls it with =(table, key)=.
+* Prototype inheritance via =__index= metatables
 
-The colon syntax just hides =self=: =rex:greet()= is identical to =rex.greet(rex)=, and =function Animal:greet()= implicitly adds =self= as the first argument.
+Lua builds object-oriented dispatch from one mechanism: if a key lookup misses on a table, Lua checks its metatable's =__index= field. If =__index= is another table, lookup continues up the chain; if it is a function, Lua calls it with =(table, key)=. Colon syntax =rex:greet()= is pure sugar for =rex.greet(rex)=.
+
+#+CAPTION: Multi-hop __index metatable lookup from rex up to Animal:greet
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let tbl(pos, title, body, hl: false) = node(
+  pos,
+  [*#title* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[#body]],
+  shape: rect, inset: 6pt, width: 88pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+  fill: if hl { rgb("#F2F8F6") } else { white },
+)
+
+#diagram(
+  spacing: (16pt, 10pt),
+  tbl((0, 0), [rex], [sound = "woof"]),
+  tbl((1.55, 0), [Dog2], [miss -> __index]),
+  tbl((3.1, 0), [Dog], [miss -> __index]),
+  tbl((4.65, 0), [Animal], [greet(self)], hl: true),
+  edge((0, 0), (1.55, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((1.55, 0), (3.1, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((3.1, 0), (4.65, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
+)
+#+END_SRC
 
 #+NAME: metatables
 #+BEGIN_SRC lua
 local Animal = {}
 function Animal:greet() return self.sound .. "!" end
+
 local Dog = {}
 Animal.__index = Animal
 setmetatable(Dog, {__index = Animal})
+
 local Dog2 = {}
 Dog.__index = Dog
 setmetatable(Dog2, {__index = Dog})
+
 local rex = {sound = "woof"}
-setmetatable(rex, {__index = Dog2})   -- two levels up to Animal
+setmetatable(rex, {__index = Dog2})
+
 local fallback = setmetatable({}, {__index = function(t, k) return k .. "?" end})
 print(rex:greet())
 print(fallback.anything)
@@ -128,3 +150,36 @@ print(fallback.anything)
 #+RESULTS:
 : woof!
 : anything?
+
+*Try editing:* add =function rex:greet() return "override!" end= right before =print(rex:greet())= and re-run — lookup now hits directly on =rex= without walking the metatable chain.
+
+* Exercise: sum a 1-based table with =ipairs=
+
+Complete the loop below so it sums every integer element in ={1, 2, 3, 4, 5}= and prints =15=.
+
+#+NAME: ex-lua-sum
+#+EXERCISE: Sum {1, 2, 3, 4, 5} with ipairs to print 15
+#+CHECK: 15
+#+BEGIN_SRC lua
+local nums = {1, 2, 3, 4, 5}
+local total = 0
+for _, v in ipairs(nums) do
+  -- add v to total here
+end
+print(total)
+#+END_SRC
+
+#+BEGIN_HINT
+Inside =for _, v in ipairs(nums) do=, update ~total = total + v~.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC lua
+local nums = {1, 2, 3, 4, 5}
+local total = 0
+for _, v in ipairs(nums) do
+  total = total + v
+end
+print(total)
+#+END_SRC
+#+END_SOLUTION

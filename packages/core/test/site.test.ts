@@ -240,9 +240,9 @@ describe('mountSite: navigator rail and panel zone', () => {
     expect(pagesBtn.tagName).toBe('BUTTON');
     expect(pagesBtn.getAttribute('type')).toBe('button');
 
-    // header bar: the switch, then the side toggle
+    // header bar: the switch, then the side toggle and hide button
     const head = root.querySelector(".lw-rail-nav > .lw-nav-head")!;
-    expect([...head.children].map((el) => el.className)).toEqual(['lw-nav-switch', 'lw-nav-side']);
+    expect([...head.children].map((el) => el.className)).toEqual(['lw-nav-switch', 'lw-nav-side', 'lw-nav-hide']);
 
     // exactly one list paints in the rail, and it is the contents; the
     // pages view is not even mounted yet
@@ -506,7 +506,7 @@ describe('mountSite: navigator side', () => {
     const side = root.querySelector<HTMLButtonElement>("[data-test='rail-side']")!;
     expect(side.tagName).toBe('BUTTON');
     expect(side.getAttribute('type')).toBe('button');
-    expect(side.textContent).toBe('Right →');
+    expect(side.textContent).toBe('→');
     expect(side.getAttribute('aria-label')).toBe('Move navigation to the right');
   });
 
@@ -520,7 +520,7 @@ describe('mountSite: navigator side', () => {
       'lw-doc-pane', 'lw-rail lw-rail-right', 'lw-rail lw-rail-nav',
     ]);
     const side = root.querySelector<HTMLButtonElement>("[data-test='rail-side']")!;
-    expect(side.textContent).toBe('← Left');
+    expect(side.textContent).toBe('←');
     expect(side.getAttribute('aria-label')).toBe('Move navigation to the left');
   });
 
@@ -536,7 +536,7 @@ describe('mountSite: navigator side', () => {
     ]);
     expect(window.localStorage.getItem(NAV_SIDE_KEY)).toBe('right');
     expect(root.querySelector<HTMLButtonElement>("[data-test='rail-side']")!.textContent)
-      .toBe('← Left');
+      .toBe('←');
 
     root.querySelector<HTMLButtonElement>("[data-test='rail-side']")!.click();
     expect(handle.navSide).toBe('left');
@@ -563,7 +563,7 @@ describe('mountSite: navigator side', () => {
     expect(second.handle.navSide).toBe('right');
     expect(sideClass(second.root)).toEqual(['lw-nav-right']);
     expect(second.root.querySelector<HTMLButtonElement>("[data-test='rail-side']")!.textContent)
-      .toBe('← Left');
+      .toBe('←');
     expect(window.localStorage.getItem(NAV_SIDE_KEY)).toBe('right');
 
     // clearing the key returns to the option default on the next mount

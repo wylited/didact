@@ -21,6 +21,7 @@ export class PanelHost {
   private readonly sectionsEl: HTMLElement;
   private readonly mount: HTMLElement;
   private readonly onVisibility: ((visible: boolean) => void) | undefined;
+  private readonly collapsed = new Set<string>();
   private block: AttachedBlock | null = null;
 
   constructor(mount: HTMLElement, onVisibility?: (visible: boolean) => void) {
@@ -43,6 +44,7 @@ export class PanelHost {
     detach.type = 'button';
     detach.dataset.test = 'uth-detach';
     detach.textContent = 'detach';
+    detach.title = 'Close inspector panel';
     detach.addEventListener('click', () => this.detach());
     head.appendChild(detach);
 
@@ -82,31 +84,48 @@ export class PanelHost {
     this.titleEl.textContent = `${block.title} · ${block.kernelLabel}`;
     this.sectionsEl.replaceChildren();
     for (const panel of block.state()) {
-      this.sectionsEl.appendChild(renderSection(panel));
+      this.sectionsEl.appendChild(renderSection(panel, this.collapsed));
     }
   }
 }
 
-function sectionShell(panel: Panel): HTMLDivElement {
+function sectionShell(panel: Panel, collapsed: Set<string>): HTMLDivElement {
   const sec = document.createElement('div');
   sec.className = 'lw-section';
   sec.dataset.kind = panel.kind;
-  const label = document.createElement('div');
+  const isCollapsed = collapsed.has(panel.title);
+  if (isCollapsed) sec.classList.add('lw-section-collapsed');
+
+  const label = document.createElement('button');
+  label.type = 'button';
   label.className = 'lw-sec-label';
   label.textContent = panel.title;
+  label.setAttribute('aria-expanded', String(!isCollapsed));
+  label.addEventListener('click', () => {
+    const next = !sec.classList.contains('lw-section-collapsed');
+    sec.classList.toggle('lw-section-collapsed', next);
+    label.setAttribute('aria-expanded', String(!next));
+    if (next) collapsed.add(panel.title);
+    else collapsed.delete(panel.title);
+  });
   sec.appendChild(label);
   return sec;
 }
 
-function renderSection(panel: Panel): HTMLElement {
-  const sec = sectionShell(panel);
+const ZERO_VALUE = /^(0|0x0+|0\.0+|false)$/i;
+
+function renderSection(panel: Panel, collapsed: Set<string>): HTMLElement {
+  const sec = sectionShell(panel, collapsed);
   switch (panel.kind) {
     case 'fields': {
       const grid = document.createElement('div');
       grid.className = 'lw-fields';
       for (const f of panel.fields) {
         const cell = document.createElement('div');
-        cell.className = f.changed === true ? 'lw-field lw-changed' : 'lw-field';
+        const classes = ['lw-field'];
+        if (f.changed === true) classes.push('lw-changed');
+        else if (ZERO_VALUE.test(f.value.trim())) classes.push('lw-field-zero');
+        cell.className = classes.join(' ');
         cell.dataset.test = `reg-${f.key}`;
         const key = document.createElement('span');
         key.className = 'lw-field-key';
@@ -156,17 +175,35 @@ function renderSection(panel: Panel): HTMLElement {
     case 'hexdump': {
       const pre = document.createElement('pre');
       pre.className = 'lw-hexdump';
-      const lines: string[] = [];
-      for (const row of panel.rows) {
-        const cells: string[] = [];
+      for (let r = 0; r < panel.rows.length; r++) {
+        const row = panel.rows[r]!;
+        if (r > 0) pre.appendChild(document.createTextNode('\n'));
+        const addrSpan = document.createElement('span');
+        addrSpan.className = 'lw-addr';
+        addrSpan.textContent = `${hex(row.addr)}  `;
+        pre.appendChild(addrSpan);
         for (let i = 0; i < 16; i++) {
-          cells.push(i < row.bytes.length ? byte(row.bytes[i]!) : '  ');
+          if (i > 0) pre.appendChild(document.createTextNode(' '));
+          if (i < row.bytes.length) {
+            const b = row.bytes[i]!;
+            const txt = byte(b);
+            if (b === 0) {
+              const z = document.createElement('span');
+              z.className = 'lw-hex-zero';
+              z.textContent = txt;
+              pre.appendChild(z);
+            } else {
+              pre.appendChild(document.createTextNode(txt));
+            }
+          } else {
+            pre.appendChild(document.createTextNode('  '));
+          }
         }
-        const half = cells.slice(0, 8).join(' ');
-        const rest = cells.slice(8).join(' ');
-        lines.push(`${hex(row.addr)}  ${half} ${rest}  |${row.ascii}|`);
+        const asciiSpan = document.createElement('span');
+        asciiSpan.className = 'lw-hex-ascii';
+        asciiSpan.textContent = `  |${row.ascii}|`;
+        pre.appendChild(asciiSpan);
       }
-      pre.textContent = lines.join('\n');
       sec.appendChild(pre);
       break;
     }

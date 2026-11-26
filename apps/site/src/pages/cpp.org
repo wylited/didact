@@ -1,15 +1,34 @@
-#+TITLE: C++ in the Browser
-#+SUBTITLE: Real clang++ (C++20, libc++) compiling to wasm32-wasi
+#+TITLE: C++20 in the Browser
+#+SUBTITLE: Real clang++ (C++20, libc++, -fno-exceptions) compiling to wasm32-wasi
 
-Hit Run on any block and clang++ compiles it against =libc++= with this exact command:
+Every block on this page compiles with real =clang++= against =libc++= using =clang++ -std=c++20 -fno-exceptions lesson.cpp -o lesson.wasm= and runs on [[file:wasm.org][WebAssembly]] via a minimal WASI shim. Open the right-hand panel after clicking *Run* to inspect *Diagnostics*, *Console*, *Program* (exit code, compiled binary size, compile time), and *Module · first 256 bytes*.
 
-=clang++ -std=c++20 -fno-exceptions lesson.cpp -o lesson.wasm=
+* Deterministic cleanup with RAII
 
-The bundled =libc++abi= is built without exception support, so =-fno-exceptions= is on. If you write =throw=, clang rejects it at compile time on that line. Everything else is real C++20 running on [[file:wasm.org][WebAssembly]] via a minimal WASI shim (stdout and exit codes work; filesystem calls fail cleanly). The right-hand panel shows the build log, exit status, binary size, compile time, and the first 256 bytes of the linked =.wasm= output.
+C++ ties resource lifetimes to lexical scopes instead of a garbage collector or =finally= blocks. Local objects construct top-to-bottom and destroy automatically in reverse (LIFO) order the moment execution leaves their enclosing braces.
 
-* RAII and destructor order
+#+CAPTION: Stack-frame construction and reverse-order destruction (RAII)
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
 
-C++ does not need =finally= blocks because local objects run their destructors automatically the moment they leave scope, always in reverse order of construction. Here =inner= is destroyed at the closing brace before execution even reaches the next =printf=, and =outer= cleans up when =main= returns.
+#let step(pos, body, hl: false) = node(
+  pos, body, shape: rect, inset: 6pt, width: 88pt,
+  stroke: 0.8pt + if hl { rgb("#C2553F") } else { rgb("#1A9988") },
+  fill: if hl { rgb("#FDF3F1") } else { rgb("#F2F8F6") },
+)
+
+#diagram(
+  spacing: (14pt, 12pt),
+  step((0, 0), [*construct* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[outer]]),
+  step((1.4, 0), [*construct* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[inner]]),
+  step((2.8, 0), [*~Trace()* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[inner leaves {}]], hl: true),
+  step((4.2, 0), [*~Trace()* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[outer leaves main]], hl: true),
+  edge((0, 0), (1.4, 0), "->", stroke: 0.8pt + luma(120)),
+  edge((1.4, 0), (2.8, 0), "->", stroke: 0.8pt + luma(120)),
+  edge((2.8, 0), (4.2, 0), "->", stroke: 0.8pt + luma(120)),
+)
+#+END_SRC
 
 #+NAME: raii
 #+BEGIN_SRC cpp
@@ -42,9 +61,29 @@ int main() {
 : --- inner already gone ---
 : destroy outer
 
-* How =std::vector= grows
+*Try editing:* declare a second object =Trace second("second");= right after =inner= and re-run — =second= is destroyed before =inner=. Now try inserting =throw 1;= inside the block to see =-fno-exceptions= rejected on that exact line in *Diagnostics*.
 
-When =push_back= runs out of space, =std::vector= allocates a new buffer twice as big, moves the existing elements across, and frees the old one. Watch =capacity= jump =1, 2, 4, 8= while =size= ticks up by one. Push 4 does not reallocate because slot 4 was already reserved.
+* Geometric growth in =std::vector=
+
+When =push_back= fills a vector's heap buffer, =std::vector= allocates a new buffer twice as large ($1, 2, 4, 8, 16, dots.c$), moves existing elements over, and frees the old buffer. Because each doubling pays for all earlier copies, appending $n$ items stays amortized $O(1)$ per push.
+
+#+CAPTION: std::vector size vs geometric capacity doubling across 9 pushes
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/lilaq:0.6.0" as lq
+
+#let xs = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+#let sz = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+#let cap = (1, 2, 4, 4, 8, 8, 8, 8, 16)
+
+#lq.diagram(
+  width: 9cm, height: 4cm,
+  xlabel: [push count], ylabel: [elements],
+  legend: (position: top + left),
+  lq.plot(xs, cap, stroke: rgb("#1A9988"), label: [capacity]),
+  lq.plot(xs, sz, stroke: (paint: rgb("#8A5A44"), thickness: 0.8pt, dash: "dashed"), label: [size]),
+)
+#+END_SRC
 
 #+NAME: vector-growth
 #+BEGIN_SRC cpp
@@ -53,107 +92,98 @@ When =push_back= runs out of space, =std::vector= allocates a new buffer twice a
 
 int main() {
   std::vector<int> v;
-  for (int i = 1; i <= 5; i++) {
+  const int* prev = nullptr;
+  for (int i = 1; i <= 6; ++i) {
     v.push_back(i * i);
-    std::printf("push %2d: size=%zu capacity=%zu\n", i * i, v.size(), v.capacity());
+    bool moved = (prev != nullptr && v.data() != prev);
+    prev = v.data();
+    std::printf("push %2d: size=%zu capacity=%zu%s\n",
+                i * i, v.size(), v.capacity(), moved ? "  (reallocated)" : "");
   }
-  for (size_t i = 0; i < v.size(); ++i)
-    std::printf(i == 0 ? "%d" : " %d", v[i]);
-  std::printf("\n");
   return 0;
 }
 #+END_SRC
 
 #+RESULTS:
 : push  1: size=1 capacity=1
-: push  4: size=2 capacity=2
-: push  9: size=3 capacity=4
-: push 16: size=4 capacity=4
-: push 25: size=5 capacity=8
-: 1 4 9 16 25
+: push  2: size=2 capacity=2  (reallocated)
+: push  3: size=3 capacity=4  (reallocated)
+: push  4: size=4 capacity=4
+: push  5: size=5 capacity=8  (reallocated)
+: push  6: size=6 capacity=8
 
-* Templates generate real functions per type
+*Try editing:* add =v.reserve(6);= right after =std::vector<int> v;= and re-run — capacity starts at =6= and every single =(reallocated)= marker disappears because =v.data()= never moves.
 
-=max<T>= is not erased at runtime. Calling it with =int=, =double=, and =char= makes clang emit three separate compiled functions, one per type, with zero boxing or virtual dispatch.
+* Templates, references, and lambda captures
 
-#+NAME: templates
+Unlike boxed generics, =template <typename T>= instantiates a separate machine-code function for each concrete type at compile time. Similarly, a lambda's capture list =[...]= decides at compile time whether the closure object stores a *copy* (=[base]=) or a *reference* (=[&counter]=).
+
+#+NAME: templates-and-lambdas
 #+BEGIN_SRC cpp
 #include <cstdio>
 
 template <typename T>
-T max(T a, T b) {
+T max_of(T a, T b) {
   return a > b ? a : b;
 }
 
 int main() {
-  std::printf("max(3, 9)        = %d\n", max(3, 9));
-  std::printf("max(2.5, 2.25)   = %.1f\n", max(2.5, 2.25));
-  std::printf("max('a', 'z')    = %c\n", max('a', 'z'));
-  return 0;
-}
-#+END_SRC
+  std::printf("max_of(3, 9) = %d, max_of(2.5, 2.25) = %.1f\n",
+              max_of(3, 9), max_of(2.5, 2.25));
 
-#+RESULTS:
-: max(3, 9)        = 9
-: max(2.5, 2.25)   = 2.5
-: max('a', 'z')    = z
-
-* References vs pointers
-
-Both swaps mutate =x= and =y= in place. The reference version (=int&=) cannot be null and cannot be rebound to another variable, so you pass =x, y= directly. The pointer version (=int*=) makes the indirection explicit with =&= at the call site and =*= inside the body.
-
-#+NAME: refs-vs-pointers
-#+BEGIN_SRC cpp
-#include <cstdio>
-
-void swapRef(int& a, int& b) {
-  int t = a; a = b; b = t;
-}
-
-void swapPtr(int* a, int* b) {
-  int t = *a; *a = *b; *b = t;
-}
-
-int main() {
-  int x = 1, y = 2;
-  swapRef(x, y);
-  std::printf("after swapRef(x, y): x=%d y=%d\n", x, y);
-  swapPtr(&x, &y);
-  std::printf("after swapPtr(&x, &y): x=%d y=%d\n", x, y);
-  return 0;
-}
-#+END_SRC
-
-#+RESULTS:
-: after swapRef(x, y): x=2 y=1
-: after swapPtr(&x, &y): x=1 y=2
-
-* Lambda captures: copy vs reference
-
-=[base]= copies =10= into =addBase= at the moment the lambda is created, so setting =base = 100= later does nothing to it. =[&counter]= grabs a live reference instead, so calling =bump()= actually increments =counter=.
-
-#+NAME: lambdas
-#+BEGIN_SRC cpp
-#include <cstdio>
-
-int main() {
   int base = 10;
-  auto addBase = [base](int x) { return base + x; };
+  auto add_base = [base](int x) { return base + x; };
   int counter = 0;
   auto bump = [&counter]() { ++counter; };
 
-  std::printf("addBase(5) = %d\n", addBase(5));
   bump();
   bump();
-  bump();
-  std::printf("counter after 3 bumps = %d\n", counter);
   base = 100;
-  std::printf("after base = 100, addBase(5) = %d (copied at capture!)\n", addBase(5));
+  std::printf("counter=%d, add_base(5)=%d (captured 10 by value)\n",
+              counter, add_base(5));
   return 0;
 }
 #+END_SRC
 
 #+RESULTS:
-: addBase(5) = 15
-: counter after 3 bumps = 3
-: after base = 100, addBase(5) = 15 (copied at capture!)
+: max_of(3, 9) = 9, max_of(2.5, 2.25) = 2.5
+: counter=2, add_base(5)=15 (captured 10 by value)
+
+*Try editing:* change =[base]= to =[&base]= and re-run — =add_base(5)= immediately jumps from =15= to =105= because the closure now reads the live variable. Compare this with [[file:javascript.org][closures in JavaScript]] and [[file:c.org][pointers in C]].
+
+* Exercise: fix a lambda capture
+
+The lambda below captures =total= by value instead of by reference (and won't even compile until fixed). Fix the capture so the program prints the sum of squares $1^2 + 2^2 + 3^2 + 4^2 = 30$.
+
+#+NAME: ex-lambda-capture
+#+EXERCISE: Capture total by reference to print 30
+#+CHECK: 30
+#+BEGIN_SRC cpp
+#include <cstdio>
+
+int main() {
+  int total = 0;
+  auto add_sq = [total](int x) mutable { total += x * x; };
+  for (int i = 1; i <= 4; ++i) add_sq(i);
+  std::printf("%d\n", total);
+  return 0;
+}
+#+END_SRC
+
+#+BEGIN_HINT
+Change =[total]= to =[&total]= so the lambda mutates the caller's =total= variable.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC cpp
+#include <cstdio>
+
+int main() {
+  int total = 0;
+  auto add_sq = [&total](int x) { total += x * x; };
+  for (int i = 1; i <= 4; ++i) add_sq(i);
+  std::printf("%d\n", total);
+  return 0;
+}
+#+END_SRC
+#+END_SOLUTION

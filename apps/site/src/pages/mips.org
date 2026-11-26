@@ -1,92 +1,131 @@
 #+TITLE: MIPS32 Assembly, Stepped Live
-#+SUBTITLE: SPIM/MARS-style MIPS32 assembler and fetch-decode-execute simulator in your browser
+#+SUBTITLE: SPIM/MARS-style pseudo-instruction expansion, hi:lo multiplication, and traps
 
-Every block here assembles to real 32-bit MIPS32 words and runs on a steppable fetch-decode-execute interpreter. Check the *Program* listing to see the actual encoded bytes at each PC address. Like SPIM and MARS in default mode, there are no branch delay slots: branches jump immediately, and =jal=/=jalr= save =pc + 4= into =$ra=.
+Every block here assembles to 32-bit MIPS32 machine words and runs on a steppable fetch-decode-execute interpreter (no branch delay slots, matching default SPIM/MARS). Open the right-hand panel to inspect *Registers*, *hi · lo · pc*, the *Program* word listing (with real encoded hex words and hoverable =#= source comments), *.data*, and *Output*.
 
-* Registers, =hi=/=lo=, and no flags
+* Pseudo-instructions expand into real words
 
-| Registers                  | Role                                                         |
-|----------------------------+--------------------------------------------------------------|
-| =$zero=                    | hardwired 0 (writes are ignored)                             |
-| =$at=                      | assembler temporary (reserved for pseudo-instructions)       |
-| =$v0=, =$v1=               | return values; =$v0= also selects the syscall                |
-| =$a0=–=$a3=                | first four arguments                                         |
-| =$t0=–=$t9=                | caller-saved scratch                                         |
-| =$s0=–=$s7=                | callee-saved                                                 |
-| =$gp=, =$sp=, =$fp=, =$ra= | global pointer, stack pointer, frame pointer, return address |
+MIPS assembly lets you write convenient pseudo-instructions like =la= (load 32-bit address) and =ble= (branch if less than or equal), even though a 32-bit instruction word can only carry a 16-bit immediate. The assembler quietly rewrites them using the reserved assembler temporary =$at= before execution starts.
 
-Two things feel different if you come from [[file:x86-64-assembly.org][x86]]. First, =mult= writes a 64-bit product across two special registers (=hi:lo=), and =div= puts the quotient in =lo= and remainder in =hi=; you pull them back with =mflo= and =mfhi=. Second, MIPS has no condition flags: comparisons write =0= or =1= into a register (=slt=), and branches compare registers directly. Pseudo-instructions like =ble $t1, 10, loop= expand into real machine instructions (=addiu=, =slt=, =beq=) that you can watch in the listing.
+#+CAPTION: How the MIPS assembler expands pseudo-instructions into 32-bit machine words
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
 
-* Syscalls
+#let src(pos, body) = node(
+  pos, body, shape: rect, inset: 6pt, width: 112pt,
+  stroke: 0.8pt + luma(120), fill: white,
+)
+#let real(pos, body) = node(
+  pos, body, shape: rect, inset: 6pt, width: 150pt,
+  stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"),
+)
 
-Load the service number into =$v0=, put the argument in =$a0=, and execute =syscall=:
+#diagram(
+  spacing: (22pt, 12pt),
+  src((0, 0), text(font: "DejaVu Sans Mono")[la \$a0, msg]),
+  real((1.8, 0), text(font: "DejaVu Sans Mono")[lui \$a0, 0x1001 #linebreak() ori \$a0, \$a0, 0x0000]),
+  src((0, 1.2), text(font: "DejaVu Sans Mono")[ble \$t1, 10, loop]),
+  real((1.8, 1.2), text(font: "DejaVu Sans Mono")[addiu \$at, \$zero, 10 #linebreak() slt \$at, \$at, \$t1 #linebreak() beq \$at, \$zero, loop]),
+  edge((0, 0), (1.8, 0), "->", stroke: 0.9pt + rgb("#1A9988"), label: [#text(size: 8pt)[2 words]], label-fill: white),
+  edge((0, 1.2), (1.8, 1.2), "->", stroke: 0.9pt + rgb("#1A9988"), label: [#text(size: 8pt)[3 words]], label-fill: white),
+)
+#+END_SRC
 
-| =$v0= | Service      | Argument in =$a0=                  |
+| =$v0= | Syscall      | Argument in =$a0=                  |
 |-------+--------------+------------------------------------|
 | 1     | print int    | signed 32-bit integer              |
 | 4     | print string | address of a NUL-terminated string |
 | 11    | print char   | ASCII code                         |
 | 10    | exit         | none                               |
 
-Memory is little-endian (=.text= at =0x00400000=, =.data= at =0x10010000=, =$sp= at =0x7fffeffc=), with a 1,000,000-instruction run cap.
-
-* Hello, MIPS
-
-Step through this block and watch =la $a0, msg= expand into two instructions (=lui= + =ori=), since the 32-bit address =0x10010000= does not fit in a 16-bit immediate. Hover any row in the listing to see its =#= comment.
+Step through =hello= and watch *Program*: line 5 (=la $a0, msg=) occupies two consecutive addresses (=0x00400004= and =0x00400008=) because =0x10010000= is split across =lui= and =ori=.
 
 #+NAME: hello
 #+BEGIN_SRC mips
-# hello-mips.asm — your first two syscalls
+# hello-mips.asm — watch la expand into two machine instructions
         .data
-msg:    .asciiz "Hello, MIPS!\n"      # NUL-terminated string in .data
+msg:    .asciiz "Hello, MIPS!\n"      # NUL-terminated string at 0x10010000
         .text
 main:   li      $v0, 4                  # syscall 4: print string at $a0
-        la      $a0, msg                # la = load address (a pseudo-op)
+        la      $a0, msg                # pseudo-op -> lui + ori
         syscall
         li      $v0, 10                 # syscall 10: exit
         syscall
 #+END_SRC
 
 #+RESULTS:
-:Hello, MIPS!
+: Hello, MIPS!
 
-* Summing 1 through 10
+*Try editing:* change the string in =.asciiz= and check *.data* to see the updated ASCII bytes followed by the =00= NUL terminator.
 
-This loop adds =1..10= into =$t0= using =addu= and =addiu=. Compilers prefer the =u= forms because signed =add=/=addi= trap on signed overflow.
+* Unsigned arithmetic vs signed overflow traps
+
+Compilers emit =addu= and =addiu= for ordinary integer math because MIPS =add= and =addi= raise a hardware arithmetic-overflow trap when a signed 32-bit sum crosses $2^(31) - 1 = 2147483647$.
 
 #+NAME: sum
 #+BEGIN_SRC mips
-# sum-1-to-10.asm — accumulate 1..10 in $t0, print it
+# sum-1-to-10.asm — accumulate 1..10 in $t0
         .text
 main:   li      $t0, 0                  # sum = 0
         li      $t1, 1                  # i = 1
-loop:   addu    $t0, $t0, $t1           # sum += i
+loop:   addu    $t0, $t0, $t1           # sum += i (wraps instead of trapping)
         addiu   $t1, $t1, 1             # i++
-        ble     $t1, 10, loop           # while (i <= 10) loop
-        move    $a0, $t0                # print sum (55)
-        li      $v0, 1                  # syscall 1: print int in $a0
+        ble     $t1, 10, loop           # expands to slt + beq using $at
+        move    $a0, $t0                # print 55
+        li      $v0, 1
         syscall
-        li      $a0, 10                 # 10 = '\n'
-        li      $v0, 11                 # syscall 11: print char in $a0
+        li      $a0, 10                 # '\n'
+        li      $v0, 11
         syscall
         li      $v0, 10                 # exit
         syscall
 #+END_SRC
 
 #+RESULTS:
-:55
+: 55
 
-* Calls and =mult=/=mflo=: =factorial(10)=
+*Try editing:* set a breakpoint on =ble $t1, 10, loop= and step through its expanded instructions to see =$at= change in *Registers*. To see a real MIPS overflow trap, replace =li $t0, 0= with =li $t0, 2147483647= and change =addu= to =add=.
 
-=jal fact= saves the return address in =$ra= and jumps; =jr $ra= jumps back. Each =mult= writes a 64-bit product to =hi:lo= and =mflo= reads the low 32 bits. For =10!=, =lo= ends at =3628800= and =hi= stays =0=. Bump =10= to =13= to see =hi= go nonzero.
+* 64-bit products in =hi:lo= and =jal=/=jr= calls
+
+Multiplying two 32-bit integers can produce up to 64 bits. Rather than writing two general registers at once, =mult= stores the full 64-bit product across dedicated =hi= and =lo= registers; you pull the halves back with =mflo= and =mfhi=.
+
+#+CAPTION: 64-bit mult result split across hi (bits 63..32) and lo (bits 31..0)
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1cm, {
+  import draw: *
+  rect((0, 1.5), (2.4, 2.2), stroke: 0.8pt + luma(120), fill: white)
+  content((1.2, 1.85), text(font: "DejaVu Sans Mono")[\$v0 (32-bit)])
+  content((2.9, 1.85), [$times$])
+  rect((3.4, 1.5), (5.8, 2.2), stroke: 0.8pt + luma(120), fill: white)
+  content((4.6, 1.85), text(font: "DejaVu Sans Mono")[\$t0 (32-bit)])
+
+  line((2.9, 1.45), (2.9, 0.95), stroke: 0.9pt + rgb("#1A9988"), mark: (end: ">"))
+  content((4.1, 1.2), text(font: "DejaVu Sans Mono", size: 8.5pt, fill: rgb("#1A9988"))[mult \$v0, \$t0])
+
+  rect((0, 0.1), (2.9, 0.85), stroke: 0.9pt + rgb("#C2553F"), fill: rgb("#FDF3F1"))
+  content((1.45, 0.475), text(font: "DejaVu Sans Mono")[hi (bits 63..32)])
+  rect((2.9, 0.1), (5.8, 0.85), stroke: 0.9pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
+  content((4.35, 0.475), text(font: "DejaVu Sans Mono")[lo (bits 31..0)])
+
+  content((1.45, -0.3), text(font: "DejaVu Sans Mono", size: 8pt, fill: rgb("#8B1A1A"))[mfhi -> high 32])
+  content((4.35, -0.3), text(font: "DejaVu Sans Mono", size: 8pt, fill: rgb("#1A9988"))[mflo -> low 32])
+})
+#+END_SRC
+
+Step into =jal fact= below and watch =$ra= capture the return address (=pc + 4=) while *hi · lo · pc* updates on every =mult=.
 
 #+NAME: factorial
 #+BEGIN_SRC mips
 # fact-10.asm — factorial(10) = 3628800 via mult / mflo
         .text
 main:   li      $a0, 10                 # n = 10
-        jal     fact                    # call fact; $ra <- return address
-        move    $a0, $v0                # print the result
+        jal     fact                    # $ra <- return address; pc <- fact
+        move    $a0, $v0
         li      $v0, 1
         syscall
         li      $a0, 10                 # '\n'
@@ -97,7 +136,7 @@ main:   li      $a0, 10                 # n = 10
 
 fact:   li      $v0, 1                  # result = 1
         li      $t0, 2                  # i = 2
-loop:   mult    $v0, $t0                # hi:lo = result * i (a full 64 bits)
+loop:   mult    $v0, $t0                # hi:lo = result * i (64 bits)
         mflo    $v0                     # result <- low 32 bits
         addiu   $t0, $t0, 1             # i++
         ble     $t0, $a0, loop          # while (i <= n)
@@ -105,15 +144,53 @@ loop:   mult    $v0, $t0                # hi:lo = result * i (a full 64 bits)
 #+END_SRC
 
 #+RESULTS:
-:3628800
+: 3628800
 
-* Syntax reference
+*Try editing:* change =li $a0, 10= to =li $a0, 13= and re-run. Because $13! = 6227020800 > 2^(32) - 1$, *hi · lo · pc* shows ~hi = 1~ — the overflowed upper 32 bits that =mflo= silently discarded! Compare this with [[file:c.org][32-bit overflow in C]].
 
-- SPIM/MARS syntax, destination first (=add $t0, $t1, $t2=), =#= comments
-- Registers by ABI name (=$t0=) or number (=$8=); =$fp= and =$s8= are the same register
-- Sections and data: =.data=, =.text=, =.word=, =.half=, =.byte=, =.asciiz=, =.ascii=, =.space=, =.align=
-- Memory operands: =offset($reg)=, =($reg)=, =label=, =label+4=, constants
-- Pseudo-ops: =li=, =la=, =move=, =nop=, =not=, =neg=, =mul=, =rem=, 3-operand =div=, =beqz=, =bnez=, =b=, =blt=, =bgt=, =ble=, =bge=
-- Core ISA: =add/addu/sub/subu/addi/addiu=, =and/or/xor/nor= (+ =i=), =sll/srl/sra= (+ =v=), =slt/sltu/slti/sltiu=, =mult/multu/div/divu=, =mfhi/mflo/mthi/mtlo=, =lb/lbu/lh/lhu/lw/sb/sh/sw=, =beq/bne/blez/bgtz/bltz/bgez=, =j/jal/jr/jalr=, =syscall=
+* Exercise: sum 1 through 20
 
-Assembly and runtime errors (bad registers, overflow on =add=, divide by zero, unaligned =lw=, stores to =.text=) report the exact source line.
+Update the loop below so it prints $sum_(i=1)^20 i = 210$.
+
+#+NAME: ex-sum-20
+#+EXERCISE: Sum 1 through 20 and print 210
+#+CHECK: 210
+#+BEGIN_SRC mips
+        .text
+main:   li      $t0, 0                  # sum = 0
+        li      $t1, 1                  # i = 1
+loop:   addu    $t0, $t0, $t1
+        addiu   $t1, $t1, 1
+        ble     $t1, 10, loop           # change 10 to 20
+        move    $a0, $t0
+        li      $v0, 1
+        syscall
+        li      $a0, 10
+        li      $v0, 11
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+
+#+BEGIN_HINT
+Change the upper bound in =ble $t1, 10, loop= to =20=.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC mips
+        .text
+main:   li      $t0, 0
+        li      $t1, 1
+loop:   addu    $t0, $t0, $t1
+        addiu   $t1, $t1, 1
+        ble     $t1, 20, loop
+        move    $a0, $t0
+        li      $v0, 1
+        syscall
+        li      $a0, 10
+        li      $v0, 11
+        syscall
+        li      $v0, 10
+        syscall
+#+END_SRC
+#+END_SOLUTION

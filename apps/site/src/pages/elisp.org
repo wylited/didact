@@ -1,17 +1,77 @@
-#+TITLE: Emacs Lisp
+#+TITLE: Emacs Lisp, Inside Out
+#+SUBTITLE: Lisp-2 symbol cells, dynamic vs lexical binding, macros, and a simulated Emacs buffer/hook/keymap runtime
 
-* Two cells per symbol
+This page runs a steppable pure-TypeScript Emacs Lisp interpreter with a simulated Emacs runtime. Click *Step* or set gutter breakpoints to watch *Control stack*, *Symbols · value cell / function cell*, *lexical* and *dynamic* environments, *Buffer* (text, point, and mark), *Hooks*, *Keymaps*, and *Output*.
+
+* Lisp-2: two cells per symbol
+
+Unlike Scheme (see [[file:lisp.org][Lisp from Cons Cells Up]]), Emacs Lisp is a *Lisp-2*: every symbol carries *both* a value cell and a function cell. Defining =(defun double ...)= fills the function cell without touching the value cell, so a variable and a function can share the exact same name without colliding.
+
+#+CAPTION: One Elisp symbol holding independent value and function cells
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let boxnode(pos, body, hl: false) = node(
+  pos, body, shape: rect, inset: 6pt, width: 112pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+  fill: if hl { rgb("#F2F8F6") } else { white },
+)
+
+#diagram(
+  spacing: (20pt, 10pt),
+  boxnode((0, 0.55), [*symbol* #linebreak() #text(font: "DejaVu Sans Mono", weight: "bold")[double]]),
+  boxnode((1.8, 0), [*value cell* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[99  (from setq)]]),
+  boxnode((1.8, 1.1), [*function cell* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[(lambda (x) (\* 2 x))]], hl: true),
+  edge((0, 0.55), (1.8, 0), "->", stroke: 0.8pt + luma(120), label: [#text(size: 8pt)[double]], label-fill: white),
+  edge((0, 0.55), (1.8, 1.1), "->", stroke: 0.9pt + rgb("#1A9988"), label: [#text(size: 8pt)[(double 4)]], label-fill: white),
+)
+#+END_SRC
+
+Run =lisp-2= and inspect *Symbols · value cell / function cell*: =double= displays both its numeric value =99= and its function definition side by side.
+
+#+NAME: lisp-2
 #+BEGIN_SRC elisp
 (defun double (x) (* 2 x))
 (setq double 99)
-(list (double 4) double)
+(setq inc (lambda (x) (+ x 1)))
+(list (double 4) double (funcall inc 9))
 #+END_SRC
 
 #+RESULTS:
-: (8 99)
+: (8 99 10)
 
-* Dynamic by default
+*Try editing:* replace =(funcall inc 9)= with =(inc 9)= and hit *Run* — Elisp signals =void-function inc= because =setq= stored the lambda in =inc='s *value* cell, not its *function* cell.
+
+* Dynamic binding vs =lexical-binding: t=
+
+Without a file-local header on line 1, Emacs Lisp uses *dynamic binding*: a =let= temporarily overrides the symbol's dynamic value on the call stack, so =(get-x)= sees the caller's ~x = 2~. With =;; -*- lexical-binding: t; -*-= on line 1, =let= creates a private lexical frame that =(get-x)= cannot see, so =(get-x)= reads the global =1=.
+
+#+CAPTION: Dynamic lookup walks the call stack; lexical lookup follows the defining scope
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let card(pos, body, warn: false) = node(
+  pos, body, shape: rect, inset: 6pt, width: 118pt,
+  stroke: 0.8pt + if warn { rgb("#C2553F") } else { rgb("#1A9988") },
+  fill: if warn { rgb("#FDF3F1") } else { rgb("#F2F8F6") },
+)
+
+#diagram(
+  spacing: (18pt, 10pt),
+  card((0, 0), [*dynamic (default)* #linebreak() #text(size: 8pt)[let binds x=2 on stack]], warn: true),
+  card((1.9, 0), [*(get-x) -> 2* #linebreak() #text(size: 8pt)[reads caller's dynamic x]], warn: true),
+  card((0, 1.15), [*lexical-binding: t* #linebreak() #text(size: 8pt)[let binds x=2 in local env]]),
+  card((1.9, 1.15), [*(get-x) -> 1* #linebreak() #text(size: 8pt)[reads top-level global x]]),
+  edge((0, 0), (1.9, 0), "->", stroke: 0.8pt + rgb("#C2553F")),
+  edge((0, 1.15), (1.9, 1.15), "->", stroke: 0.8pt + rgb("#1A9988")),
+)
+#+END_SRC
+
+#+NAME: dynamic-binding
 #+BEGIN_SRC elisp
+;; Default: dynamic binding
 (setq x 1)
 (defun get-x () x)
 (let ((x 2)) (get-x))
@@ -20,7 +80,9 @@
 #+RESULTS:
 : 2
 
-* Lexical with the file-local header
+Now run the exact same code with the file-local lexical cookie on line 1:
+
+#+NAME: lexical-binding
 #+BEGIN_SRC elisp
 ;; -*- lexical-binding: t; -*-
 (setq x 1)
@@ -31,17 +93,76 @@
 #+RESULTS:
 : 1
 
-* Buffers and hooks
+*Try editing:* in =lexical-binding=, change =(setq x 1)= to =(defvar x 1)= and re-run — the result flips back to =2=! Even under =lexical-binding: t=, =defvar= marks a symbol *special* (always dynamically scoped), which is how Emacs packages temporarily rebind configuration variables with =let=.
+
+* Macros and =macroexpand-1=
+
+=defmacro= transforms unevaluated S-expressions before execution, just like in Scheme. Step through =elisp-macro= to watch =our-unless= rewrite itself into =(if ... nil (progn ...))=.
+
+#+NAME: elisp-macro
+#+BEGIN_SRC elisp
+(defmacro our-unless (cond &rest body)
+  `(if ,cond nil (progn ,@body)))
+
+(message "expansion: %S" (macroexpand-1 '(our-unless nil (setq n 5))))
+(setq n 0)
+(our-unless nil (setq n 5) (setq n (1+ n)))
+n
+#+END_SRC
+
+#+RESULTS:
+: expansion: (if nil nil (progn (setq n 5)))
+
+* Buffers, hooks, and keymaps
+
+What makes Emacs Lisp unique is its live editor model: text lives in *buffers* with a 1-based cursor (=point=), events fire *hooks*, and key sequences dispatch commands through *keymaps*. Run =emacs-runtime= and inspect *Buffer*, *Hooks*, and *Keymaps* in the right-hand panel.
+
+#+NAME: emacs-runtime
 #+BEGIN_SRC elisp
 (defvar launched 0)
 (defun note-launch () (setq launched (1+ launched)))
 (add-hook 'after-init-hook #'note-launch)
 (run-hooks 'after-init-hook)
-(with-current-buffer (get-buffer-create "notes")
-  (insert "hello")
+
+(defun greet ()
+  (interactive)
+  (insert "Hello from C-c h!"))
+
+(define-key global-map (kbd "C-c h") #'greet)
+(call-interactively (lookup-key global-map (kbd "C-c h")))
+(save-excursion
   (goto-char 1)
-  (buffer-string))
+  (insert "> "))
+(list launched (point) (buffer-string))
 #+END_SRC
 
 #+RESULTS:
-: "hello"
+: (1 20 "> Hello from C-c h!")
+
+*Try editing:* step past =(save-excursion ...)= and watch *Buffer*: =point= moved from =18= to =20= because inserting ="> "= before the saved marker shifted it forward by 2 characters!
+
+* Exercise: turn on lexical closures
+
+Under dynamic binding, =make-adder= loses its parameter =n= the moment it returns, so calling the returned lambda raises =void-variable n=. Add the lexical-binding cookie on line 1 so the closure captures ~n = 5~ and returns =8=.
+
+#+NAME: ex-elisp-closure
+#+EXERCISE: Enable lexical-binding so make-adder returns 8
+#+CHECK: 8
+#+BEGIN_SRC elisp
+(defun make-adder (n)
+  (lambda (x) (+ x n)))
+(funcall (make-adder 5) 3)
+#+END_SRC
+
+#+BEGIN_HINT
+Put =;; -*- lexical-binding: t; -*-= on the very first line of the block.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC elisp
+;; -*- lexical-binding: t; -*-
+(defun make-adder (n)
+  (lambda (x) (+ x n)))
+(funcall (make-adder 5) 3)
+#+END_SRC
+#+END_SOLUTION

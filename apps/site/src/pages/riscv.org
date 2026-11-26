@@ -1,43 +1,65 @@
 #+TITLE: RISC-V (RV32IM), Stepped Live
-#+SUBTITLE: 32-bit fixed-width instructions, ABI registers, and ecall on a steppable simulator
+#+SUBTITLE: Fixed-width 32-bit instructions, register-direct branches, and byte sign-extension
 
-* Registers and branches
+This page runs a pure-TypeScript RV32IM interpreter: 32 integer registers (=x0=–=x31=), the =M= multiply/divide extension, and fixed 4-byte instructions. Click *Step* or set a gutter breakpoint on any instruction to inspect *Registers*, *Branch* (which records the operands and outcome of the most recent comparison), *Disassembly*, *.data*, and *Output*.
 
-RV32IM has 32 registers (=x0=–=x31=) and every instruction is 4 bytes wide. Register =x0= (=zero=) is hardwired to =0=, so writes to it do nothing.
+* Register roles and flagless branches
+
+Two design choices separate RISC-V from [[file:x86-64-assembly.org][x86-64]]:
+
+- =x0= (=zero=) is permanently wired to =0=. Every write to =x0= is discarded, which eliminates dedicated =nop= and =mov= encodings.
+- There is no flags register. Branch instructions like =blt t1, t0, done= compare two registers and decide whether to jump in one step.
+
+#+CAPTION: RV32IM register-direct branch versus x86-style flags
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge, shapes
+
+#let boxnode(pos, body, hl: false) = node(
+  pos, body, shape: rect, inset: 6pt, width: 84pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+  fill: if hl { rgb("#F2F8F6") } else { white },
+)
+
+#diagram(
+  spacing: (18pt, 12pt),
+  boxnode((0, 0), [*t1* = 10 #linebreak() #text(size: 8pt)[rs1 (limit)]]),
+  boxnode((0, 1.1), [*t0* = i #linebreak() #text(size: 8pt)[rs2 (counter)]]),
+  node(
+    (1.5, 0.55),
+    [*blt t1, t0* #linebreak() #text(size: 8pt)[10 \< i ?]],
+    shape: shapes.diamond, inset: 8pt, width: 84pt,
+    stroke: 0.9pt + rgb("#1A9988"), fill: rgb("#F2F8F6"),
+  ),
+  boxnode((3.1, 0), [*pc \<- done* #linebreak() #text(size: 8pt)[taken]]),
+  boxnode((3.1, 1.1), [*pc \<- pc + 4* #linebreak() #text(size: 8pt)[fall-through]]),
+  edge((0, 0), (1.5, 0.55), "->", stroke: 0.8pt + luma(120)),
+  edge((0, 1.1), (1.5, 0.55), "->", stroke: 0.8pt + luma(120)),
+  edge((1.5, 0.55), (3.1, 0), "->", stroke: 0.9pt + rgb("#1A9988"), label: [yes], label-fill: white),
+  edge((1.5, 0.55), (3.1, 1.1), "->", stroke: 0.8pt + luma(120), label: [no], label-fill: white),
+)
+#+END_SRC
 
 | Register      | ABI name | Role                      |
 |---------------+----------+---------------------------|
-| x0            | zero     | always 0                  |
+| x0            | zero     | hardwired 0               |
 | x1            | ra       | return address            |
 | x2            | sp       | stack pointer             |
 | x10–x17       | a0–a7    | arguments, ecall services |
 | x5–x7, x28–31 | t0–t6    | caller-saved temporaries  |
 | x8–x9, x18–27 | s0–s11   | callee-saved              |
 
-There is no flags register. Branches like =blt= and =bne= compare two registers and jump in a single instruction. Look at *Branch context* in the right-hand panel to see the last comparison and whether it was taken.
+* =ecall= services and =x0= immutability
 
-* =ecall= services
-
-Put the service number in =a7=, put any argument in =a0=, and run =ecall=:
-
-| =a7= | Service      | Effect                             |
-|------+--------------+------------------------------------|
-| 1    | print int    | print =a0= as a signed decimal     |
-| 4    | print string | print NUL-terminated bytes at =a0= |
-| 11   | print char   | print the low byte of =a0=         |
-| 10   | exit         | stop execution                     |
-| 93   | exit         | same as 10 (Linux convention)      |
-
-* Hello, RISC-V
-
-=la= loads the address of =msg= into =a0= and =li= puts service =4= in =a7=. Edit the string in =.asciz= and hit Run.
+Load a service code into =a7= (=1= print int, =4= print string, =11= print char, =10= or =93= exit), place its argument in =a0=, and execute =ecall=.
 
 #+NAME: hello
 #+BEGIN_SRC riscv
         .text
 hello:
-        la      a0, msg        # a0 -> address of the string
-        li      a7, 4          # service 4: print string
+        addi    zero, zero, 99 # writes to x0 are silently dropped
+        la      a0, msg        # a0 <- address of msg in .data
+        li      a7, 4          # service 4: print NUL-terminated string
         ecall
         li      a0, 10         # '\n'
         li      a7, 11         # service 11: print char
@@ -54,9 +76,11 @@ msg:
 #+RESULTS:
 : Hello, RISC-V!
 
-* Summing 1 through 10
+*Try editing:* step past line 3 (=addi zero, zero, 99=) and confirm =zero= stays =0= in *Registers*. Notice in *Disassembly* that every instruction address steps by exactly 4 bytes, and =la a0, msg= expands into two 4-byte instructions.
 
-=t0= counts from =1= up to =10= while =t2= holds the running sum. Once =10 < t0=, =blt t1, t0, done= jumps out of the loop and prints =55=. Step a few times to watch =t0= and =t2= highlight as they update.
+* Watching the *Branch* panel in a loop
+
+This loop sums $sum_(i=1)^10 i = 55$ in =t2=. Click the gutter on line 9 (=blt t1, t0, done=) to set a breakpoint, then press *Run* a few times: the *Branch* panel displays the two compared registers (=t1= and =t0=) and flips from *not taken* to *taken* on the eleventh check when =t0= reaches =11=.
 
 #+NAME: sum-loop
 #+BEGIN_SRC riscv
@@ -67,13 +91,13 @@ msg:
 loop:
         add     t2, t2, t0     # sum += i
         addi    t0, t0, 1      # i++
-        blt     t1, t0, done   # if 10 < i, leave the loop
+        blt     t1, t0, done   # branch if 10 < i
         j       loop
 done:
         mv      a0, t2         # a0 = 55
         li      a7, 1          # service 1: print int
         ecall
-        li      a0, 10         # newline
+        li      a0, 10         # '\n'
         li      a7, 11
         ecall
         li      a0, 0
@@ -84,30 +108,64 @@ done:
 #+RESULTS:
 : 55
 
-* Signed vs unsigned byte loads (=lb= vs =lbu=)
+*Try editing:* change =blt t1, t0, done= to =bge t0, t1, done= and re-run — the loop now stops one iteration early at =45= because it exits when $i = 10$ before adding $10$.
 
-When you load a single byte (=0xFF=) into a 32-bit register, =lb= sign-extends the top bit (=0xFFFFFFFF = -1=) while =lbu= zero-extends it (=0x000000FF = 255=). After running, check the =.data= hex view to see the four =FF= bytes written by =sw=.
+* Sign extension vs zero extension (=lb= vs =lbu=)
+
+When a 32-bit RISC-V core loads a single byte from memory, it has to fill the upper 24 bits of the destination register. =lb= copies bit 7 (the sign bit) into bits 8–31, preserving two's-complement negative numbers; =lbu= fills bits 8–31 with zeros.
+
+#+CAPTION: Loading byte 0xFF into a 32-bit register with lb vs lbu
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1cm, {
+  import draw: *
+  // Byte in memory
+  content((0.5, 2.3), [memory byte:], anchor: "east")
+  rect((0.7, 2.0), (2.7, 2.6), stroke: 0.9pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
+  content((1.7, 2.3), text(font: "DejaVu Sans Mono")[11111111 (0xFF)])
+
+  // lb
+  content((0.5, 1.15), text(font: "DejaVu Sans Mono", weight: "bold")[lb], anchor: "east")
+  rect((0.7, 0.85), (5.5, 1.45), stroke: 0.8pt + rgb("#C2553F"), fill: rgb("#FDF3F1"))
+  content((3.1, 1.15), text(font: "DejaVu Sans Mono", fill: rgb("#8B1A1A"))[11111111 11111111 11111111])
+  rect((5.5, 0.85), (7.3, 1.45), stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
+  content((6.4, 1.15), text(font: "DejaVu Sans Mono")[11111111])
+  content((7.6, 1.15), [= -1], anchor: "west")
+
+  // lbu
+  content((0.5, 0.15), text(font: "DejaVu Sans Mono", weight: "bold")[lbu], anchor: "east")
+  rect((0.7, -0.15), (5.5, 0.45), stroke: 0.8pt + luma(140), fill: rgb("#F7F7F7"))
+  content((3.1, 0.15), text(font: "DejaVu Sans Mono", fill: luma(80))[00000000 00000000 00000000])
+  rect((5.5, -0.15), (7.3, 0.45), stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
+  content((6.4, 0.15), text(font: "DejaVu Sans Mono")[11111111])
+  content((7.6, 0.15), [= 255], anchor: "west")
+})
+#+END_SRC
+
+Run =bytes= and inspect *.data*: =sw t0, 0(t1)= writes four =FF= bytes into =buf=, then =lb= and =lbu= read the very same address =0(t1)= into =a0= with opposite interpretations.
 
 #+NAME: bytes
 #+BEGIN_SRC riscv
         .text
-        li      t0, -1         # 0xFFFFFFFF
+        li      t0, -1         # 0xFFFFFFFF in two's complement
         la      t1, buf        # t1 -> scratch word in .data
-        sw      t0, 0(t1)      # store the word: FF FF FF FF
-        lb      a0, 0(t1)      # sign-extend byte FF -> -1
-        li      a7, 1          # print int
-        ecall
-        li      a0, 32         # ' '
-        li      a7, 11         # print char
-        ecall
-        lbu     a0, 0(t1)      # zero-extend byte FF -> 255
+        sw      t0, 0(t1)      # store FF FF FF FF
+        lb      a0, 0(t1)      # sign-extend 0xFF -> 0xFFFFFFFF (-1)
         li      a7, 1
         ecall
-        li      a0, 10         # newline
+        li      a0, 32         # ' '
+        li      a7, 11
+        ecall
+        lbu     a0, 0(t1)      # zero-extend 0xFF -> 0x000000FF (255)
+        li      a7, 1
+        ecall
+        li      a0, 10         # '\n'
         li      a7, 11
         ecall
         li      a0, 0
-        li      a7, 10         # exit
+        li      a7, 10
         ecall
 
         .data
@@ -118,4 +176,61 @@ buf:
 #+RESULTS:
 : -1 255
 
-Try setting a breakpoint on =add t2, t2, t0= (execution pauses before the instruction runs), or introducing a typo like =addd= to see the line-mapped assembler error.
+*Try editing:* change =li t0, -1= to =li t0, 127= (=0x7F=, sign bit 0) and re-run — both loads print =127=. Change it to =128= (=0x80=, sign bit 1) and watch =lb= jump to =-128= while =lbu= prints =128=.
+
+* Exercise: factorial with the =M= extension
+
+Compute $5! = 120$ using =mul= (part of RV32IM) and print it with =ecall= service =1=.
+
+#+NAME: ex-fact-5
+#+EXERCISE: Compute 5! = 120 using mul
+#+CHECK: 120
+#+BEGIN_SRC riscv
+        .text
+        li      t0, 1          # i = 1
+        li      t1, 5          # n = 5
+        li      t2, 0          # bug: fix initial value and loop body
+loop:
+        add     t2, t2, t0     # replace add with mul
+        addi    t0, t0, 1
+        blt     t1, t0, done
+        j       loop
+done:
+        mv      a0, t2
+        li      a7, 1
+        ecall
+        li      a0, 10
+        li      a7, 11
+        ecall
+        li      a0, 0
+        li      a7, 10
+        ecall
+#+END_SRC
+
+#+BEGIN_HINT
+Initialize the accumulator =t2= to =1= (not =0=), multiply =t2= by =t0= with =mul t2, t2, t0=, and loop while ~t0 <= 5~.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC riscv
+        .text
+        li      t0, 1
+        li      t1, 5
+        li      t2, 1
+loop:
+        mul     t2, t2, t0
+        addi    t0, t0, 1
+        blt     t1, t0, done
+        j       loop
+done:
+        mv      a0, t2
+        li      a7, 1
+        ecall
+        li      a0, 10
+        li      a7, 11
+        ecall
+        li      a0, 0
+        li      a7, 10
+        ecall
+#+END_SRC
+#+END_SOLUTION

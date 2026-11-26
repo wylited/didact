@@ -242,6 +242,7 @@ export class BlockRuntime {
   private readonly events: BlockEvents;
   private readonly view: EditorView;
   private readonly statusEl: HTMLElement;
+  private readonly revertBtn: HTMLButtonElement;
   private readonly errorEl: HTMLElement;
   private readonly resultsEl: HTMLElement | null;
   private readonly sample: string;
@@ -320,15 +321,18 @@ export class BlockRuntime {
     const head = document.createElement('div');
     head.className = 'lw-block-head';
 
+    const meta = document.createElement('div');
+    meta.className = 'lw-block-meta';
+
     const lang = document.createElement('span');
     lang.className = 'lw-lang';
     lang.textContent = node.lang;
-    head.appendChild(lang);
+    meta.appendChild(lang);
 
     const name = document.createElement('span');
     name.className = 'lw-block-name';
     name.textContent = this.title;
-    head.appendChild(name);
+    meta.appendChild(name);
 
     if (shared !== undefined) {
       const sess = document.createElement('span');
@@ -345,7 +349,7 @@ export class BlockRuntime {
           `:session ${shared.name}: this kernel cannot share session state; blocks run isolated`,
         );
       }
-      head.appendChild(sess);
+      meta.appendChild(sess);
     }
 
     if (node.exercise !== null) {
@@ -354,7 +358,7 @@ export class BlockRuntime {
       badge.dataset.test = 'block-exercise';
       badge.setAttribute('role', 'status');
       badge.setAttribute('aria-live', 'polite');
-      head.appendChild(badge);
+      meta.appendChild(badge);
       this.exerciseBadge = badge;
       // a previous visit's pass survives until this run is judged, so a
       // reset mid-rerun restores "passed" instead of forgetting it
@@ -366,58 +370,73 @@ export class BlockRuntime {
       );
     }
 
+    head.appendChild(meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'lw-block-actions';
+
     const runBtn = document.createElement('button');
     runBtn.type = 'button';
+    runBtn.className = 'lw-btn lw-btn-primary';
     runBtn.dataset.test = 'block-run';
     runBtn.textContent = '▶ Run';
-    runBtn.title = 'Run the block (Ctrl/Cmd+Enter)';
+    runBtn.title = `Run the block (${isApplePlatform() ? '⌘' : 'Ctrl+'}Enter)`;
     runBtn.setAttribute(
       'aria-keyshortcuts',
       isApplePlatform() ? 'Meta+Enter' : 'Control+Enter',
     );
     runBtn.addEventListener('click', () => void this.run());
-    head.appendChild(runBtn);
+    actions.appendChild(runBtn);
 
     const stepBtn = document.createElement('button');
     stepBtn.type = 'button';
+    stepBtn.className = 'lw-btn lw-btn-secondary';
     stepBtn.dataset.test = 'block-step';
     stepBtn.textContent = '⤵ Step';
     stepBtn.title = 'Step one instruction (Shift+Enter)';
     stepBtn.setAttribute('aria-keyshortcuts', 'Shift+Enter');
     stepBtn.addEventListener('click', () => void this.step());
     // kernels may opt out of stepping (features.stepping === false)
-    if (kernel.features?.stepping !== false) head.appendChild(stepBtn);
+    if (kernel.features?.stepping !== false) actions.appendChild(stepBtn);
 
     const resetBtn = document.createElement('button');
     resetBtn.type = 'button';
+    resetBtn.className = 'lw-btn lw-btn-ghost';
     resetBtn.dataset.test = 'block-reset';
-    resetBtn.textContent = '⟲ Reset machine';
-    resetBtn.title = 'Reset the session and clear its output (keeps the code)';
+    resetBtn.textContent = '⟲';
+    resetBtn.title = 'Reset session and clear output (keeps code)';
+    resetBtn.setAttribute('aria-label', 'Reset session');
     resetBtn.addEventListener('click', () => this.reset());
-    head.appendChild(resetBtn);
+    actions.appendChild(resetBtn);
 
     const revertBtn = document.createElement('button');
     revertBtn.type = 'button';
+    revertBtn.className = 'lw-btn lw-btn-ghost';
     revertBtn.dataset.test = 'block-revert';
-    revertBtn.textContent = '↺ Revert code';
-    revertBtn.title = 'Restore the sample code (keeps the session)';
+    revertBtn.dataset.dirty = String(initialCode !== this.sample);
+    revertBtn.textContent = '↺';
+    revertBtn.title = 'Revert to sample code (keeps session)';
+    revertBtn.setAttribute('aria-label', 'Revert code');
     revertBtn.addEventListener('click', () => this.revertCode());
-    head.appendChild(revertBtn);
+    actions.appendChild(revertBtn);
+    this.revertBtn = revertBtn;
 
     const copyBtn = document.createElement('button');
     copyBtn.type = 'button';
+    copyBtn.className = 'lw-btn lw-btn-ghost';
     copyBtn.dataset.test = 'block-copy';
-    copyBtn.textContent = '⧉ Copy Code';
-    copyBtn.title = 'Copy this block’s code to the clipboard';
+    copyBtn.textContent = '⧉';
+    copyBtn.title = 'Copy code to clipboard';
+    copyBtn.setAttribute('aria-label', 'Copy code');
     copyBtn.addEventListener('click', () => void this.copyCode());
-    head.appendChild(copyBtn);
+    actions.appendChild(copyBtn);
 
     this.statusEl = document.createElement('span');
     this.statusEl.className = 'lw-status';
     this.statusEl.dataset.test = 'block-status';
     this.statusEl.textContent = 'idle';
-    head.appendChild(this.statusEl);
 
+    head.append(actions, this.statusEl);
     this.el.appendChild(head);
 
     const editorHost = document.createElement('div');
@@ -724,12 +743,14 @@ export class BlockRuntime {
     this.view.dispatch({
       changes: { from: 0, to: this.view.state.doc.length, insert: this.sample },
     });
+    this.revertBtn.dataset.dirty = 'false';
     this.clearSavedCode();
   }
 
   /** Mirror the editor text into storage, or drop the draft when the text
    *  matches the sample. Never throws. */
   private persistCode(): void {
+    this.revertBtn.dataset.dirty = String(this.source !== this.sample);
     if (this.id === undefined || this.storage === null) return;
     const key = CODE_KEY_PREFIX + this.id;
     try {

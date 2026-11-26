@@ -1,11 +1,11 @@
 #+TITLE: Prolog, Search Exposed
-#+SUBTITLE: Unification, SLD resolution, backtracking, and cut on a steppable Prolog engine
+#+SUBTITLE: Unification, SLD resolution, choice points, backtracking, and cut on a steppable Prolog engine
 
-* Facts and queries
+In Prolog you declare *facts* and *rules*, then pose a query (=?- ...=). Rather than executing statements top to bottom, the engine searches for variable bindings that satisfy every goal using *SLD resolution* and depth-first backtracking. Click *Step* or set gutter breakpoints to inspect *Goal stack*, *Choice points*, *Search* (the exact transition on the last step: =resolve=, =mismatch=, =backtrack=, =cut=, =solution=), *Bindings*, and *Output*.
 
-In Prolog you write facts and rules instead of imperative steps. =likes(ada, prolog).= states a fact, and =?- likes(ada, X).= asks Prolog to find a binding for the capitalized variable =X= that makes it true.
+* Facts, unification, and backtracking
 
-Run the block and look at *Bindings*: it finds =X = prolog= and stops. Run it again to backtrack to the next match (=X = lisp=), and a third time to get =No.=. The unifier checks for cycles (occurs check), so =?- X = f(X).= fails cleanly instead of looping forever.
+=likes(ada, prolog).= states a fact; =?- likes(ada, X).= asks the unifier to bind the capitalized variable =X=. Run =facts-and-queries= once to get ~X = prolog~, then click *Run* again to trigger backtracking to ~X = lisp~, and a third time to exhaust the search (=No.=).
 
 #+NAME: facts-and-queries
 #+BEGIN_SRC prolog
@@ -19,9 +19,38 @@ likes(bob, prolog).
 : Yes.
 : X = prolog
 
-* Rules and the goal stack
+*Try editing:* replace the query with =?- X = f(X).= and run — this engine enables the *occurs check*, so cyclic unification fails cleanly with =No.= instead of looping forever.
 
-=:-= means "if", so =grandparent(X, Z) :- parent(X, Y), parent(Y, Z).= breaks one goal into two subgoals. Step through the block with *Goal stack* open: Prolog always resolves the leftmost goal first, unifying =Y = mary= and then proving =parent(mary, ann)=. When the goal stack empties, you have an answer.
+* Rules, the *Goal stack*, and SLD search
+
+A rule =grandparent(X, Z) :- parent(X, Y), parent(Y, Z).= rewrites one goal into two subgoals. Prolog always resolves the leftmost goal first, pushing a choice point whenever multiple clauses could match.
+
+#+CAPTION: SLD resolution tree for grandparent(tom, G) showing choice points and backtracking
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let g(pos, body, hl: false, alt: false) = node(
+  pos, body, shape: rect, inset: 5pt, width: 112pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else if alt { rgb("#C2553F") } else { luma(130) },
+  fill: if hl { rgb("#F2F8F6") } else if alt { rgb("#FDF3F1") } else { white },
+)
+
+#diagram(
+  spacing: (16pt, 12pt),
+  g((1, 0), text(font: "DejaVu Sans Mono", size: 8pt)[?- grandparent(tom, G)]),
+  g((1, 1), text(font: "DejaVu Sans Mono", size: 8pt)[parent(tom, Y), parent(Y, G)]),
+  g((1, 2), text(font: "DejaVu Sans Mono", size: 8pt)[parent(mary, G)  (Y = mary)]),
+  g((0, 3.1), [*G = ann* #linebreak() #text(size: 8pt)[1st solution]], hl: true),
+  g((2, 3.1), [*G = pat* #linebreak() #text(size: 8pt)[via choice point]], alt: true),
+  edge((1, 0), (1, 1), "->", stroke: 0.8pt + luma(120)),
+  edge((1, 1), (1, 2), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((1, 2), (0, 3.1), "->", stroke: 0.9pt + rgb("#1A9988"), label: [#text(size: 8pt)[clause 2]], label-fill: white),
+  edge((1, 2), (2, 3.1), "->", stroke: 0.8pt + rgb("#C2553F"), label: [#text(size: 8pt)[redo -> clause 3]], label-fill: white),
+)
+#+END_SRC
+
+Step through =rules-and-conjunction= with *Goal stack* and *Search* open to watch ~Y = mary~ bind and a choice point appear at =parent(mary, G)=.
 
 #+NAME: rules-and-conjunction
 #+BEGIN_SRC prolog
@@ -36,25 +65,9 @@ grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
 : Yes.
 : G = ann
 
-* Recursive =member= and =findall=
+* Relations run backwards: splitting lists with =append/3=
 
-=member/2= is not built into this kernel, so we define it in two clauses: =E= is in a list if it matches the head =[E|_]=, or if it is in the tail =T=. =findall/3= runs a goal through every possible backtrack and collects all matches into a list (=Es=) in clause order. (=E = E= just shows the template variable stayed unbound outside =findall=.)
-
-#+NAME: member-by-recursion
-#+BEGIN_SRC prolog
-member(E, [E|_]).
-member(E, [_|T]) :- member(E, T).
-?- findall(E, member(E, [ada, bob, cy]), Es).
-#+END_SRC
-
-#+RESULTS:
-: Yes.
-: E = E
-: Es = [ada, bob, cy]
-
-* Running =append= backwards
-
-Because predicates are relations rather than one-way functions, =append/3= can split a list just as easily as it joins two lists. Step through the query below with *Choice points* open: every recursive step saves an alternative on the choice-point stack, and backtracking unwinds them one by one to produce all three splits of =[1, 2]=.
+Because Prolog predicates are *relations* rather than one-way functions, =append/3= splits a list just as effortlessly as it concatenates two lists. Step through =append-generates= with *Choice points* open: every recursive call pushes an alternative onto *Choice points*, and =findall/3= drives backtracking through all three splits of =[1, 2]=.
 
 #+NAME: append-generates
 #+BEGIN_SRC prolog
@@ -69,9 +82,32 @@ append([X|Xs], Ys, [X|Zs]) :- append(Xs, Ys, Zs).
 : Ys = Ys
 : Ps = [p([], [1, 2]), p([1], [2]), p([1, 2], [])]
 
+*Try editing:* change =[1, 2]= to =[1, 2, 3]= and re-run — =Ps= now collects all 4 splits of the 3-element list.
+
 * Pruning search with cut (=!=)
 
-The cut operator =!= always succeeds and immediately drops every choice point created since the current predicate started. In =max3=, once =X >= Y= succeeds and hits =!=, Prolog commits to that clause and never tries the fallback, so =WithCut= is =[5]=. Without the cut, =maxu= backtracks into the second clause too and returns =[5, 3]=.
+The cut operator =!= always succeeds and immediately discards every choice point created since the current predicate was entered. Contrast =max3= (which commits once ~X >= Y~ succeeds) with =maxu= (which lacks =!= and backtracks into the fallback clause too).
+
+#+CAPTION: Cut (!) discards the choice point to clause 2 once X >= Y succeeds
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let boxnode(pos, body, hl: false, cut: false) = node(
+  pos, body, shape: rect, inset: 5pt, width: 108pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else if cut { rgb("#C2553F") } else { luma(130) },
+  fill: if hl { rgb("#F2F8F6") } else if cut { rgb("#FDF3F1") } else { white },
+)
+
+#diagram(
+  spacing: (18pt, 12pt),
+  boxnode((1, 0), text(font: "DejaVu Sans Mono", size: 8pt)[max3(5, 3, M)]),
+  boxnode((0, 1.2), [*clause 1: 5 >= 3, !* #linebreak() #text(size: 8pt)[commits -> M = 5]], hl: true),
+  boxnode((2, 1.2), [*clause 2: pruned* #linebreak() #text(size: 8pt)[choice point dropped]], cut: true),
+  edge((1, 0), (0, 1.2), "->", stroke: 0.9pt + rgb("#1A9988")),
+  edge((1, 0), (2, 1.2), "->", stroke: (paint: rgb("#C2553F"), thickness: 0.8pt, dash: "dashed"), label: [#text(size: 8pt)[cut!]], label-fill: white),
+)
+#+END_SRC
 
 #+NAME: cut-prunes
 #+BEGIN_SRC prolog
@@ -90,3 +126,33 @@ maxu(_, Y, Y).
 : Yes.
 : M = M
 : WithoutCut = [5, 3]
+
+*Try editing:* step through =max3(5, 3, M)= and watch *Search* report =cut= while *Choice points* drops to zero. Then remove =, != from line 1 and re-run to see =WithCut= turn into =[5, 3]=.
+
+* Exercise: recursive =ancestor/2=
+
+Add a recursive second clause for =ancestor(X, Z)= so =findall(A, ancestor(A, ann), As)= returns =[mary, tom]=. Step through *Goal stack* to watch the recursion unwind.
+
+#+NAME: ex-ancestor
+#+EXERCISE: Complete ancestor/2 so As = [mary, tom]
+#+BEGIN_SRC prolog
+parent(tom, mary).
+parent(mary, ann).
+ancestor(X, Z) :- parent(X, Z).
+% Add the recursive clause for ancestor(X, Z) here:
+?- findall(A, ancestor(A, ann), As).
+#+END_SRC
+
+#+BEGIN_HINT
+Add =ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).= right below the base case.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC prolog
+parent(tom, mary).
+parent(mary, ann).
+ancestor(X, Z) :- parent(X, Z).
+ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
+?- findall(A, ancestor(A, ann), As).
+#+END_SRC
+#+END_SOLUTION

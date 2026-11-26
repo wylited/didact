@@ -1,60 +1,24 @@
-/* theme.css — "textbook, light" visual language (docs/design.md §Visual
-   language). White background, near-black prose, hairline rules, zero
-   radius, no accent color, small-caps section labels.
+/* theme.css — "textbook, light" editorial notebook visual language.
+   Pure white paper canvas, crisp hairlines, zero radius, no accent color,
+   Tailwind-Typography reading rhythm, zero unnecessary grey chrome bars.
 
-   Layout: nav rail (fixed 232px) | document | panel rail (0 until a
-   panel attaches).
-
-   At rest the document is the only elastic band, and on a big display
-   BOTH the reading measure and the body type grow, so the document
-   fills more of the page at a comfortable line length:
-
-     viewport      doc type   measure          text width   line
-     900-1599px    16px       74ch              767px        ~100 chars
-     1600-2199px   17px       82ch              903px        ~111 chars
-     2200px+       18px       90ch             1050px        ~122 chars
-
-   (1ch = 0.648em in Atkinson Hyperlegible: 0.648 * px * ch. Chars
-   are counted at a mean 0.476em advance; see "wide screens" for the
-   derivation.) Headings and inner spacing are em-based, so the type
-   bump carries them; the `ch` measure lives on .lw-doc, so it is the
-   doc's ch.
-
-   The layout frame caps at rail + 2 * (text + 4.5rem): 119.4rem at
-   the base measure, 136.4rem from 1600px, 154.7rem from 2200px. Below
-   its cap the gutter is the whole gap from the nav hairline to the
-   text; past it the frame centres and the band keeps 4.5rem per side
-   (gutter plus slack). At rest (no panel) the text is centred on the
-   page by the grid itself — the rail's 232px is exactly what the
-   track is short of — so no left/right compensation is applied (see
-   "centring check"). Prose, lists and headings use the measure (prose
-   one ch short, so the last word fits); tables, listings and
-   executable blocks may exceed it to min(100%, 90ch). No
-   42rem/40rem prose caps, no fixed 88rem frame stranding a 74ch
-   column.
-
-   While a panel is attached the grid is the same frame split three
-   ways: the panel takes clamp(420px, 42vw, 720px) — 28vw under
-   1420px, where a 42vw panel would squeeze the doc under its 40ch
-   floor — and the doc shrinks from its measure toward that floor,
-   centred on the remaining band, so the gutter, not a squeezed band,
-   is what separates the two. The 40ch floor is in the doc's own ch,
-   so it too grows with the type (40 * 0.648 * 18 = 467px at 18px).
-
-   At 1920px attached: the 780px panel beside a 77ch (903px) doc.
-
-   <900px the zones stack: rail on top, one full-width doc column,
-   panel full-width underneath while attached. */
+   Layout: nav rail (fixed 232px, collapsible) | document | panel rail
+   (0 until a panel attaches). */
 
 :root {
-  --lw-ink: #1a1a1a;
-  --lw-paper: #ffffff;
-  --lw-hairline: #d0d0d0;
-  --lw-tint: #f4f1e8;        /* changed-marking tint */
-  --lw-gray: #8c8c8c;        /* inactive ink: nav links, hover rules */
-  --lw-hover: #f4f4f4;       /* register/flag hover tint (neutral) */
-  --lw-error: #8b1a1a;       /* error ink: status + line-mapped errors */
-  --lw-serif: "Atkinson Hyperlegible", Georgia, "Times New Roman", serif;
+  --lw-ink: #171717;              /* headings, active controls, primary ink */
+  --lw-prose: #2b2b2b;            /* editorial body prose ink */
+  --lw-paper: #ffffff;            /* primary canvas everywhere */
+  --lw-surface-alt: #f4f4f1;      /* inline code tint, active nav & hover fills */
+  --lw-hairline: #e6e6e2;         /* structural hairline dividers */
+  --lw-hairline-strong: #c6c6c0;  /* interactive borders & hover emphasis */
+  --lw-tint: #f6f0dc;             /* changed-marking & current-line tint */
+  --lw-gray: #6e6e68;             /* WCAG AA muted metadata & inactive nav */
+  --lw-hover: #f5f5f2;            /* neutral hover tint */
+  --lw-error: #991b1b;            /* error ink: status + line-mapped errors */
+  --lw-error-bg: #fef2f2;         /* error line fill */
+  --lw-serif: "Atkinson Hyperlegible", -apple-system, BlinkMacSystemFont,
+              "Segoe UI", system-ui, sans-serif;
   --lw-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
              "Liberation Mono", "DejaVu Sans Mono", monospace;
 }
@@ -64,33 +28,24 @@
   box-sizing: border-box;
 }
 
-/* ---- layout: navigation rail (232px, one list at a time) at either
-   edge, document center, panel rail at the right edge — zero-width
-   until a panel attaches, then clamp(420px, 42vw, 720px). The grid's outer
-   tracks are `auto`, so the rails' animated element widths drive the
-   grid: width 300ms cubic-bezier(.2,.7,.3,1); the panel fades in
-   ~160ms.
+body {
+  margin: 0;
+  background: var(--lw-paper);
+  color: var(--lw-prose);
+  font-family: var(--lw-serif);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 
-   --lw-doc-measure is the reading measure the document column asks
-   for; --lw-gutter is the doc pane's side padding, the gap from a rail
-   hairline to the text. .lw-layout caps the frame at nav rail + 2 *
-   (measure + 4.5rem): the 4.5rem per side is the widest gutter
-   (2.25rem) plus the 2.25rem of slack the band keeps once the frame
-   centres, so both a table at max-width: 100% and the text fit. */
+/* ---- layout: navigation rail (232px, collapsible) | document | panel rail */
 
 .lw-site {
-  /* the layout cap: rail + 2 * (text + 4.5rem of gutter/slack), in rem
-     — 119.4rem at the base measure (232px + 2 * 69.4rem), 136.4rem from
-     1600px, 154.7rem from 2200px. A ch here would be this rule's 16px
-     ch, and the text grows with the doc's font-size, so the cap is
-     spelled out per tier instead. --lw-doc-measure itself lives on
-     .lw-doc ("document" below): a ch resolves against the font-size of
-     the element that USES it, and the measure must be the doc's ch. */
   --lw-frame: 119.4rem;
-  --lw-gutter: 1.5rem;       /* doc pane side padding: 1.75/2/2.25rem >= 900px */
-  --lw-rail-w: 232px;        /* nav rail width, in the frame sum */
+  --lw-gutter: 1.5rem;
+  --lw-rail-w: 232px;
   background: var(--lw-paper);
-  color: var(--lw-ink);
+  color: var(--lw-prose);
+  font-family: var(--lw-serif);
 }
 
 .lw-layout {
@@ -107,68 +62,11 @@
   padding: 2rem var(--lw-gutter) 4rem;
 }
 
-/* the doc column always keeps a readable measure: it fills the band up
-   to the measure (so prose, lists and tables agree), and narrows only
-   when an attached panel squeezes the band below it — never under 40ch
-   (the 40ch floor wins in a short band: the text may then run past
-   the page edge rather than become unreadable) */
 .lw-doc-pane > .lw-doc {
   max-width: max(min(var(--lw-doc-measure), 100%), 40ch);
   margin-inline: auto;
 }
 
-/* ---- centring check — no rule needed, the geometry already centres
-   the text. At rest the track between the rail and the empty panel
-   rail is viewport - 232px, the doc is centred in it, and the rail is
-   232px, so
-
-     text centre = 232 + (viewport - 232) / 2 + 1/2 = (viewport + 1) / 2
-
-   i.e. the text is centred on the page to within the rail's 1px
-   hairline. Measured gap from the nav hairline vs from the right edge
-   of the page (doc in brackets): 1280: 14.25rem = 14.25rem (74ch);
-   1440: 19.25 = 19.25 (74ch); 1600: 23.25 = 23.25 (78ch);
-   1920: 24.00 / 33.25 (78ch, frame capped); 2560: 25.00 / 52.25
-   (82ch, frame capped). With a panel attached the same symmetry holds
-   on the smaller side: both gaps are the gutter — 1.75rem at
-   1280/1440, 2rem at 1600, 2rem / 2.5rem at 1920/2560.
-
-   So no left/right compensation is applied: a one-sided extra padding
-   moves the auto-centred text by only half the padding, and an
-   asymmetric padding would split the gutter unevenly — both would
-   take the level text off centre rather than onto it. */
-
-/* ---- wide screens (>=900px only; <900px the zones stack and the doc
-   fills a phone column). Two things grow together on a big display:
-   the reading measure and the body type.
-
-   1ch is the width of the font's '0' — 0.648em in Atkinson
-   Hyperlegible (measured from the shipped woff: advance 648/1000
-   units) — so a `ch` measure scales with the font-size while the
-   CHARACTER count does not: 74ch is 74 characters whether set at 16
-   or 18px, but 74ch at 18px occupies 74 * 0.648 * 18 = 863px instead
-   of 767px. Growing the measure in ch therefore widens the text
-   without making it longer per line; growing the type makes it fill
-   more of the page at the same character count.
-
-   Line length, counted in real characters (mean prose advance
-   measured at 0.476em over the latin lowercase set + space, i.e.
-   1.36 characters per `ch`; the -1ch allowance .lw-para takes off is
-   included):
-
-     width        type   measure        line at 16px   line as set
-     900-1599px   16px   74ch =  767px  ~100           ~100
-     1600-2199px  17px   82ch =  903px  ~117           ~111
-     2200px+      18px   90ch = 1050px  ~137           ~122
-
-   Within a tier, `ch` and the mean character both scale with the em,
-   so a tier's line holds the same characters whatever its font-size;
-   across tiers the count rises with the measure (100 -> 111 -> 122)
-   while every character is also set larger, which is the trade the
-   user asked for: bigger type, and a wider text block, not a longer
-   line at the same size. The 82ch/90ch measures keep the block from
-   looking narrow beside the larger letters (903px at 17px against
-   767px at 16px). */
 @media (min-width: 900px) {
   .lw-site { --lw-gutter: 1.75rem; }
 }
@@ -181,11 +79,11 @@
   .lw-site { --lw-frame: 154.7rem; --lw-gutter: 2.25rem; }
 }
 
-/* ---- the navigation rail: ONE list at a time (contents | pages),
-   either grid end (theme.css side rules below; packages/core/src/site.ts) */
+/* ---- navigation rail (clean white paper, hairline edge, collapsible) */
 
 .lw-rail-nav {
   width: var(--lw-rail-w);
+  background: var(--lw-paper);
   border-right: 1px solid var(--lw-hairline);
   position: sticky;
   top: 0;
@@ -193,135 +91,177 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  font-family: var(--lw-serif);
+  transition: width 220ms cubic-bezier(.2, .7, .3, 1),
+              border-color 220ms ease,
+              opacity 160ms ease;
 }
 
-/* navigator moved to the right: document stays in the middle, hairline
-   moves to the navigator's left edge */
 .lw-site.lw-nav-right .lw-rail-nav {
   border-right: none;
   border-left: 1px solid var(--lw-hairline);
 }
 
-/* the right-side DOM order is document, panel rail, navigator (site.ts
-   appends the rail in right mode), so the tracks follow that order:
-   the document takes the flexible track and both rails take `auto`.
-   Without this the document landed in the leading `auto` track and the
-   rail in the 1fr one — the panel then painted over the rail. Only in
-   multi-column mode: the <900px stack uses a single column. */
+.lw-site.lw-nav-hidden .lw-rail-nav {
+  width: 0;
+  border-right-color: transparent;
+  border-left-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* floating reveal control when the sidebar is hidden */
+.lw-nav-reveal {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 40;
+  font-family: var(--lw-mono);
+  font-size: 1.08rem;
+  line-height: 1;
+  padding: 0.38rem 0.52rem;
+  background: var(--lw-paper);
+  color: var(--lw-gray);
+  border: 1px solid var(--lw-hairline);
+  cursor: pointer;
+}
+.lw-site.lw-nav-right .lw-nav-reveal {
+  left: auto;
+  right: 0.75rem;
+}
+.lw-nav-reveal:hover {
+  color: var(--lw-ink);
+  border-color: var(--lw-ink);
+}
+.lw-nav-reveal:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
+.lw-nav-reveal[hidden] { display: none; }
+
 @media (min-width: 900px) {
   .lw-site.lw-nav-right .lw-layout {
     grid-template-columns: minmax(0, 1fr) auto auto;
   }
 }
 
-/* ---- rail masthead: the wordmark and the lesson search sit above the
-   CONTENTS | PAGES switch, inside the 232px rail and never past it. The
-   wordmark is larger than a rail label and smaller than the document
-   title; the search is plain serif with a 1px hairline and no rounding.
-   The hairline under the block is the switch bar's top rule. */
-
+/* clearly clickable brand wordmark with subtle editorial underline cue */
 .lw-brand {
-  display: block;
-  padding: 0.85rem 0.75rem 0.4rem;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 1rem 0.9rem 0.55rem;
   font-family: var(--lw-serif);
-  font-size: 1.05rem;
+  font-size: 1.08rem;
   font-weight: 700;
   line-height: 1.2;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.01em;
   color: var(--lw-ink);
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-color: var(--lw-hairline-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.24em;
   overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: text-decoration-color 120ms ease;
 }
-.lw-brand:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
+.lw-brand::after {
+  content: 'home';
+  font-family: var(--lw-mono);
+  font-size: 0.64rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--lw-gray);
+  opacity: 0.55;
+  text-decoration: none;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.lw-brand:hover,
+.lw-brand:focus-visible { text-decoration-color: var(--lw-ink); }
+.lw-brand:hover::after,
+.lw-brand:focus-visible::after { opacity: 1; color: var(--lw-ink); }
+.lw-brand:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: -2px; }
 
 .lw-nav-search {
   display: block;
-  width: calc(100% - 1.5rem);
-  margin: 0 0.75rem 0.6rem;
-  padding: 0.25rem 0.4rem;
+  width: calc(100% - 1.8rem);
+  margin: 0 0.9rem 0.7rem;
+  padding: 0.34rem 0.5rem;
   font-family: var(--lw-serif);
   font-size: 0.8rem;
-  line-height: 1.3;
+  line-height: 1.35;
   color: var(--lw-ink);
   background: var(--lw-paper);
   border: 1px solid var(--lw-hairline);
   appearance: none;
   -webkit-appearance: none;
+  transition: border-color 120ms ease;
 }
-.lw-nav-search::placeholder { color: var(--lw-gray); opacity: 1; }
-.lw-nav-search:hover { border-color: var(--lw-ink); }
+.lw-nav-search::placeholder { color: var(--lw-gray); opacity: 0.75; }
+.lw-nav-search:hover { border-color: var(--lw-hairline-strong); }
 .lw-nav-search:focus-visible {
   outline: 1px solid var(--lw-ink);
-  outline-offset: 1px;
+  outline-offset: 0;
   border-color: var(--lw-ink);
 }
 
-/* the live-search list takes the rail's one scrolling slot (the nav lists
-   are emptied while it is live). Each hit is a block link: the title in
-   ink over a muted, two-line-clamped snippet; never wider than the rail. */
 .lw-search-results {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 0.35rem 0.75rem 1.5rem;
+  padding: 0.35rem 0.9rem 1.5rem;
 }
 .lw-search-results[hidden] { display: none; }
 
 .lw-search-result {
   display: block;
-  padding: 0.4rem 0;
+  padding: 0.5rem 0.3rem;
   border-bottom: 1px solid var(--lw-hairline);
   color: var(--lw-ink);
   text-decoration: none;
   overflow-wrap: anywhere;
 }
 .lw-search-result:last-child { border-bottom: none; }
-.lw-search-result-title { display: block; font-size: 0.9rem; line-height: 1.35; }
+.lw-search-result:hover { background: var(--lw-hover); }
+.lw-search-result-title {
+  display: block;
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
 .lw-search-result-snippet {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
-  margin-top: 0.15rem;
+  margin-top: 0.16rem;
   font-size: 0.76rem;
-  line-height: 1.35;
+  line-height: 1.4;
   color: var(--lw-gray);
-}
-.lw-search-result:hover .lw-search-result-title,
-.lw-search-result:focus-visible .lw-search-result-title {
-  text-decoration: underline;
 }
 .lw-search-result:hover .lw-search-result-snippet,
-.lw-search-result:focus-visible .lw-search-result-snippet { color: var(--lw-ink); }
-.lw-search-result:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
+.lw-search-result:focus-visible .lw-search-result-snippet { color: var(--lw-prose); }
+.lw-search-result:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: -1px; }
 
-/* a live search with no hits still owns the rail: say so instead of
-   blanking the column */
 .lw-search-empty {
   margin: 0;
-  padding: 0.5rem 0.15rem;
+  padding: 0.65rem 0.15rem;
   font-family: var(--lw-serif);
-  font-size: 0.85rem;
+  font-size: 0.84rem;
   color: var(--lw-gray);
 }
 
-/* the header bar: a segmented CONTENTS | PAGES switch plus the side
-   toggle, small-caps on a hairline. Its top rule closes the masthead. */
 .lw-rail-head {
   border-top: 1px solid var(--lw-hairline);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.6rem 0.75rem;
+  gap: 0.3rem;
+  padding: 0.48rem 0.9rem;
   border-bottom: 1px solid var(--lw-hairline);
   font-family: var(--lw-serif);
-  font-size: 0.82rem;
-  font-variant: small-caps;
-  letter-spacing: 0.06em;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -329,21 +269,20 @@
 .lw-nav-switch {
   display: flex;
   align-items: baseline;
-  gap: 0.9rem;
+  gap: 0.8rem;
   min-width: 0;
+  margin-right: auto;
 }
 
-/* one small-caps switch button; the pressed one is near-black behind a
-   2px rule — the same emphasis the active list rows use */
 .lw-nav-tab {
   font: inherit;
-  font-variant: small-caps;
-  letter-spacing: 0.06em;
-  line-height: 1.2;
-  padding: 0 0 0.15rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  line-height: 1.3;
+  padding: 0.1rem 0 0.2rem;
   border: none;
   border-bottom: 2px solid transparent;
-  background: var(--lw-paper);
+  background: transparent;
   color: var(--lw-gray);
   cursor: pointer;
 }
@@ -354,25 +293,30 @@
 }
 .lw-nav-tab:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
 
-/* compact side flip: mono, hairline box at rest */
-.lw-nav-side {
+/* minimal arrow-only rail controls: flip side + hide sidebar */
+.lw-nav-side,
+.lw-nav-hide {
   flex: none;
   font-family: var(--lw-mono);
-  font-size: 0.66rem;
+  font-size: 1.08rem;
   font-weight: 400;
-  letter-spacing: 0.04em;
-  padding: 0.1rem 0.25rem;
-  background: var(--lw-paper);
+  line-height: 1;
+  text-transform: none;
+  padding: 0.22rem 0.36rem;
+  background: transparent;
   color: var(--lw-gray);
-  border: 1px solid var(--lw-hairline);
+  border: 1px solid transparent;
   cursor: pointer;
 }
-.lw-nav-side:hover { border-color: var(--lw-ink); color: var(--lw-ink); }
-.lw-nav-side:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 1px; }
+.lw-nav-side:hover,
+.lw-nav-hide:hover {
+  color: var(--lw-ink);
+  background: var(--lw-hover);
+  border-color: var(--lw-hairline);
+}
+.lw-nav-side:focus-visible,
+.lw-nav-hide:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 1px; }
 
-/* ONE list at a time: the shown column fills the rail below the header
-   and is the only box that scrolls (min-height: 0 engages overflow);
-   the other is emptied and hidden, so it paints nothing */
 .lw-contents { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .lw-rail-pages-list {
   flex: 1 1 auto;
@@ -380,14 +324,11 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  padding: 0.75rem 0.75rem 1.5rem;
+  gap: 0.08rem;
+  padding: 0.6rem 0.55rem 1.5rem;
 }
 .lw-contents[hidden], .lw-rail-pages-list[hidden] { display: none; }
 
-/* the pages slot is a flex shell around the pages list: it fills the rail
-   below the switch and lets that list be the one scroller. Empty while the
-   contents (or a live search) is showing, so it takes no space. */
 .lw-nav-slot {
   display: flex;
   flex: 1 1 auto;
@@ -399,57 +340,61 @@
 .lw-toc-list {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  padding: 0.75rem 0.75rem 1.5rem;
+  gap: 0.08rem;
+  padding: 0.6rem 0.55rem 1.5rem;
 }
 
-/* page links share the contents rhythm: same size, same line height */
-.lw-nav-link {
+.lw-nav-link,
+.lw-toc-item {
+  display: block;
+  padding: 0.34rem 0.55rem;
+  border-left: 2px solid transparent;
   color: var(--lw-gray);
   text-decoration: none;
-  line-height: 1.35;
-  font-size: 0.95rem;
+  line-height: 1.4;
+  font-size: 0.875rem;
+  transition: color 110ms ease, background-color 110ms ease;
 }
-.lw-nav-link:hover { color: var(--lw-ink); }
-.lw-nav-link.lw-nav-active { color: var(--lw-ink); text-decoration: underline; }
+
+.lw-nav-link:hover,
+.lw-toc-item:hover {
+  color: var(--lw-ink);
+  background: var(--lw-hover);
+  text-decoration: none;
+}
+
+.lw-nav-link.lw-nav-active,
+.lw-toc-active {
+  color: var(--lw-ink);
+  font-weight: 600;
+  background: var(--lw-surface-alt);
+  border-left-color: var(--lw-ink);
+  text-decoration: none;
+}
+
 .lw-nav-link[data-complete='true'] { color: var(--lw-ink); }
 
-/* completion marker: appended only when a page is complete, small enough
-   that the title does not visibly shift; ink, not a color-only state */
 .lw-nav-check {
   display: inline-block;
-  margin-left: 0.3em;
+  margin-left: 0.35em;
   font-size: 0.78em;
   line-height: 1;
-  vertical-align: 0.05em;
+  vertical-align: 0.04em;
   color: var(--lw-ink);
 }
 
 .lw-nav-link:focus-visible,
 .lw-toc-item:focus-visible {
   outline: 1px solid var(--lw-ink);
-  outline-offset: 2px;
+  outline-offset: -1px;
 }
 
-.lw-toc-item {
-  color: var(--lw-gray);
-  text-decoration: none;
-  line-height: 1.35;
-  font-size: 0.95rem;
+.lw-toc-sub {
+  padding-left: 1.2rem;
+  font-size: 0.82rem;
 }
 
-.lw-toc-item:hover { color: var(--lw-ink); text-decoration: underline; }
-
-.lw-toc-sub { padding-left: 0.9rem; font-size: 0.88rem; }
-
-.lw-toc-active {
-  color: var(--lw-ink);
-  border-left: 2px solid var(--lw-ink);
-  padding-left: 0.5rem;
-}
-
-/* ---- right rail: the under-the-hood panel; zero-width (and
-   hairline-invisible) until one attaches, then it slides wide */
+/* ---- right rail: under-the-hood inspector panel */
 
 .lw-rail-right {
   width: 0;
@@ -462,12 +407,6 @@
               border-color 300ms cubic-bezier(.2, .7, .3, 1);
 }
 
-/* attached width: clamp(420px, 42vw, 720px) — 682px at 1920/2560px.
-   Under 1420px the vw term eases to 28vw (420-460px): the range where
-   the frame is too short for a 42vw panel beside the doc's 40ch floor,
-   and where the doc's capped 74ch column leaves band slack the flat
-   gutter cannot spend — so the panel takes it and the doc keeps 48-74ch
-   instead of overflowing. */
 .lw-site.lw-panel-attached .lw-rail-right {
   width: clamp(420px, 42vw, 720px);
   border-left-color: var(--lw-hairline);
@@ -482,6 +421,7 @@
   inset: 0;
   overflow-y: auto;
   font-family: var(--lw-mono);
+  background: var(--lw-paper);
 }
 
 .lw-panel-pane .lw-panel {
@@ -495,19 +435,14 @@
   to { opacity: 1; transform: none; }
 }
 
-/* ---- reduced motion: width modulation and fades become instant */
-
 @media (prefers-reduced-motion: reduce) {
-  .lw-rail-right, .lw-panel {
+  .lw-rail-nav, .lw-rail-right, .lw-panel {
     transition: none !important;
     animation: none !important;
   }
 }
 
-/* ---- narrow screens (<900px): zones stack; the empty panel rail is
-   display: none so it paints nothing at rest, and appears full-width
-   under the document while attached — the clamp() minimum would
-   overflow a phone viewport */
+/* ---- narrow screens (<900px) */
 
 @media (max-width: 899px) {
   .lw-layout { grid-template-columns: minmax(0, 1fr); }
@@ -517,14 +452,12 @@
     width: auto;
     transition: none;
   }
-  /* the rail stacks above the document: header (view switch + side
-     toggle) first, then the shown list as a wrapping row. On the right
-     the rail is last in DOM order, so `order` brings it back on top. */
   .lw-rail-nav {
     order: -1;
     border-right: none;
     border-bottom: 1px solid var(--lw-hairline);
   }
+  .lw-site.lw-nav-hidden .lw-rail-nav { display: none; }
   .lw-site.lw-nav-right .lw-rail-nav { border-left: none; }
   .lw-contents, .lw-rail-pages-list {
     flex-direction: row;
@@ -533,40 +466,27 @@
     overflow-y: visible;
     padding-top: 0.5rem;
   }
-  /* lesson titles are sentences, not terse section labels: wrapping them
-     into one run-on row makes the list unreadable on a phone. Keep the
-     page list one lesson per line in a bounded scroller. */
   .lw-rail-pages-list {
     flex-direction: column;
     flex-wrap: nowrap;
-    gap: 0.2rem;
+    gap: 0.15rem;
     max-height: 30vh;
     overflow-y: auto;
   }
-  /* search results stay inside the stacked rail: one bounded scroller
-     instead of an arbitrarily tall list */
   .lw-search-results { max-height: 50vh; }
-  .lw-brand { padding-top: 0.65rem; }
-  /* the footer fills the phone column with the document */
+  .lw-brand { padding-top: 0.7rem; }
   .lw-page-footer { max-width: none; }
   .lw-rail-right { display: none; }
   .lw-site.lw-panel-attached .lw-rail-right {
     display: block;
-    width: auto; /* beats the clamp() minimum, which overflows phones */
+    width: auto;
     border-top: 1px solid var(--lw-hairline);
   }
   .lw-panel-pane { position: static; overflow: visible; }
-  /* one full-width column: the gutter alone pads it (1.5rem), the
-     --lw-gutter media queries only apply from 900px */
   .lw-doc-pane > .lw-doc { max-width: none; }
 }
 
-/* ---- small desktops (900-1199px) with a panel attached: the 420px
-   panel beside the 232px rail would leave the document under its 40ch
-   floor (at 900px barely 17ch). The rail moves to a header strip and
-   the panel keeps its place beside the document, so the panel stays
-   visible and the document keeps ~40-65ch; the rail returns to its
-   own column as soon as the panel detaches. */
+/* ---- small desktops (900-1199px) with panel attached */
 
 @media (min-width: 900px) and (max-width: 1199px) {
   .lw-site.lw-panel-attached .lw-layout {
@@ -583,14 +503,12 @@
     border-left: none;
     border-bottom: 1px solid var(--lw-hairline);
   }
+  .lw-site.lw-panel-attached.lw-nav-hidden .lw-rail-nav { display: none; }
   .lw-site.lw-panel-attached .lw-doc-pane { grid-area: doc; }
-  /* a touch narrower than the 420px default: the 20px go to the text */
   .lw-site.lw-panel-attached .lw-rail-right {
     grid-area: panel;
     width: clamp(400px, 40vw, 460px);
   }
-  /* the rail's lists flow below the switch instead of filling a
-     full-height column */
   .lw-site.lw-panel-attached .lw-contents,
   .lw-site.lw-panel-attached .lw-rail-pages-list {
     flex: none;
@@ -602,77 +520,82 @@
     flex-direction: row;
     flex-wrap: wrap;
   }
-  /* the doc keeps its normal measure (the base rule centres it); only
-     the phones drop the cap, where the viewport is already the cap */
 }
 
-/* ---- document. Everything inside scales with the doc's own
-   font-size (em, not rem), so the 1600/2200px type tiers below carry
-   the heading sizes and the vertical rhythm with it instead of
-   leaving them fixed beside larger prose. The `ch` measures come from
-   --lw-doc-measure, so a `ch` here is the doc's ch. */
+/* ---- document prose (Tailwind Typography reading rhythm) */
 
 .lw-doc {
-  --lw-doc-measure: 74ch;    /* the doc's own ch: 82ch >= 1600px, 90ch >= 2200px */
+  --lw-doc-measure: 74ch;
   font-family: var(--lw-serif);
-  line-height: 1.65;
+  color: var(--lw-prose);
+  line-height: 1.72;
 }
 
-/* Wide-screen tiers: measure AND type grow together. These must follow
-   the base .lw-doc rule above — same specificity, and the older placement
-   beside the frame tiers was overridden by the 74ch default. */
 @media (min-width: 1600px) {
-  .lw-doc { --lw-doc-measure: 82ch; font-size: 1.0625rem; line-height: 1.68; }
+  .lw-doc { --lw-doc-measure: 82ch; font-size: 1.0625rem; line-height: 1.72; }
 }
 
 @media (min-width: 2200px) {
-  .lw-doc { --lw-doc-measure: 90ch; font-size: 1.125rem; line-height: 1.66; }
+  .lw-doc { --lw-doc-measure: 90ch; font-size: 1.125rem; line-height: 1.7; }
 }
 
 .lw-title {
   font-size: 2em;
   font-weight: 700;
-  margin: 0 0 0.12em;
+  line-height: 1.18;
+  letter-spacing: -0.025em;
+  color: var(--lw-ink);
+  margin: 0 0 0.28em;
 }
 
 .lw-subtitle {
-  font-style: italic;
-  color: var(--lw-ink);
-  margin: 0 0 1.25em;
+  font-style: normal;
+  font-size: 1.05em;
+  line-height: 1.5;
+  color: var(--lw-gray);
+  margin: 0 0 1.75em;
 }
 
 .lw-heading {
   font-weight: 700;
+  color: var(--lw-ink);
+  line-height: 1.3;
+  letter-spacing: -0.015em;
   margin: 1.4em 0 0.47em;
-  letter-spacing: 0.01em;
-}
-
-.lw-heading, .lw-sec-label {
-  font-variant: small-caps;
-  letter-spacing: 0.06em;
 }
 
 .lw-doc > h2.lw-heading {
   font-size: 1.4em;
   border-top: 1px solid var(--lw-hairline);
-  padding-top: 0.9em;
+  margin-top: 2.1em;
+  padding-top: 1.15em;
 }
-.lw-doc > h3.lw-heading { font-size: 1.15em; }
-.lw-doc > h4.lw-heading { font-size: 1em; }
+.lw-doc > h3.lw-heading {
+  font-size: 1.15em;
+  margin-top: 1.7em;
+}
+.lw-doc > h4.lw-heading {
+  font-size: 1em;
+  margin-top: 1.4em;
+}
 
-/* prose fills the doc measure: -1ch because a ch is a '0' (wider than
-   average prose), so the last word fits rather than drops. The cap is
-   the same variable the doc column uses, minus that choke, so nothing
-   double-caps; em for the spacing. */
-.lw-para { margin: 0 0 1em; max-width: calc(var(--lw-doc-measure) - 1ch); }
+.lw-para {
+  margin: 0 0 1em;
+  max-width: calc(var(--lw-doc-measure) - 1ch);
+}
 
-/* prose links: ink, underlined with the muted rule; an unresolved link
-   is inert text (never an anchor) struck through in error ink */
+.lw-doc strong, .lw-doc b {
+  color: var(--lw-ink);
+  font-weight: 700;
+}
+
 .lw-link {
-  color: inherit;
+  color: var(--lw-ink);
   text-decoration: underline;
-  text-decoration-color: var(--lw-gray);
-  text-underline-offset: 0.16em;
+  text-decoration-color: var(--lw-hairline-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  transition: text-decoration-color 120ms ease;
 }
 .lw-link:hover { text-decoration-color: var(--lw-ink); }
 .lw-link:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
@@ -682,75 +605,84 @@
   cursor: help;
 }
 
+/* Tailwind-Typography inline code: gentle tint, no border cages */
 code.lw-inline {
   font-family: var(--lw-mono);
-  font-size: 0.9em;
-  border: 1px solid var(--lw-hairline);
-  padding: 0 0.25em;
+  font-size: 0.85em;
+  color: var(--lw-ink);
+  background: var(--lw-surface-alt);
+  outline: 1px solid transparent;
+  padding: 0.14em 0.36em;
+  vertical-align: baseline;
 }
 
 .lw-list {
-  margin: 0 0 1.25em;
-  padding-left: 1.5em;
-  /* the marker hangs in the indent already: keep the item text inside
-     the measure rather than 1.5em short of it (em, so it tracks the
-     doc font-size like the measure does) */
+  margin: 0 0 1.35em;
+  padding-left: 1.55em;
   max-width: calc(var(--lw-doc-measure) + 1.5ch);
 }
-.lw-list li { margin-bottom: 0.35em; }
+.lw-list li {
+  margin-bottom: 0.42em;
+  padding-left: 0.2em;
+}
+.lw-list li::marker { color: var(--lw-gray); }
 
-/* unsupported-construct report: a hairline band above the article, no
-   fill and no accent — errors take the error ink, warnings plain ink */
 .lw-org-warnings {
   border-top: 1px solid var(--lw-hairline);
   border-bottom: 1px solid var(--lw-hairline);
-  padding: 0.55em 0;
+  padding: 0.6em 0;
   margin: 0 0 1.5em;
 }
 .lw-org-warnings-title {
-  font-variant: small-caps;
+  font-size: 0.76rem;
+  text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 700;
+  color: var(--lw-ink);
   margin: 0 0 0.35em;
 }
 .lw-org-warnings ul {
   margin: 0;
-  padding-left: 1.5em;
-  font-size: 0.9em;
+  padding-left: 1.4em;
+  font-size: 0.88em;
 }
 .lw-org-warnings li { margin: 0 0 0.2em; }
 .lw-org-warnings li[data-severity='warning'] { color: var(--lw-gray); }
 .lw-org-warnings li[data-severity='error'] { color: var(--lw-error); }
 
-/* tables and listings are not prose: they may run past the reading
-   measure up to the doc's 90ch ceiling (wider and the eye loses the
-   row across the page), but never past their column */
+/* Book/Tailwind-Typography tables: pure white, horizontal rules only */
 .lw-table {
   border-collapse: collapse;
-  margin: 0 0 1.25em;
-  font-size: 0.92em;
+  width: 100%;
+  margin: 1.25em 0 1.6em;
+  font-size: 0.9em;
+  line-height: 1.5;
   max-width: min(100%, 90ch);
 }
 .lw-table th, .lw-table td {
-  border: 1px solid var(--lw-hairline);
-  padding: 0.3em 0.7em;
+  border: none;
+  border-bottom: 1px solid var(--lw-hairline);
+  padding: 0.52em 0.75em;
   text-align: left;
+  vertical-align: top;
 }
-.lw-table th { font-weight: 700; }
+.lw-table th {
+  font-weight: 700;
+  color: var(--lw-ink);
+  border-bottom: 1.5px solid var(--lw-ink);
+  font-size: 0.82em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 
-/* ---- lesson footer: prev/next in page order, the progress reading, and
-   — only on pages without checked exercises — a manual completion
-   toggle. The hairline plus the top margin separate it from the article;
-   the measure matches the document's. */
+/* ---- lesson footer */
 
 .lw-page-footer {
   --lw-doc-measure: 74ch;
   max-width: var(--lw-doc-measure);
-  margin: 3rem auto 0;
-  padding-top: 1.1rem;
+  margin: 3.5rem auto 0;
+  padding-top: 1.35rem;
   border-top: 1px solid var(--lw-hairline);
-  /* the measure is in ch: it only resolves like .lw-doc when the same
-     serif face sets the em, so the footer column lines up with the text */
   font-family: var(--lw-serif);
   font-size: 1rem;
 }
@@ -764,7 +696,8 @@ code.lw-inline {
 
 .lw-prevnext-link {
   max-width: 46%;
-  font-size: 0.92rem;
+  font-size: 0.94rem;
+  font-weight: 600;
   line-height: 1.35;
   color: var(--lw-ink);
   text-decoration: none;
@@ -773,47 +706,47 @@ code.lw-inline {
 .lw-prevnext-link[rel='next'] { margin-left: auto; text-align: right; }
 .lw-prevnext-link::before {
   display: block;
-  margin-bottom: 0.15rem;
+  margin-bottom: 0.2rem;
   font-family: var(--lw-serif);
   font-size: 0.7rem;
-  font-variant: small-caps;
-  font-weight: 400;
+  text-transform: uppercase;
+  font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--lw-gray);
 }
-.lw-prevnext-link[rel='prev']::before { content: 'Previous'; }
-.lw-prevnext-link[rel='next']::before { content: 'Next'; }
-.lw-prevnext-link:hover { text-decoration: underline; text-underline-offset: 0.16em; }
+.lw-prevnext-link[rel='prev']::before { content: '← Previous'; }
+.lw-prevnext-link[rel='next']::before { content: 'Next →'; }
+.lw-prevnext-link:hover { text-decoration: underline; text-underline-offset: 0.18em; }
 .lw-prevnext-link:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
 
 .lw-page-meta {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 1rem;
-  margin-top: 1rem;
+  margin-top: 1.25rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--lw-hairline);
 }
 
 .lw-page-progress {
   margin: 0;
   font-family: var(--lw-serif);
-  font-size: 0.78rem;
-  font-variant: small-caps;
-  letter-spacing: 0.08em;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
   color: var(--lw-gray);
 }
 
-/* same hairline/mono control as the block headers; the pressed state adds
-   an ink rule and an underline, never color alone */
 .lw-page-complete {
   font-family: var(--lw-mono);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   line-height: 1.3;
-  padding: 0.15rem 0.6rem;
+  padding: 0.25rem 0.65rem;
   color: var(--lw-ink);
   background: var(--lw-paper);
-  border: 1px solid var(--lw-hairline);
+  border: 1px solid var(--lw-hairline-strong);
   cursor: pointer;
 }
 .lw-page-complete:hover { border-color: var(--lw-ink); }
@@ -841,86 +774,107 @@ code.lw-inline {
 
 /* ---- read-only source listings */
 
-/* code is not prose: listings and executable blocks may use up to
-   min(100%, 90ch) — long source lines wrap more often at the reading
-   measure, they did not get anywhere at a 40-42rem cap */
-.lw-src { margin: 1.5rem 0 2rem; max-width: min(100%, 90ch); }
+.lw-src {
+  margin: 1.5rem 0 1.85rem;
+  max-width: min(100%, 90ch);
+  border: 1px solid var(--lw-hairline);
+}
 .lw-ro-head {
   font-family: var(--lw-mono);
-  font-size: 0.75rem;
+  font-size: 0.72rem;
+  color: var(--lw-gray);
   border-bottom: 1px solid var(--lw-hairline);
-  padding-bottom: 0.3rem;
-  margin-bottom: 0.5rem;
-  font-variant: small-caps;
+  padding: 0.35rem 0.75rem;
+  text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 .lw-ro-code {
   font-family: var(--lw-mono);
   font-size: 0.82rem;
-  line-height: 1.5;
+  line-height: 1.55;
   margin: 0;
+  padding: 0.7rem 0.85rem;
+  background: var(--lw-paper);
   white-space: pre-wrap;
   overflow-x: auto;
 }
 
-/* ---- executable block */
+/* ---- executable notebook cell (pure white, hairline rules, zero grey bars) */
 
 .lw-block {
   border: 1px solid var(--lw-hairline);
-  margin: 0 0 0.5rem;
+  background: var(--lw-paper);
+  margin: 1.35rem 0 0.55rem;
+  transition: border-color 140ms ease;
 }
-.lw-block.lw-running { outline: 2px solid var(--lw-ink); }
+.lw-block:focus-within { border-color: var(--lw-hairline-strong); }
+.lw-block.lw-running {
+  border-color: var(--lw-ink);
+  outline: 1px solid var(--lw-ink);
+}
 
 .lw-block-head {
   display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: nowrap;
+  background: var(--lw-paper);
   border-bottom: 1px solid var(--lw-hairline);
-  padding: 0.4rem 0.6rem;
+  padding: 0.38rem 0.65rem;
   font-family: var(--lw-mono);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
+}
+
+.lw-block-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .lw-lang {
-  font-variant: small-caps;
+  font-size: 0.68rem;
+  text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 700;
+  color: var(--lw-ink);
+  flex: none;
 }
 
-.lw-block-name { color: var(--lw-ink); opacity: 0.75; }
+.lw-block-name {
+  color: var(--lw-gray);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-/* `:session <name>` badge: compact, muted, hairline — a label, not a
-   control. Unsupported kernels (no resume()) mark it in error ink with
-   a dotted underline instead of a second badge. */
 .lw-block-session {
   font-family: var(--lw-mono);
-  font-size: 0.7rem;
-  font-variant: small-caps;
-  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
   color: var(--lw-gray);
   border: 1px solid var(--lw-hairline);
   padding: 0 0.3rem;
   white-space: nowrap;
+  flex: none;
 }
 .lw-session-unsupported {
   color: var(--lw-error);
+  border-color: var(--lw-error);
   text-decoration: underline dotted;
   text-underline-offset: 2px;
 }
 
-/* `#+EXERCISE` / `#+CHECK` badge: compact small-caps like the session
-   label, but its own state styling. The state word is always in the text,
-   so color, weight, and rules only reinforce it — never carry it alone. */
 .lw-block-exercise {
   font-family: var(--lw-mono);
-  font-size: 0.7rem;
-  font-variant: small-caps;
-  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
   color: var(--lw-gray);
   border: 1px solid var(--lw-hairline);
-  padding: 0 0.3rem;
+  padding: 0 0.32rem;
   white-space: nowrap;
+  flex: none;
 }
 .lw-block-exercise[data-state='pending'] { color: var(--lw-gray); }
 .lw-block-exercise[data-state='running'] {
@@ -929,11 +883,13 @@ code.lw-inline {
 }
 .lw-block-exercise[data-state='passed'] {
   color: var(--lw-ink);
+  background: var(--lw-tint);
   border-color: var(--lw-ink);
   font-weight: 700;
 }
 .lw-block-exercise[data-state='failed'] {
   color: var(--lw-error);
+  background: var(--lw-error-bg);
   border-color: var(--lw-error);
   text-decoration: underline dotted;
   text-underline-offset: 2px;
@@ -946,45 +902,129 @@ code.lw-inline {
   text-underline-offset: 2px;
 }
 
+.lw-block-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.22rem;
+  flex: none;
+}
+
 .lw-block-head button {
   font-family: var(--lw-mono);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  padding: 0.16rem 0.42rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--lw-gray);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 110ms ease, color 110ms ease, border-color 110ms ease, opacity 110ms ease;
+}
+
+.lw-block-head button.lw-btn-primary {
   background: var(--lw-paper);
   color: var(--lw-ink);
-  border: 1px solid var(--lw-hairline);
-  padding: 0.15rem 0.6rem;
-  cursor: pointer;
+  border-color: var(--lw-ink);
+  font-weight: 600;
+  padding: 0.16rem 0.55rem;
 }
-.lw-block-head button:hover { border-color: var(--lw-ink); }
+.lw-block-head button.lw-btn-primary:hover {
+  background: var(--lw-ink);
+  color: var(--lw-paper);
+}
+
+.lw-block-head button.lw-btn-secondary {
+  background: var(--lw-paper);
+  color: var(--lw-ink);
+  border-color: var(--lw-hairline-strong);
+  padding: 0.16rem 0.5rem;
+}
+.lw-block-head button.lw-btn-secondary:hover {
+  border-color: var(--lw-ink);
+  background: var(--lw-hover);
+}
+
+.lw-block-head button.lw-btn-ghost {
+  min-width: 1.7rem;
+  min-height: 1.7rem;
+  padding: 0.16rem 0.34rem;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.lw-block-head button.lw-btn-ghost:hover {
+  color: var(--lw-ink);
+  background: var(--lw-hover);
+  border-color: var(--lw-hairline);
+}
+
+.lw-block-head button[data-dirty='false'] { opacity: 0.38; }
+.lw-block-head button[data-dirty='false']:hover { opacity: 1; }
+
 .lw-block-head button:focus-visible {
   outline: 1px solid var(--lw-ink);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
 .lw-status {
   margin-left: auto;
-  min-width: 0;              /* long status text wraps instead of overflowing */
-  overflow-wrap: anywhere;
-  hyphens: auto;
+  min-width: 0;
+  font-size: 0.7rem;
+  color: var(--lw-gray);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.lw-status-error { color: var(--lw-error); }
+.lw-status-error {
+  color: var(--lw-error);
+  font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 
-[data-test="editor"] .cm-editor { font-size: 0.82rem; }
+@media (max-width: 640px) {
+  .lw-block-head { flex-wrap: wrap; }
+}
+
+/* CodeMirror editor: pure white gutter & paper integration */
+[data-test="editor"] .cm-editor { font-size: 0.84rem; line-height: 1.58; }
 [data-test="editor"] .cm-editor.cm-focused { outline: none; }
-[data-test="editor"] .cm-scroller { font-family: var(--lw-mono); }
+[data-test="editor"] .cm-scroller {
+  font-family: var(--lw-mono);
+  overflow-x: auto;
+}
+[data-test="editor"] .cm-content { padding: 0.55rem 0; }
+[data-test="editor"] .cm-line { padding: 0 0.75rem; }
+[data-test="editor"] .cm-gutters {
+  background: var(--lw-paper);
+  border-right: 1px solid #f0f0ec;
+  color: var(--lw-gray);
+}
+[data-test="editor"] .cm-lineNumbers .cm-gutterElement {
+  padding: 0 0.55rem 0 0.65rem;
+  font-size: 0.74rem;
+  opacity: 0.55;
+}
 
-.lw-current-line { background: var(--lw-tint); }
-.lw-error-line { background: #f6dede; }
-
-/* Breakpoints (kernels with features.breakpoints): clickable line
-   numbers, filled black square markers, textbook debugger style. */
+.lw-current-line {
+  background: var(--lw-tint);
+  box-shadow: inset 3px 0 0 var(--lw-ink);
+}
+.lw-error-line {
+  background: var(--lw-error-bg);
+  box-shadow: inset 3px 0 0 var(--lw-error);
+}
 
 [data-test="editor"][data-bp] .cm-lineNumbers .cm-gutterElement { cursor: pointer; }
+[data-test="editor"][data-bp] .cm-lineNumbers .cm-gutterElement:hover {
+  opacity: 1;
+  color: var(--lw-ink);
+}
 
 .lw-bp {
-  width: 0.5rem;
-  height: 0.5rem;
-  margin: 0.18rem 0.15rem 0.1rem;
+  width: 0.46rem;
+  height: 0.46rem;
+  margin: 0.25rem 0.15rem 0.1rem;
   background: var(--lw-ink);
 }
 
@@ -992,31 +1032,29 @@ code.lw-inline {
   font-family: var(--lw-mono);
   font-size: 0.78rem;
   color: var(--lw-error);
-  border-top: 1px solid var(--lw-hairline);
-  padding: 0.4rem 0.6rem;
+  background: var(--lw-error-bg);
+  border-top: 1px solid var(--lw-error);
+  padding: 0.45rem 0.75rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* ---- hint/solution folds: native <details>, closed by default, in the
-   same hairline box as a block. The summary is the only control (native
-   disclosure triangle, keyboard-operable); hint and solution differ only
-   in their label and the solution's weight, never in accent color. Bodies
-   recurse, so nested blocks and result slots keep their full width. */
+/* ---- hint/solution folds */
 
 .lw-fold {
   border: 1px solid var(--lw-hairline);
-  margin: 0 0 1rem;
+  margin: 1rem 0 1.25rem;
   background: var(--lw-paper);
 }
 
 .lw-fold > summary {
   display: list-item;
-  padding: 0.4rem 0.6rem;
+  padding: 0.45rem 0.75rem;
+  background: var(--lw-paper);
   font-family: var(--lw-serif);
-  font-size: 0.82rem;
-  font-variant: small-caps;
-  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
   line-height: 1.3;
   color: var(--lw-ink);
   cursor: pointer;
@@ -1030,126 +1068,177 @@ code.lw-inline {
 }
 .lw-fold[open] > summary { border-bottom: 1px solid var(--lw-hairline); }
 
-.lw-fold-body { padding: 0.65rem 0.75rem 0.75rem; }
+.lw-fold-body { padding: 0.85rem 0.95rem 0.95rem; }
 .lw-fold-body > :last-child { margin-bottom: 0; }
-/* nested content is sized by the body, never squeezed by it */
 .lw-fold-body .lw-block,
 .lw-fold-body .lw-results,
 .lw-fold-body .lw-src,
 .lw-fold-body .lw-fold { max-width: 100%; }
 
-/* ---- results slot */
+/* ---- notebook output (clean left rule on white paper) */
 
 .lw-results {
   font-family: var(--lw-mono);
   font-size: 0.82rem;
-  border-left: 2px solid var(--lw-hairline);
-  margin: 0 0 2rem;
-  padding: 0.4rem 0.9rem;
+  line-height: 1.55;
+  color: var(--lw-ink);
+  border-left: 2px solid var(--lw-hairline-strong);
+  margin: 0 0 1.85rem;
+  padding: 0.35rem 0.95rem;
   white-space: pre-wrap;
+  overflow-x: auto;
   min-height: 0;
 }
 .lw-results:empty { display: none; }
 .lw-results pre { margin: 0; white-space: pre-wrap; }
 
-/* ---- under-the-hood panel */
+/* ---- under-the-hood inspector panel */
 
 .lw-panel {
   border: 1px solid var(--lw-hairline);
   font-family: var(--lw-mono);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   display: flex;
   flex-direction: column;
   max-height: 100%;
+  background: var(--lw-paper);
 }
 
 .lw-panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  background: var(--lw-paper);
   border-bottom: 1px solid var(--lw-hairline);
-  padding: 0.4rem 0.6rem;
+  padding: 0.55rem 0.9rem;
 }
 
-.lw-panel-title { font-weight: 700; }
+.lw-panel-title {
+  font-weight: 700;
+  color: var(--lw-ink);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .lw-panel-head button {
   font-family: var(--lw-mono);
-  font-size: 0.75rem;
-  background: var(--lw-paper);
+  font-size: 0.72rem;
+  color: var(--lw-gray);
+  background: transparent;
   border: 1px solid var(--lw-hairline);
-  padding: 0.1rem 0.5rem;
+  padding: 0.14rem 0.48rem;
   cursor: pointer;
+  flex: none;
 }
-.lw-panel-head button:hover { border-color: var(--lw-ink); }
+.lw-panel-head button:hover {
+  border-color: var(--lw-ink);
+  color: var(--lw-ink);
+}
+.lw-panel-head button:focus-visible {
+  outline: 1px solid var(--lw-ink);
+  outline-offset: 1px;
+}
 
-.lw-section { border-bottom: 1px solid var(--lw-hairline); padding: 0.6rem 0.75rem; }
+.lw-section {
+  border-bottom: 1px solid var(--lw-hairline);
+  padding: 0.75rem 0.9rem;
+}
 .lw-section:last-child { border-bottom: none; }
 
-/* panel mode: field sections re-flow into a wrapping grid; listings and
-   hexdumps stay single-column (their rows are wide) */
-.lw-site.lw-panel-attached .lw-section { padding: 0.8rem 1rem; }
+.lw-site.lw-panel-attached .lw-section { padding: 0.85rem 1rem; }
 .lw-site.lw-panel-attached .lw-fields {
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
 }
 
 .lw-sec-label {
-  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-family: var(--lw-mono);
+  font-size: 0.7rem;
   font-weight: 700;
-  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--lw-gray);
+  margin-bottom: 0.55rem;
+  cursor: pointer;
 }
+.lw-sec-label::before {
+  content: '▾';
+  font-size: 0.75em;
+  line-height: 1;
+}
+.lw-sec-label:hover { color: var(--lw-ink); }
+.lw-sec-label:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: 2px; }
 
+.lw-section-collapsed .lw-sec-label { margin-bottom: 0; }
+.lw-section-collapsed .lw-sec-label::before { content: '▸'; }
+.lw-section-collapsed > :not(.lw-sec-label) { display: none; }
+
+/* Fields grid: per-cell borders prevent grey dead-space on partial rows */
 .lw-fields {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-  gap: 1px;
-  background: var(--lw-hairline);
-  border: 1px solid var(--lw-hairline);
+  gap: 0;
+  background: transparent;
+  border-top: 1px solid var(--lw-hairline);
+  border-left: 1px solid var(--lw-hairline);
 }
 
 .lw-field {
   background: var(--lw-paper);
-  /* left padding reserves the rule slot so changed/hover states never
-     shift content (the rules are inset overlays, not borders) */
-  padding: 0.3rem 0.45rem 0.3rem calc(0.45rem + 2px);
+  border-right: 1px solid var(--lw-hairline);
+  border-bottom: 1px solid var(--lw-hairline);
+  padding: 0.36rem 0.5rem 0.36rem calc(0.5rem + 2px);
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.35rem;
+  transition: background-color 100ms ease, opacity 100ms ease;
 }
-/* changed and hover share one 2px inset rule position; on a changed row
-   the changed tint + ink rule win, so hover never suppresses the marking
-   nor stacks a second rule */
+.lw-field-zero { opacity: 0.45; }
+.lw-field-zero:hover { opacity: 0.92; }
+
 .lw-field.lw-changed {
   background: var(--lw-tint);
-  box-shadow: inset 2px 0 0 var(--lw-ink);
+  box-shadow: inset 3px 0 0 var(--lw-ink);
 }
-.lw-field-key { font-weight: 700; }
-.lw-field-val { margin-left: auto; }
-.lw-field-sub { width: 100%; opacity: 0.65; font-size: 0.72rem; }
-
-/* Hovering a register/flag row highlights it: neutral tint + gray left
-   rule (changed-marking language, grayed so it can't read as a change). */
+.lw-field-key { font-weight: 700; color: var(--lw-ink); }
+.lw-field-val { margin-left: auto; color: var(--lw-ink); }
+.lw-field-sub { width: 100%; opacity: 0.65; font-size: 0.7rem; }
 
 .lw-field:not(.lw-changed):hover {
   background: var(--lw-hover);
-  box-shadow: inset 2px 0 0 var(--lw-gray);
+  box-shadow: inset 2px 0 0 var(--lw-hairline-strong);
 }
 
 .lw-listing { border-collapse: collapse; width: 100%; }
 .lw-listing td {
-  padding: 0.1rem 0.4rem;
+  padding: 0.18rem 0.45rem;
   white-space: nowrap;
   vertical-align: top;
 }
-.lw-addr { opacity: 0.6; }
-.lw-bytes { opacity: 0.75; }
-.lw-text { font-weight: 700; }
-.lw-row-current td { background: var(--lw-tint); border-top: 1px solid var(--lw-ink); border-bottom: 1px solid var(--lw-ink); }
+.lw-addr { color: var(--lw-gray); }
+.lw-bytes { color: var(--lw-gray); opacity: 0.8; }
+.lw-text { font-weight: 600; color: var(--lw-ink); }
+.lw-row-current td {
+  background: var(--lw-tint);
+  border-top: 1px solid var(--lw-ink);
+  border-bottom: 1px solid var(--lw-ink);
+}
+.lw-row-current td:first-child { box-shadow: inset 3px 0 0 var(--lw-ink); }
 
-/* Narrow panes (<900px): disassembly rows wrap instead of widening the panel
-   (hexdump keeps 16 bytes/row behind its own horizontal scroll). */
 @media (max-width: 899px) {
   .lw-listing td { white-space: normal; overflow-wrap: anywhere; }
 }
@@ -1159,19 +1248,19 @@ code.lw-inline {
   margin: 0;
   white-space: pre;
   overflow-x: auto;
-  line-height: 1.45;
+  line-height: 1.5;
+  color: var(--lw-ink);
 }
+.lw-hex-zero { opacity: 0.45; transition: opacity 100ms ease; }
+.lw-hexdump:hover .lw-hex-zero { opacity: 0.72; }
+.lw-hex-ascii { color: var(--lw-gray); }
 
 /* Trusted kernel markup (SVG etc.): panel sections and results slots. */
 
 .lw-html { margin: 0; }
-/* Typst wraps each page in a shrink-to-fit inline-flex div and rewrites
- * wide pages to width="100%" — a percentage width cannot resolve against
- * shrink-to-fit sizing, so the SVG would fall back to its intrinsic
- * ~300px. Stretch the wrapper to the slot instead. */
 .lw-html > div:has(> svg) { width: 100%; max-width: 100%; }
 .lw-html svg { max-width: 100%; height: auto; }
-.lw-results > * + * { margin-top: 0.4rem; }
+.lw-results > * + * { margin-top: 0.45rem; }
 
 /* ---- tooltip */
 
@@ -1181,13 +1270,13 @@ code.lw-inline {
   max-width: 22rem;
   background: var(--lw-paper);
   color: var(--lw-ink);
-  border: 1px solid var(--lw-hairline);
+  border: 1px solid var(--lw-hairline-strong);
   font-family: var(--lw-serif);
   font-size: 0.78rem;
   line-height: 1.45;
   padding: 0.4rem 0.6rem;
   pointer-events: none;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 /* ---- font fallback when mountSite({ fonts: false }) */
@@ -1204,7 +1293,7 @@ code.lw-inline {
 }
 .lw-math-block {
   display: block;
-  margin: 0.9em 0;
+  margin: 1.1em 0;
   overflow-x: auto;
   overflow-y: hidden;
 }
@@ -1213,14 +1302,13 @@ code.lw-inline {
   font-family: var(--lw-mono);
   color: var(--lw-error);
 }
-.lw-diagram { margin: 1.5em 0; text-align: center; }
+.lw-diagram { margin: 1.75em 0; text-align: center; }
 .lw-diagram svg { max-width: 100%; height: auto; }
 .lw-caption {
-  margin-top: 0.45em;
+  margin-top: 0.5em;
   font-size: 0.86rem;
-  line-height: 1.4;
-  color: var(--lw-ink);
-  opacity: 0.72;
+  line-height: 1.45;
+  color: var(--lw-gray);
 }
 .lw-diagram-missing {
   font-family: var(--lw-mono);

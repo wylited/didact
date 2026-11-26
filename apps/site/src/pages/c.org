@@ -1,65 +1,172 @@
 #+TITLE: C in the Browser
-#+SUBTITLE: Real clang compiling to wasm32-wasi right in this tab
+#+SUBTITLE: Real clang (LLVM 22) compiling to wasm32-wasi and running locally in this tab
 
-These blocks compile with actual clang (LLVM 22 via =@yowasp/clang=) and run in your browser's [[file:wasm.org][WebAssembly]] engine. The first run pulls down the ~105 MB toolchain once and caches it locally. After that, hitting Run compiles, links with =wasm-ld=, and executes the binary in the same tab.
+Every block here compiles with actual =clang= (fetched once and cached locally, ~105 MB) into a =wasm32-wasip1= binary, links with =wasm-ld=, and executes on your browser's [[file:wasm.org][WebAssembly]] engine through a minimal WASI shim. Because it runs as compiled native-speed WebAssembly rather than an interpreter, there is no single-stepping; instead, the right-hand panel shows *Diagnostics* (exact clang warnings and line-mapped errors), *Console*, *Program* (exit code, binary size, compile time), and *Module · first 256 bytes* (starting with the =00 61 73 6d= WebAssembly magic header).
 
-WebAssembly cannot talk to your OS directly, so a small WASI shim handles stdout/stderr, exit codes, random bytes, and wall-clock time. Anything else (files, sleep, spawning processes) stops with an explicit unsupported-call error. Keep an eye on the panel on the right: it shows the compiler output, exit code, binary size, compile time, and the first 256 bytes of the linked =.wasm= file. One catch: a tight infinite loop with no I/O will freeze the tab because raw WebAssembly cannot be preempted.
+#+CAPTION: In-browser C compilation and WASI execution pipeline
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
 
-* =puts= and =printf=
+#let stage(pos, body, hl: false) = node(
+  pos, body, shape: rect, inset: 6pt, width: 78pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+  fill: if hl { rgb("#F2F8F6") } else { white },
+)
 
-=puts= writes a string and tacks on a newline for you. =printf= gives you format strings like =%d= and leaves the newline up to you. Try deleting a semicolon and hitting Run to see clang report the exact line.
+#diagram(
+  spacing: (14pt, 10pt),
+  stage((0, 0), [*lesson.c* #linebreak() #text(size: 8pt)[source buffer]]),
+  stage((1.35, 0), [*clang* #linebreak() #text(size: 8pt)[C -> wasm32 obj]]),
+  stage((2.7, 0), [*wasm-ld* #linebreak() #text(size: 8pt)[links libc]]),
+  stage((4.05, 0), [*WASI shim* #linebreak() #text(size: 8pt)[stdout & exit]], hl: true),
+  edge((0, 0), (1.35, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((1.35, 0), (2.7, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((2.7, 0), (4.05, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
+)
+#+END_SRC
 
-#+NAME: hello
+* Data model sizes on =wasm32=
+
+C does not fix the bit-width of =long= or pointers — the target ABI does. On =wasm32= (ILP32), =int=, =long=, and =void*= are all 4 bytes, whereas =long long= is 8 bytes.
+
+#+NAME: sizes
 #+BEGIN_SRC c
 #include <stdio.h>
 
 int main(void) {
-  puts("Hello, world!");
-  printf("2 + 3 = %d\n", 2 + 3);
+  printf("sizeof(char)      = %zu\n", sizeof(char));
+  printf("sizeof(int)       = %zu\n", sizeof(int));
+  printf("sizeof(long)      = %zu\n", sizeof(long));
+  printf("sizeof(void*)     = %zu\n", sizeof(void*));
+  printf("sizeof(long long) = %zu\n", sizeof(long long));
   return 0;
 }
 #+END_SRC
 
 #+RESULTS:
-: Hello, world!
-: 2 + 3 = 5
+: sizeof(char)      = 1
+: sizeof(int)       = 4
+: sizeof(long)      = 4
+: sizeof(void*)     = 4
+: sizeof(long long) = 8
 
-* Summing 1 through 10
+*Try editing:* look at *Module · first 256 bytes* after running — bytes =0..3= are always =00 61 73 6d= (="\0asm"=) followed by version =01 00 00 00=. Now delete a semicolon on line 4 and hit *Run* to see clang's exact line-mapped error in *Diagnostics*.
 
-A basic =for= loop summing the first ten integers into =sum=.
+* Pointers and scaled arithmetic
 
-#+NAME: sum-loop
+In C, adding =1= to a pointer =int *p= does not add 1 byte — it advances by ~sizeof(int) = 4~ bytes so =p + k= always lands on element =a[k]=.
+
+#+CAPTION: Contiguous 4-byte int array layout and scaled pointer arithmetic
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1cm, {
+  import draw: *
+  let vals = ("10", "20", "30", "40")
+  let offs = ("+0", "+4", "+8", "+12")
+  for i in range(4) {
+    let x = i * 2.1
+    rect((x, 0.2), (x + 2.1, 1.1), stroke: 0.8pt + if i == 1 { rgb("#1A9988") } else { luma(120) }, fill: if i == 1 { rgb("#F2F8F6") } else { white })
+    content((x + 1.05, 0.65), text(font: "DejaVu Sans Mono", weight: "bold")[#vals.at(i)])
+    content((x + 1.05, -0.1), text(font: "DejaVu Sans Mono", size: 8pt, fill: luma(90))[a[#i] (#offs.at(i) B)])
+  }
+  line((1.05, 1.7), (1.05, 1.15), stroke: 0.8pt + luma(100), mark: (end: ">"))
+  content((1.05, 1.95), text(font: "DejaVu Sans Mono", size: 8.5pt)[p])
+  line((3.15, 1.7), (3.15, 1.15), stroke: 0.9pt + rgb("#1A9988"), mark: (end: ">"))
+  content((3.15, 1.95), text(font: "DejaVu Sans Mono", size: 8.5pt, fill: rgb("#1A9988"))[p + 1 (+4 bytes)])
+})
+#+END_SRC
+
+#+NAME: pointer-math
 #+BEGIN_SRC c
 #include <stdio.h>
+#include <stddef.h>
 
 int main(void) {
-  int sum = 0;
-  for (int i = 1; i <= 10; i++) sum += i;
-  printf("%d\n", sum);
+  int a[4] = {10, 20, 30, 40};
+  int *p = a;
+  ptrdiff_t byte_stride = (char *)(p + 1) - (char *)p;
+  printf("*(p + 2) = %d\n", *(p + 2));
+  printf("byte stride of int* = %td\n", byte_stride);
   return 0;
 }
 #+END_SRC
 
 #+RESULTS:
-: 55
+: *(p + 2) = 30
+: byte stride of int* = 4
 
-* Recursive =factorial(10)=
+*Try editing:* change =int a[4]= and =int *p= to =short= (2 bytes) or =double= (8 bytes) and re-run — watch =byte_stride= change automatically to match the element type.
 
-Standard recursive factorial using =long=. Because =wasm32= has 32-bit =long=s, =10!= fits fine (=3628800=), but changing =10= to =13= will overflow.
+* Integer width and factorial overflow
+
+Because =long= is 32-bit signed on =wasm32=, its maximum value is $2^(31) - 1 = 2147483647$. $12! = 479001600$ fits, while $13! = 6227020800$ overflows signed =long= (undefined behavior in C!). Switching to 64-bit =long long= extends the exact range up to $20!$.
 
 #+NAME: factorial
 #+BEGIN_SRC c
 #include <stdio.h>
 
-long factorial(int n) {
-  return n <= 1 ? 1L : n * factorial(n - 1);
+long long factorial(int n) {
+  return n <= 1 ? 1LL : (long long)n * factorial(n - 1);
 }
 
 int main(void) {
-  printf("%ld\n", factorial(10));
+  printf("10! = %lld\n", factorial(10));
+  printf("13! = %lld\n", factorial(13));
   return 0;
 }
 #+END_SRC
 
 #+RESULTS:
-: 3628800
+: 10! = 3628800
+: 13! = 6227020800
+
+*Try editing:* change =long long= back to =long= (and =%lld= to =%ld=) and run with =13= to see why width matters on ILP32 targets — then compare with [[file:mips.org][hi:lo overflow in MIPS]] and [[file:cpp.org][C++20 on the same clang engine]].
+
+* Exercise: sum an array with pointers
+
+Replace the =0= in =sum_range= so it walks from =begin= up to (not including) =end= and prints =55=.
+
+#+NAME: ex-ptr-sum
+#+EXERCISE: Sum 1..10 via pointer range [begin, end)
+#+CHECK: 55
+#+BEGIN_SRC c
+#include <stdio.h>
+
+int sum_range(const int *begin, const int *end) {
+  int total = 0;
+  (void)begin;
+  (void)end;
+  return total;
+}
+
+int main(void) {
+  int xs[10] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  printf("%d\n", sum_range(xs, xs + 10));
+  return 0;
+}
+#+END_SRC
+
+#+BEGIN_HINT
+Loop ~for (const int *p = begin; p < end; ++p) total += *p;~.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC c
+#include <stdio.h>
+
+int sum_range(const int *begin, const int *end) {
+  int total = 0;
+  for (const int *p = begin; p < end; ++p) total += *p;
+  return total;
+}
+
+int main(void) {
+  int xs[10] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  printf("%d\n", sum_range(xs, xs + 10));
+  return 0;
+}
+#+END_SRC
+#+END_SOLUTION

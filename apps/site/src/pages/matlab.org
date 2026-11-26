@@ -1,16 +1,59 @@
 #+TITLE: MATLAB, Column-Major
-#+SUBTITLE: Matrices, linear indexing, backslash solving, workspaces, and vectorization on a steppable interpreter
+#+SUBTITLE: Column-major matrices, linear indexing, backslash solving, and loop columns on a steppable interpreter
 
-This is a small MATLAB-flavored interpreter written in TypeScript. Every value is a 2D matrix of IEEE 754 doubles stored column-major in a flat array, just like real MATLAB. It covers matrix literals, ranges, matrix and elementwise operators, =end= indexing, control flow, top-level functions, and core builtins (=zeros=, =sum=, =sort=, =det=, =inv=). Cells, structs, function handles, =try/catch=, and string variables are rejected with their line number.
-
-A few small quirks of this subset: there is no =rand= (everything is deterministic), numbers trim trailing zeros (=0.5= instead of =0.5000=), and inside =[ ]= a minus sign starts a new element, so write =[(1 - 2)]= for subtraction.
+Every value in this pure-TypeScript MATLAB interpreter is a 2D matrix of IEEE 754 doubles stored *column-major* in a flat array. Click *Step* or set gutter breakpoints to inspect *Workspace*, *Matrices* (showing every element's flat 0-based memory address and raw 64-bit IEEE 754 hex bytes), *Columns* (tracking which column a =for= loop is walking), *Call stack*, and *console*.
 
 * Column-major storage and linear indexing
 
-Inside =[ ... ]=, spaces or commas separate columns and semicolons start new rows.
+In C or Python, 2D arrays are laid out row by row. In MATLAB (as in Fortran), an $R times C$ matrix is stored *column by column*, so element $(r, c)$ sits at 0-based flat offset:
 
+$$ "addr"(r, c) = (c - 1) dot.c R + (r - 1) $$
+
+#+CAPTION: 2x3 matrix A laid out column-major in linear memory (0-based offsets)
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1cm, {
+  import draw: *
+  // 2x3 logical matrix
+  content((1.5, 2.35), [*Logical 2x3 matrix A*])
+  let rows = (("1", "2", "3"), ("4", "5", "6"))
+  for r in range(2) {
+    for c in range(3) {
+      let x = c * 1.0
+      let y = 1.2 - r * 0.8
+      let hl = c == 0
+      rect((x, y), (x + 0.9, y + 0.7),
+        stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+        fill: if hl { rgb("#F2F8F6") } else { white })
+      content((x + 0.45, y + 0.35), text(font: "DejaVu Sans Mono", weight: "bold")[#rows.at(r).at(c)])
+    }
+  }
+
+  // Arrow
+  line((3.15, 1.15), (4.05, 1.15), stroke: 0.9pt + rgb("#1A9988"), mark: (end: ">"))
+
+  // Flat column-major memory
+  content((7.1, 2.35), [*Flat column-major memory*])
+  let flat = ("1", "4", "2", "5", "3", "6")
+  for i in range(6) {
+    let x = 4.2 + i * 0.96
+    let hl = i < 2
+    rect((x, 0.8), (x + 0.9, 1.5),
+      stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+      fill: if hl { rgb("#F2F8F6") } else { white })
+    content((x + 0.45, 1.15), text(font: "DejaVu Sans Mono", weight: "bold")[#flat.at(i)])
+    content((x + 0.45, 0.5), text(font: "DejaVu Sans Mono", size: 7.5pt, fill: luma(90))[+#i])
+  }
+})
+#+END_SRC
+
+Step through =col-major= with *Matrices* open: =A(2)= returns =4= (down column 1) and =A(3)= returns =2= (top of column 2), matching the flat layout ~A(:)' = [1 4 2 5 3 6]~.
+
+#+NAME: col-major
 #+BEGIN_SRC matlab
-A = [1 2; 3 4]
+A = [1 2 3; 4 5 6]
 disp(A(:)')
 disp(A(2))
 disp(A(3))
@@ -19,52 +62,42 @@ disp(A(3))
 #+RESULTS:
 : A =
 :
-: 1  2
-: 3  4
-: 1  3  2  4
-: 3
+: 1  2  3
+: 4  5  6
+: 1  4  2  5  3  6
+: 4
 : 2
 
-Notice =A(2)= is =3= and =A(3)= is =2=. That happens because MATLAB lays =[1 2; 3 4]= out down the first column and then down the second: =[1, 3, 2, 4]=. Hit Step and open the *Matrices* panel to see every element at its flat 0-based address (=(col - 1) * rows + row - 1=) along with its raw 64-bit IEEE 754 hex bytes.
+*Try editing:* reshape =A= into a 3x2 matrix =[1 2; 3 4; 5 6]= and re-run — =A(2)= becomes =3= and =A(3)= becomes =5= because column 1 now has three rows ($R = 3$).
 
-Ranges (=start:step:stop=) build row vectors, and a trailing semicolon suppresses printing:
+* Matrix math, elementwise math, and backslash solving
 
-#+BEGIN_SRC matlab
-v = 1:0.5:3
-disp(v)
-w = 5:-2:1;
-disp(w)
+Bare =*= performs matrix multiplication; dotted =.*= multiplies element by element. Backslash =M \ b= solves $M x = b$ via Gaussian elimination with partial pivoting instead of explicitly inverting $M$. Here one backslash fits the quadratic $p(x) = a + b x + c x^2$ through $(1, 6)$, $(2, 14)$, and $(3, 36)$, yielding $p(x) = 12 - 13x + 7x^2$.
+
+#+CAPTION: Quadratic fit p(x) = 12 - 13x + 7x^2 solved via M \ b
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/lilaq:0.6.0" as lq
+
+#let xs = lq.linspace(0.5, 3.4, num: 50)
+#let ys = xs.map(x => 12 - 13 * x + 7 * x * x)
+
+#lq.diagram(
+  width: 8.5cm, height: 3.8cm,
+  xlabel: [$x$], ylabel: [$p(x)$],
+  legend: (position: top + left),
+  lq.plot(xs, ys, mark: none, stroke: rgb("#1A9988"), label: [$12 - 13x + 7x^2$]),
+  lq.scatter((1, 2, 3), (6, 14, 36), size: (36, 36, 36), color: rgb("#C2553F"), label: [data points]),
+)
 #+END_SRC
 
-#+RESULTS:
-: v =
-:
-:   1  1.5    2  2.5    3
-:   1  1.5    2  2.5    3
-: 5  3  1
-
-* Matrix math vs elementwise math
-
-Bare =*= does matrix multiplication; dotted =.*= multiplies element by element. The same split applies to =/= and =\= (linear solves) vs =./= and =.\= (elementwise division), and =^= vs =.^=. ='= transposes.
-
+#+NAME: matrix-solve
 #+BEGIN_SRC matlab
 A = [1 2; 3 4];
 B = [5 6; 7 8];
 disp(A * B)
 disp(A .* B)
-#+END_SRC
 
-#+RESULTS:
-: 19  22
-: 43  50
-:  5  12
-: 21  32
-
-* Solving =Mx = b= with =\=
-
-Backslash (=M \ b=) runs Gaussian elimination with partial pivoting instead of explicitly inverting =M=. Here one backslash fits a quadratic =p(x) = a + bx + cx^2= through =(1, 6)=, =(2, 14)=, and =(3, 36)=, giving =12 - 13x + 7x^2=. If =M= is singular, both =\= and =inv= stop with an error on that line.
-
-#+BEGIN_SRC matlab
 M = [1 1 1; 1 2 4; 1 3 9];
 b = [6; 14; 36];
 c = M \ b;
@@ -72,66 +105,81 @@ disp(c')
 #+END_SRC
 
 #+RESULTS:
+: 19  22
+: 43  50
+:  5  12
+: 21  32
 :  12  -13    7
 
-* Slicing and deleting rows or columns
+*Try editing:* make row 3 of =M= a copy of row 1 (=[1 1 1; 1 2 4; 1 1 1]=) so $det(M) = 0$ and re-run — =M \ b= halts with a singular-matrix error on that exact line.
 
-Indexing starts at 1, =:= means the whole row or column, and =end= is the length of that dimension. Assigning =[]= to a full row or column deletes it; watch the remaining elements slide to new addresses in the *Matrices* panel when =A(:, 2) = []= runs. Out-of-bounds writes are rejected (preallocate with =zeros=).
+* Slicing, deletion, and value-semantics workspaces
 
-#+BEGIN_SRC matlab
-A = [1 2 3; 4 5 6];
-disp(A(1:2, 2:end))
-disp(A(:, 2))
-disp(A(1, :))
-A(1, :) = [10 20 30];
-A(:, 2) = [];
-disp(A)
-#+END_SRC
+Assigning =[]= to a full row or column deletes it and compacts the remaining entries in *Matrices*. Functions receive arguments *by value* and run in their own private workspace — local variables never leak back into the caller.
 
-#+RESULTS:
-: 2  3
-: 5  6
-: 2
-: 5
-: 1  2  3
-: 10  30
-:  4   6
-
-* Functions get their own workspace
-
-Arguments are passed by value, and local variables inside a function never leak into the script's workspace. Here =y= lives inside =twice= and never shows up next to =v= in the *Workspace* panel. Put a breakpoint on line 3 to see =twice='s private workspace in the *Call stack* panel. Functions can also return multiple outputs (=function [q, r] = divmod(a, b)=).
-
+#+NAME: slice-and-fn
 #+BEGIN_SRC matlab
 function t = twice(x)
   y = x * 2;
   t = y;
 end
+
+A = [1 2 3; 4 5 6];
+A(:, 2) = [];
+disp(A)
+
 v = [1 2 3];
 w = twice(v);
-fprintf('v is still %d %d %d\n', v(1), v(2), v(3));
-fprintf('w is      %d %d %d\n', w(1), w(2), w(3));
+fprintf('v = %d %d %d, w = %d %d %d\n', v(1), v(2), v(3), w(1), w(2), w(3));
 #+END_SRC
 
 #+RESULTS:
-: v is still 1 2 3
-: w is      2 4 6
+: 1  3
+: 4  6
+: v = 1 2 3, w = 2 4 6
 
-=fprintf= accepts literal format strings with =%d=, =%.Nf=, =%%=, and =\n= (strings are display-only in this dialect).
+*Try editing:* set a breakpoint on line 2 (~y = x * 2;~) and click *Run* — *Call stack* shows =twice='s private frame and *Workspace* shows =x= and =y= isolated from =v=. Step past ~A(:, 2) = []~ and watch =3= and =6= slide to flat offsets =+2= and =+3= in *Matrices*.
 
-* Loops vs vectorization
+* Loops walk *columns* (watch the *Columns* panel)
 
-In MATLAB, =for c = A= loops over the *columns* of =A= (=[1; 4]=, then =[2; 5]=, then =[3; 6]=). Both approaches below print =21=, but =sum(sum(A))= pushes the whole walk into builtins instead of stepping through every loop iteration in the interpreter. (=sum(A)= sums down columns; =sum(A, 2)= sums across rows.)
+One of MATLAB's classic surprises: ~for c = A~ iterates over the *columns* of =A= (=[1; 4]=, then =[2; 5]=, then =[3; 6]=), never the rows or individual scalars. Step through =loop-columns= with the *Columns* panel open to watch the current column index, shape, and column-major memory start address update on every pass.
 
+#+NAME: loop-columns
 #+BEGIN_SRC matlab
 A = [1 2 3; 4 5 6];
 s = 0;
 for c = A
   s = s + sum(c);
 end
-fprintf('loop total:      %d\n', s);
+fprintf('loop total:       %d\n', s);
 fprintf('vectorized total: %d\n', sum(sum(A)));
 #+END_SRC
 
 #+RESULTS:
-: loop total:      21
+: loop total:       21
 : vectorized total: 21
+
+*Try editing:* replace ~for c = A~ with ~for c = A'~ (transposed!) and step through *Columns* — the loop now takes only 2 passes (columns of $A^T$ are the rows of $A$), still summing to =21=.
+
+* Exercise: sum only the second row of =A=
+
+Print the sum of the second row of =A = [1 2 3; 4 5 6]=, which is $4 + 5 + 6 = 15$.
+
+#+NAME: ex-row-sum
+#+EXERCISE: Print the sum of row 2 of A (15)
+#+CHECK: 15
+#+BEGIN_SRC matlab
+A = [1 2 3; 4 5 6];
+disp(sum(A(1, :)))
+#+END_SRC
+
+#+BEGIN_HINT
+Slice the entire second row with =A(2, :)= and pass it to =sum(...)=.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC matlab
+A = [1 2 3; 4 5 6];
+disp(sum(A(2, :)))
+#+END_SRC
+#+END_SOLUTION

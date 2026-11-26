@@ -1,16 +1,46 @@
 #+TITLE: SQL, Row by Row
-#+SUBTITLE: Watch table scans, nested-loop joins, grouping, sorting, and NULL logic run one row at a time
+#+SUBTITLE: Watch table scans, nested-loop joins, grouping, sorting, and NULL logic execute one row at a time
 
-SQL lets you write what you want (=WHERE age >= 30=) instead of writing a loop, but the database still runs a loop under the covers. This page runs a small TypeScript SQL engine (=CREATE TABLE=, =INSERT=, =SELECT= over =INTEGER= and =TEXT=) where every Step is literally one row operation.
+SQL is declarative — you write *what* rows you want rather than writing a loop — yet the database still runs a pipeline of iterators underneath. Every *Step* on this page executes one row operation and updates four live panels: *Plan* (each operator's =seen / passed / emitted= counters), *Current row*, *Tables*, and *Results*.
 
-* Scans, filters, and projections
+* Pipelines: Scan -> Filter -> Project
 
-Step through the query below with the *Plan* panel open. Each operator shows *seen / passed / emitted* counters: =Scan users= reads all 5 rows (=5/5/5=), =Filter age >= 30= keeps 2 (=5/2/2=), and =Project= outputs 2 (=2/2/2=). Notice =eve= is left out because her age is =NULL=, and =NULL >= 30= is unknown, not true.
+When you step through a =SELECT ... WHERE= query, rows flow upward from the table scan through the filter predicate to the projection. Watch *Plan* as =Scan users= reads all 5 rows (=5/5/5=), ~Filter age >= 30~ passes 2 (=5/2/2=), and =Project= emits 2 (=2/2/2=).
+
+#+CAPTION: Row-flow operator pipeline with seen / passed / emitted counts
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let op(pos, title, sub, hl: false) = node(
+  pos,
+  [*#title* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[#sub]],
+  shape: rect, inset: 6pt, width: 102pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+  fill: if hl { rgb("#F2F8F6") } else { white },
+)
+
+#diagram(
+  spacing: (16pt, 10pt),
+  op((0, 0), [Scan users], [5 / 5 / 5]),
+  op((1.65, 0), [Filter age >= 30], [5 / 2 / 2], hl: true),
+  op((3.3, 0), [Project name, age], [2 / 2 / 2]),
+  edge((0, 0), (1.65, 0), "->", stroke: 0.8pt + rgb("#1A9988"), label: [#text(size: 8pt)[5 rows]], label-fill: white),
+  edge((1.65, 0), (3.3, 0), "->", stroke: 0.8pt + rgb("#1A9988"), label: [#text(size: 8pt)[2 rows]], label-fill: white),
+)
+#+END_SRC
+
+Notice =eve= (whose =age= is =NULL=) is dropped by =Filter=: in SQL's three-valued logic, ~NULL >= 30~ evaluates to *unknown*, not true.
 
 #+NAME: select-where
 #+BEGIN_SRC sql
 CREATE TABLE users (id INTEGER, name TEXT, city TEXT, age INTEGER);
-INSERT INTO users VALUES (1, 'alice', 'HK', 34), (2, 'Bob', 'HK', 27), (3, 'carol', 'SF', 41), (4, 'dave', 'SF', 19), (5, 'eve', 'NY', NULL);
+INSERT INTO users VALUES
+  (1, 'alice', 'HK', 34),
+  (2, 'Bob', 'HK', 27),
+  (3, 'carol', 'SF', 41),
+  (4, 'dave', 'SF', 19),
+  (5, 'eve', 'NY', NULL);
 SELECT name, age FROM users WHERE age >= 30;
 #+END_SRC
 
@@ -22,9 +52,40 @@ SELECT name, age FROM users WHERE age >= 30;
 :  alice | 34  
 :  carol | 41  
 
-* Nested-loop joins
+*Try editing:* change ~WHERE age >= 30~ to ~WHERE NOT (age >= 30)~ and re-run — =eve= is *still* missing because =NOT unknown= is still =unknown=! Use =WHERE age IS NULL= to find her.
 
-This engine joins tables with a plain nested loop so the cost is visible: for every row from =users=, it scans every row of =orders= and tests the =ON= condition. With 3 users and 3 orders, =NestedLoop join orders= checks 9 pairs and emits 2 matches (=9/2/2=). Order 12 (=user_id = 9=) matches nobody and gets dropped. When both tables have an =id= column, qualify it as =users.id= or =orders.id= (bare =id= fails as ambiguous).
+* Nested-loop joins and $O(N dot.c M)$ cost
+
+This engine executes =JOIN= as a plain nested loop so the quadratic probe cost is visible on every step. For each of the $N = 3$ rows in =users=, it scans all $M = 3$ rows in =orders=, testing $3 times 3 = 9$ pairs and emitting the 2 that match ~users.id = orders.user_id~.
+
+#+CAPTION: Nested-loop join probing all 3 x 3 = 9 (user, order) pairs
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1cm, {
+  import draw: *
+  let users = ("1: alice", "2: Bob", "3: carol")
+  let orders = ("u=1 ($100)", "u=3 ($60)", "u=9 ($999)")
+  let hits = ((0, 0), (2, 1))
+
+  for c in range(3) {
+    content((2.4 + c * 2.1, 2.75), text(font: "DejaVu Sans Mono", size: 8pt)[#orders.at(c)])
+  }
+  for r in range(3) {
+    let y = 1.9 - r * 0.8
+    content((1.2, y + 0.3), text(font: "DejaVu Sans Mono", size: 8pt)[#users.at(r)], anchor: "east")
+    for c in range(3) {
+      let x = 1.45 + c * 2.1
+      let hit = hits.contains((r, c))
+      rect((x, y), (x + 1.9, y + 0.62),
+        stroke: 0.8pt + if hit { rgb("#1A9988") } else { luma(180) },
+        fill: if hit { rgb("#F2F8F6") } else { white })
+      content((x + 0.95, y + 0.31), text(size: 8pt, fill: if hit { rgb("#1A9988") } else { luma(140) })[#if hit { "match" } else { "skip" }])
+    }
+  }
+})
+#+END_SRC
 
 #+NAME: nested-loop-join
 #+BEGIN_SRC sql
@@ -32,7 +93,8 @@ CREATE TABLE users (id INTEGER, name TEXT);
 INSERT INTO users VALUES (1, 'alice'), (2, 'Bob'), (3, 'carol');
 CREATE TABLE orders (id INTEGER, user_id INTEGER, total INTEGER);
 INSERT INTO orders VALUES (10, 1, 100), (11, 3, 60), (12, 9, 999);
-SELECT users.name, orders.total FROM users JOIN orders ON users.id = orders.user_id;
+SELECT users.name, orders.total
+  FROM users JOIN orders ON users.id = orders.user_id;
 #+END_SRC
 
 #+RESULTS:
@@ -45,16 +107,20 @@ SELECT users.name, orders.total FROM users JOIN orders ON users.id = orders.user
 :  alice | 100   
 :  carol | 60    
 
-Because nested loops scale as =N * M= (two 200-row tables take 40,000 probes), runs cap out at 100,000 row operations and stop with a line-numbered error instead of freezing your tab.
+*Try editing:* set a breakpoint on line 5 and step through *Plan* to watch =NestedLoop= count up to =9/2/2=. Then add a fourth order =(13, 2, 45)= and re-run to see probes jump from =9= to =12= ($3 times 4$). Try removing =users.= from =users.id= to see the engine reject the ambiguous column name.
 
-* =GROUP BY= and =HAVING=
+* =GROUP BY=, =HAVING=, and the grouping rule
 
-=GROUP BY city= folds rows into per-city buckets one step at a time while updating =COUNT=, =SUM=, =AVG=, =MIN=, and =MAX=. Watch *Current row* as each row gets folded in. Once folding finishes, =HAVING= filters the finished groups (while =WHERE= filters raw rows before grouping).
+=WHERE= filters raw rows *before* grouping; =GROUP BY= folds rows into per-key buckets one step at a time while updating =COUNT=, =SUM=, =AVG=, =MIN=, and =MAX=; =HAVING= filters the finished groups afterward.
 
 #+NAME: group-by
 #+BEGIN_SRC sql
 CREATE TABLE users (id INTEGER, name TEXT, city TEXT, age INTEGER);
-INSERT INTO users VALUES (1, 'alice', 'HK', 34), (2, 'Bob', 'HK', 27), (3, 'carol', 'SF', 41), (4, 'dave', 'SF', 19);
+INSERT INTO users VALUES
+  (1, 'alice', 'HK', 34),
+  (2, 'Bob', 'HK', 27),
+  (3, 'carol', 'SF', 41),
+  (4, 'dave', 'SF', 19);
 SELECT city, COUNT(*), AVG(age) FROM users GROUP BY city;
 SELECT city, COUNT(*) FROM users GROUP BY city HAVING COUNT(*) > 1 AND AVG(age) > 30;
 #+END_SRC
@@ -71,29 +137,18 @@ SELECT city, COUNT(*) FROM users GROUP BY city HAVING COUNT(*) > 1 AND AVG(age) 
 : ------+----------
 :  HK   | 2        
 
-Any non-aggregated column in =SELECT= must also be in =GROUP BY=. Otherwise SQL would have to guess which =name= to pick out of a multi-row group. Line 3 below fails before reading a single row (the =INSERT= on line 2 still ran first):
+*Try editing:* change =SELECT city, COUNT(*)= on line 7 to =SELECT name, COUNT(*)= and run — SQL rejects the query before scanning a single row because =name= is neither grouped nor aggregated. Wrap it as =MIN(name)= to fix it.
 
-#+NAME: grouping-rule
-#+BEGIN_SRC sql
-CREATE TABLE users (id INTEGER, name TEXT, city TEXT, age INTEGER);
-INSERT INTO users VALUES (1, 'alice', 'HK', 34), (2, 'Bob', 'SF', 27);
-SELECT name, COUNT(*) FROM users GROUP BY city;
-#+END_SRC
+* Sorting, =LIMIT=, and =LIKE=
 
-#+RESULTS:
-: INSERT 0 2
+=ORDER BY= runs a stable merge sort where each comparison is one step (numbers numerically, text in ASCII order with uppercase before lowercase, =NULL= last), and =LIMIT= halts the pipeline early once enough rows have been emitted.
 
-Wrap =name= in =MIN(name)= or add it to =GROUP BY= to fix it.
-
-* =ORDER BY= and =LIMIT=
-
-Sorting runs a stable merge sort where each comparison is one step. =INTEGER= columns sort numerically, =TEXT= columns sort in ASCII order (uppercase before lowercase), and =NULL=s sort last. =LIMIT 3= stops after emitting three rows.
-
-#+NAME: order-limit
+#+NAME: order-limit-like
 #+BEGIN_SRC sql
 CREATE TABLE scores (player TEXT, points INTEGER);
 INSERT INTO scores VALUES ('alice', 7), ('Bob', 12), ('carol', 12), ('dave', 3);
 SELECT player, points FROM scores ORDER BY points DESC, player LIMIT 3;
+SELECT player FROM scores WHERE player LIKE '%a%';
 #+END_SRC
 
 #+RESULTS:
@@ -104,35 +159,42 @@ SELECT player, points FROM scores ORDER BY points DESC, player LIMIT 3;
 :  Bob    | 12     
 :  carol  | 12     
 :  alice  | 7      
+: 
+:  player 
+: --------
+:  alice  
+:  carol  
+:  dave   
 
-* =NULL= and =LIKE=
+* Exercise: high-value orders by city
 
-=NULL= means unknown, not zero or empty string. Comparing =NULL= with =>=, ===, or =!= gives unknown, and =WHERE= drops anything that is not true (even =NOT (age > 25)= drops Bob). Use =IS NULL= or =IS NOT NULL= to match missing values. Aggregates skip =NULL=s (=COUNT(*)= counts rows; =COUNT(age)= counts non-null ages).
+Write a query over =users= and =orders= that joins them, groups by =users.city=, and keeps only cities whose total spend =SUM(orders.total)= is at least =100=. Step through *Plan* to verify the operator order: =Scan= -> =NestedLoop= -> =Group= -> =Having= -> =Project=.
 
-The last query uses =LIKE=: =%= matches any run of characters, =_= matches one character, and matching is case-sensitive.
-
-#+NAME: null-and-like
+#+NAME: ex-city-spend
+#+EXERCISE: Join users and orders, group by city, and filter HAVING SUM(orders.total) >= 100
 #+BEGIN_SRC sql
-CREATE TABLE users (name TEXT, city TEXT, age INTEGER);
-INSERT INTO users VALUES ('alice', 'HK', 34), ('Bob', 'HK', NULL), ('carol', 'SF', 28);
-SELECT name FROM users WHERE age IS NULL;
-SELECT name FROM users WHERE age > 25;
-SELECT name FROM users WHERE name LIKE '%o%';
+CREATE TABLE users (id INTEGER, name TEXT, city TEXT);
+INSERT INTO users VALUES (1, 'alice', 'HK'), (2, 'Bob', 'HK'), (3, 'carol', 'SF');
+CREATE TABLE orders (id INTEGER, user_id INTEGER, total INTEGER);
+INSERT INTO orders VALUES (10, 1, 70), (11, 2, 50), (12, 3, 60);
+-- Edit the query below so only HK (total 120) is returned:
+SELECT users.city, orders.total
+  FROM users JOIN orders ON users.id = orders.user_id;
 #+END_SRC
 
-#+RESULTS:
-: INSERT 0 3
-: 
-:  name 
-: ------
-:  Bob  
-: 
-:  name  
-: -------
-:  alice 
-:  carol 
-: 
-:  name  
-: -------
-:  Bob   
-:  carol 
+#+BEGIN_HINT
+Join on ~users.id = orders.user_id~, add =GROUP BY users.city=, and filter groups with ~HAVING SUM(orders.total) >= 100~.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC sql
+CREATE TABLE users (id INTEGER, name TEXT, city TEXT);
+INSERT INTO users VALUES (1, 'alice', 'HK'), (2, 'Bob', 'HK'), (3, 'carol', 'SF');
+CREATE TABLE orders (id INTEGER, user_id INTEGER, total INTEGER);
+INSERT INTO orders VALUES (10, 1, 70), (11, 2, 50), (12, 3, 60);
+SELECT users.city, SUM(orders.total)
+  FROM users JOIN orders ON users.id = orders.user_id
+  GROUP BY users.city
+  HAVING SUM(orders.total) >= 100;
+#+END_SRC
+#+END_SOLUTION

@@ -1,23 +1,55 @@
 #+TITLE: Lisp from Cons Cells Up
-#+SUBTITLE: Cons pairs, quoting, tail calls, closures, and macros on a steppable Scheme interpreter
+#+SUBTITLE: Cons-cell heap addresses, tail-call frame reuse, closures, and macros on a steppable Scheme interpreter
 
-* Cons cells and the heap
+Every value in this pure-TypeScript Scheme interpreter is either an atom (number, symbol, ~#t~ / ~#f~, string, ='()=) or a *cons cell* — a two-slot pair =(car . cdr)= allocated at a fixed heap address. Click *Step* or set gutter breakpoints to inspect *Heap* (every allocated cell at =0x0000=, =0x0010=, ...), *Environment* frames, *Control stack*, and *Output*.
 
-Every value in this Lisp is either an atom (number, symbol, =#t=/=#f=, string, ='()=) or a *cons cell*, which is just a pair of two slots called =car= and =cdr=. A list like =(1 2)= is nothing more than =(cons 1 (cons 2 '()))=.
+* Cons cells and pointer identity
 
-Run the block below and look at the *Heap* panel. Each cell gets a fixed address (=0x0000=, =0x0010=, ...). =(cons 2 '())= allocates the first cell, and =(cons 1 ...)= allocates a second cell whose =cdr= points to it. (The heap caps at 4,096 cells with no garbage collector.) When a cell's =cdr= is not another list, it prints as a dotted pair like =(1 . 2)=.
+A proper list like =(1 2)= is just a chain of cons cells ending in ='()=: =(cons 1 (cons 2 '()))=. When the final =cdr= is another atom instead of ='()=, Lisp prints a dotted pair like =(1 . 2)=.
+
+#+CAPTION: Box-and-pointer heap layout of (1 2) versus dotted pair (1 . 2)
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1cm, {
+  import draw: *
+  // Proper list (1 2)
+  content((2.6, 2.2), [*Proper list (1 2)*])
+  // Cell 0x0010
+  rect((0.2, 1.1), (1.1, 1.8), stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
+  rect((1.1, 1.1), (2.0, 1.8), stroke: 0.8pt + rgb("#1A9988"), fill: white)
+  content((0.65, 1.45), text(font: "DejaVu Sans Mono", weight: "bold")[1])
+  content((1.1, 0.8), text(font: "DejaVu Sans Mono", size: 7.5pt, fill: luma(90))[0x0010])
+  line((1.55, 1.45), (2.95, 1.45), stroke: 0.8pt + rgb("#1A9988"), mark: (end: ">"))
+  // Cell 0x0000
+  rect((3.0, 1.1), (3.9, 1.8), stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
+  rect((3.9, 1.1), (4.8, 1.8), stroke: 0.8pt + rgb("#1A9988"), fill: white)
+  content((3.45, 1.45), text(font: "DejaVu Sans Mono", weight: "bold")[2])
+  content((4.35, 1.45), text(font: "DejaVu Sans Mono", size: 8pt)[()])
+  content((3.9, 0.8), text(font: "DejaVu Sans Mono", size: 7.5pt, fill: luma(90))[0x0000])
+
+  // Dotted pair (1 . 2)
+  content((7.4, 2.2), [*Dotted pair (1 . 2)*])
+  rect((6.3, 1.1), (7.2, 1.8), stroke: 0.8pt + rgb("#C2553F"), fill: rgb("#FDF3F1"))
+  rect((7.2, 1.1), (8.1, 1.8), stroke: 0.8pt + rgb("#C2553F"), fill: rgb("#FDF3F1"))
+  content((6.75, 1.45), text(font: "DejaVu Sans Mono", weight: "bold")[1])
+  content((7.65, 1.45), text(font: "DejaVu Sans Mono", weight: "bold")[2])
+  content((7.2, 0.8), text(font: "DejaVu Sans Mono", size: 7.5pt, fill: luma(90))[0x0020])
+})
+#+END_SRC
+
+Run =cons-101= and look at *Heap*: =(cons 2 '())= allocates cell =0x0000= first, then =(cons 1 ...)= allocates =0x0010= pointing to =0x0000=.
 
 #+NAME: cons-101
 #+BEGIN_SRC lisp
 (define lst (cons 1 (cons 2 '())))
-(display (car lst))
-(newline)
-(display (cdr lst))
-(newline)
-(display lst)
-(newline)
-(display (cons 1 2))
-(newline)
+(display (car lst)) (newline)
+(display (cdr lst)) (newline)
+(display lst) (newline)
+(display (cons 1 2)) (newline)
+(display (eq? (list 1 2) (list 1 2))) (newline)
+(display (equal? (list 1 2) (list 1 2))) (newline)
 #+END_SRC
 
 #+RESULTS:
@@ -25,30 +57,38 @@ Run the block below and look at the *Heap* panel. Each cell gets a fixed address
 : (2)
 : (1 2)
 : (1 . 2)
+: #f
+: #t
 
-* Quote and quasiquote
+*Try editing:* =eq?= compares heap addresses (so two fresh =(list 1 2)= allocations are =#f=), whereas =equal?= walks both trees structurally (=#t=). Test =(define b (cdr lst)) (eq? b (cdr lst))= to see structural sharing return =#t=.
 
-Prefixing a form with ='= stops Lisp from evaluating it and hands you the list structure itself. Quasiquote (backquote) does the same thing except you can unquote pieces inside it: =,= evaluates a single expression, and =,@= evaluates a list and splices its elements in. Step through the block to watch the interpreter expand quasiquote into regular =cons= and =append= calls on the *Control stack*.
+* Tail calls vs growing the *Control stack*
 
-#+NAME: quote-vs-quasiquote
-#+BEGIN_SRC lisp
-(display '(1 2 3))
-(newline)
-(define x 10)
-(display `(x is ,x and doubled is ,(* 2 x)))
-(newline)
-(display `(start ,@(list 1 2 3) end))
-(newline)
+In =fact=, the outer multiplication =(* n ...)= must wait for =(fact (- n 1))= to return, so every recursive call pushes a pending continuation frame onto *Control stack* ($O(n)$ space). In =sum-to=, the recursive call is the very last operation (tail position), so the interpreter reuses the current frame in $O(1)$ space.
+
+#+CAPTION: Non-tail recursion stacks waiting multiply frames; tail recursion reuses one frame
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let frame(pos, body, warn: false) = node(
+  pos, body, shape: rect, inset: 5pt, width: 108pt,
+  stroke: 0.8pt + if warn { rgb("#C2553F") } else { rgb("#1A9988") },
+  fill: if warn { rgb("#FDF3F1") } else { rgb("#F2F8F6") },
+)
+
+#diagram(
+  spacing: (22pt, 9pt),
+  frame((0, 0), text(font: "DejaVu Sans Mono", size: 8pt)[(\* 3 ...)], warn: true),
+  frame((0, 0.85), text(font: "DejaVu Sans Mono", size: 8pt)[(\* 2 ...)], warn: true),
+  frame((0, 1.7), text(font: "DejaVu Sans Mono", size: 8pt)[(\* 1 ...) -> O(n)], warn: true),
+  edge((0, 0), (0, 0.85), "->", stroke: 0.7pt + rgb("#C2553F")),
+  edge((0, 0.85), (0, 1.7), "->", stroke: 0.7pt + rgb("#C2553F")),
+
+  frame((2.1, 0.85), text(font: "DejaVu Sans Mono", size: 8pt)[(sum-to n acc) -> O(1)]),
+  edge((2.1, 0.85), (2.1, 0.85), "->", bend: 120deg, stroke: 0.9pt + rgb("#1A9988"), label: [#text(size: 8pt)[reuse frame]], label-fill: white),
+)
 #+END_SRC
-
-#+RESULTS:
-: (1 2 3)
-: (x is 10 and doubled is 20)
-: (start 1 2 3 end)
-
-* Tail calls vs growing the stack
-
-Compare =sum-to= and =fact= below with the *Control stack* panel open. =fact= still has to multiply by =n= after =(fact (- n 1))= returns, so every call leaves a waiting frame on the stack. =sum-to= finishes by calling itself in tail position, so the interpreter reuses the current frame instead of stacking a new one. That is why =(sum-to 100000 0)= runs in flat O(1) stack space. (Total reductions cap at 1,000,000 so infinite recursion stops cleanly.)
 
 #+NAME: tail-calls
 #+BEGIN_SRC lisp
@@ -56,23 +96,24 @@ Compare =sum-to= and =fact= below with the *Control stack* panel open. =fact= st
   (if (= n 0)
       acc
       (sum-to (- n 1) (+ n acc))))
-(display (sum-to 100000 0))
-(newline)
+(display (sum-to 100000 0)) (newline)
+
 (define (fact n)
   (if (= n 0)
       1
       (* n (fact (- n 1)))))
-(display (fact 10))
-(newline)
+(display (fact 10)) (newline)
 #+END_SRC
 
 #+RESULTS:
 : 5000050000
 : 3628800
 
-* Closures
+*Try editing:* set a breakpoint on line 10 (=* n (fact (- n 1))=) and click *Run* repeatedly to watch *Control stack* grow deeper on every recursive call, then contrast it with a breakpoint on line 4 where the stack depth never grows.
 
-Every =lambda= hangs on to the environment where it was created. Calling =make-counter= twice creates two separate =let= frames, each with its own =n=, so =a= and =b= count independently. Open the *Environment* panel while stepping to watch the scope chain (=a -> let -> make-counter -> global=) and see =set!= mutate =n=.
+* Lexical closures and private environments
+
+Every =lambda= closes over the environment frame where it was created. Calling =make-counter= twice allocates two independent =let= frames, so =a= and =b= mutate separate =n= bindings.
 
 #+NAME: closures
 #+BEGIN_SRC lisp
@@ -82,32 +123,29 @@ Every =lambda= hangs on to the environment where it was created. Calling =make-c
 (define a (make-counter))
 (define b (make-counter))
 (a) (a)
-(display (list (a) (b)))
-(newline)
+(display (list (a) (b))) (newline)
 #+END_SRC
 
 #+RESULTS:
 : (3 1)
 
-By the way, =eq?= compares heap addresses (so =(eq? (list 1 2) (list 1 2))= is =#f=), while =equal?= walks both lists and compares values (=#t=).
+*Try editing:* step through =(a)= and =(b)= to watch the environment chain in the panel point to two distinct =let= frames. Compare this with [[file:elisp.org][Emacs Lisp's dynamic vs lexical binding]].
 
-* Macros rewrite syntax before evaluation
+* Quasiquote and syntax-rewriting macros
 
-A macro receives its arguments unevaluated and returns new code for the evaluator to run. =my-if= rewrites itself into =cond=, and =swap!= expands into a =let= block that swaps two variables in place (using an unhygienic local named =tmp=). Call =macroexpand-1= to see the rewritten form without executing it.
+A macro receives its arguments *unevaluated* as cons lists and returns new code for the evaluator to run. Quasiquote (=`=) builds templates where =,= inserts one evaluated value and =,@= splices a list. =macroexpand-1= shows the generated code without executing it.
 
 #+NAME: macros
 #+BEGIN_SRC lisp
 (define-macro (my-if c t e) `(cond (,c ,t) (else ,e)))
-(display (macroexpand-1 '(my-if (= 1 1) 'yes 'no)))
-(newline)
-(display (my-if (= 1 2) 'yes 'no))
-(newline)
+(display (macroexpand-1 '(my-if (= 1 1) 'yes 'no))) (newline)
+(display (my-if (= 1 2) 'yes 'no)) (newline)
+
 (define-macro (swap! x y) `(let ((tmp ,x)) (set! ,x ,y) (set! ,y tmp)))
 (define p 1)
 (define q 2)
 (swap! p q)
-(display (list p q))
-(newline)
+(display (list p q)) (newline)
 #+END_SRC
 
 #+RESULTS:
@@ -115,4 +153,27 @@ A macro receives its arguments unevaluated and returns new code for the evaluato
 : no
 : (2 1)
 
-Try running =(append '(1 2) '(3 4))= and testing with =eq?= whether the tail list is shared, or write your own macro and inspect it with =macroexpand-1=.
+*Try editing:* rename =p= to =tmp= and call =(swap! tmp q)= — watch classic unhygienic variable capture break the swap because =swap!='s internal =tmp= shadows the caller's =tmp=!
+
+* Exercise: splice a list with quasiquote
+
+Use quasiquote (=`=) and unquote-splicing (=,@=) to splice =mid= inside =(10 ... 40)= so the block prints =(10 20 30 40)=.
+
+#+NAME: ex-splice
+#+EXERCISE: Splice mid into (10 20 30 40) using ,@
+#+CHECK: (10 20 30 40)
+#+BEGIN_SRC lisp
+(define mid (list 20 30))
+(display `(10 ,mid 40)) (newline)
+#+END_SRC
+
+#+BEGIN_HINT
+Replace =,mid= with =,@mid= so =(20 30)= is spliced flat instead of nested as =(10 (20 30) 40)=.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC lisp
+(define mid (list 20 30))
+(display `(10 ,@mid 40)) (newline)
+#+END_SRC
+#+END_SOLUTION

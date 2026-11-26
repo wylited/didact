@@ -1,23 +1,22 @@
 #+TITLE: JavaScript, Stepped Live
-#+SUBTITLE: Coercion, [[file:lisp.org::*Closures][closures]], hoisting, and the event loop on a small steppable JS interpreter
+#+SUBTITLE: Type coercion, var vs let closures, hoisting/TDZ, and the event loop on a steppable JS interpreter
 
-This page runs a hand-written JavaScript interpreter instead of your browser's engine, so you can single-step through statements and watch *Scopes*, *Call stack*, and *Event loop* update live. It supports =var=/=let=/=const=, functions, arrows, loops, =Math=, =console=, and basic array/string methods. Classes, =this=, and =async=/=await= are rejected up front with a line number.
+This page runs a hand-written JavaScript interpreter instead of your browser's opaque engine so you can single-step every statement, drop gutter breakpoints, and watch *Scopes*, *Call stack*, *Event loop*, and *console* update live.
 
-* Why =[]= == =false=
+* Abstract equality (~==~) vs strict equality (~===~)
 
-=== checks type and value without converting anything. == coerces operands until their types match, which is how an empty array ends up equal to =false=: =[]= turns into =''=, =''= turns into =0=, and =false= turns into =0=.
+~===~ checks type and value without conversion. ~==~ coerces operands step by step until their types match, which is how ~[] == false~ evaluates to =true=: =[]= coerces to =''=, =''= coerces to =0=, and =false= coerces to =0=.
 
-| Expression          | What == actually does               | Result |
+| Expression          | Coercion steps                      | Result |
 |---------------------+-------------------------------------+--------|
-| ='' == 0=           | =''= becomes =0=                    | true   |
-| ='1' == 1=          | ='1'= becomes =1=                   | true   |
-| =[] == false=       | =[]= -> =''= -> =0=, =false= -> =0= | true   |
-| =null == undefined= | special case in the spec            | true   |
-| =NaN == NaN=        | =NaN= never equals anything         | false  |
-| =[] === false=      | different types, no coercion        | false  |
+| ~'' == 0~           | =''= -> =0=                         | true   |
+| ~'1' == 1~          | ='1'= -> =1=                        | true   |
+| ~[] == false~       | =[]= -> =''= -> =0=, =false= -> =0= | true   |
+| ~null == undefined~ | spec special case                   | true   |
+| ~NaN == NaN~        | =NaN= never equals itself           | false  |
+| ~[] === false~      | different types, no coercion        | false  |
 
-Step through the calls below to see each row in action.
-
+#+NAME: coercion
 #+BEGIN_SRC javascript
 console.log('' == 0, '1' == 1);
 console.log([] == false, [] == 0, [7] == 7);
@@ -33,10 +32,52 @@ console.log([] === false, '1' === 1);
 : false false
 : false false
 
-* Closures hold bindings, not copies
+*Try editing:* add ~console.log([] == ![]);~ and run it — =![]= is =false= (arrays are truthy), reducing the check to ~[] == false~.
 
-A function remembers the scope slot a variable lives in, not the value it happened to hold when the function was defined. In the =var i= loop there is only one =i= for the whole scope, so all three functions read =3= after the loop finishes. With =let j=, each iteration gets its own slot, so they return =0=, =1=, =2=.
+* Closures capture bindings, not snapshots
 
+A closure holds a reference to the environment slot where a variable lives, not a copy of its value. A ~for (var i = ...)~ loop allocates *one* shared =i= slot for the entire enclosing scope, whereas ~for (let j = ...)~ allocates a fresh =j= slot on every iteration.
+
+#+CAPTION: Shared var i slot versus per-iteration let j slots captured by loop closures
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let fn(pos, body) = node(
+  pos, body, shape: rect, inset: 5pt, width: 66pt,
+  stroke: 0.8pt + luma(130), fill: white,
+)
+#let slot(pos, body, warn: false) = node(
+  pos, body, shape: rect, inset: 6pt, width: 66pt,
+  stroke: 0.9pt + if warn { rgb("#C2553F") } else { rgb("#1A9988") },
+  fill: if warn { rgb("#FDF3F1") } else { rgb("#F2F8F6") },
+)
+
+#diagram(
+  spacing: (16pt, 10pt),
+  fn((0, 0), text(font: "DejaVu Sans Mono", size: 8pt)[withVar[0]]),
+  fn((0, 0.85), text(font: "DejaVu Sans Mono", size: 8pt)[withVar[1]]),
+  fn((0, 1.7), text(font: "DejaVu Sans Mono", size: 8pt)[withVar[2]]),
+  slot((1.4, 0.85), text(font: "DejaVu Sans Mono", weight: "bold")[var i = 3], warn: true),
+  edge((0, 0), (1.4, 0.85), "->", stroke: 0.8pt + rgb("#C2553F")),
+  edge((0, 0.85), (1.4, 0.85), "->", stroke: 0.8pt + rgb("#C2553F")),
+  edge((0, 1.7), (1.4, 0.85), "->", stroke: 0.8pt + rgb("#C2553F")),
+
+  fn((2.9, 0), text(font: "DejaVu Sans Mono", size: 8pt)[withLet[0]]),
+  fn((2.9, 0.85), text(font: "DejaVu Sans Mono", size: 8pt)[withLet[1]]),
+  fn((2.9, 1.7), text(font: "DejaVu Sans Mono", size: 8pt)[withLet[2]]),
+  slot((4.3, 0), text(font: "DejaVu Sans Mono", weight: "bold")[let j = 0]),
+  slot((4.3, 0.85), text(font: "DejaVu Sans Mono", weight: "bold")[let j = 1]),
+  slot((4.3, 1.7), text(font: "DejaVu Sans Mono", weight: "bold")[let j = 2]),
+  edge((2.9, 0), (4.3, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((2.9, 0.85), (4.3, 0.85), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((2.9, 1.7), (4.3, 1.7), "->", stroke: 0.8pt + rgb("#1A9988")),
+)
+#+END_SRC
+
+Set a breakpoint on line 9 and click *Run* to inspect *Scopes*: =i= is already =3= in the outer scope, while each =withLet= function closed over its own =j=.
+
+#+NAME: closures
 #+BEGIN_SRC javascript
 var withVar = [];
 for (var i = 0; i < 3; i = i + 1) {
@@ -54,12 +95,13 @@ console.log(withLet[0](), withLet[1](), withLet[2]());
 : 3 3 3
 : 0 1 2
 
-Put a breakpoint on line 9 and look at *Scopes*: the =withVar= functions all point to the same =i=, while each =withLet= function has a separate =j=.
+Compare this with [[file:lisp.org][closures in Lisp]] and [[file:cpp.org][C++ value vs reference captures]].
 
 * Hoisting and the temporal dead zone
 
-Before executing line 1 of a scope, the interpreter registers every declaration in that scope. =var= bindings start out as =undefined=, and =function= declarations are immediately callable. =let= and =const= are registered too, but stay unreadable until their declaration line runs; touching =later= on line 5 throws =Cannot access 'later' before initialization= and halts the block.
+Before line 1 runs, the interpreter registers every declaration in the scope. =var= starts out =undefined= and =function= declarations are immediately callable. =let= and =const= are registered too, but stay in the *temporal dead zone* until their declaration executes — reading =later= on line 5 throws before line 6 runs.
 
+#+NAME: hoisting-tdz
 #+BEGIN_SRC javascript
 console.log(hoistedVar, typeof hoistedFn);
 var hoistedVar = 'now set';
@@ -73,12 +115,39 @@ let later = 'never reached';
 : undefined function
 : now set callable before its line
 
-Step from the very first line and watch =hoistedVar= show up in *Scopes* before line 1 executes.
+*Try editing:* step once from line 1 and look at *Scopes* — =hoistedVar= is already listed as =undefined= before line 2 executes. Now move ~let later = 'now safe';~ above line 5 and re-run to eliminate the TDZ error.
 
-* Event loop order: sync, microtasks, macrotasks
+* Event loop order: sync -> microtasks -> macrotasks
 
-Top-level synchronous code runs to completion first. Once it finishes, the engine drains the entire microtask queue (=Promise.resolve().then(...)=) before taking a single macrotask (=setTimeout(..., 0)=). That is why =3 microtask= always beats =4 macrotask= even when the timeout is =0=.
+Synchronous top-level code runs to completion first. Next, the engine drains the *entire* microtask queue (=Promise.resolve().then(...)=) before taking a single macrotask (=setTimeout(..., 0)=).
 
+#+CAPTION: Event loop priority: synchronous stack, then full microtask drain, then next macrotask
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let q(pos, title, sub, hl: false) = node(
+  pos,
+  [*#title* #linebreak() #text(size: 8pt)[#sub]],
+  shape: rect, inset: 6pt, width: 102pt,
+  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+  fill: if hl { rgb("#F2F8F6") } else { white },
+)
+
+#diagram(
+  spacing: (16pt, 10pt),
+  q((0, 0), [1. Call stack], [sync code to empty]),
+  q((1.7, 0), [2. Microtask queue], [drain ALL Promise.then], hl: true),
+  q((3.4, 0), [3. Macrotask queue], [run ONE setTimeout]),
+  edge((0, 0), (1.7, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((1.7, 0), (3.4, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
+  edge((3.4, 0), (1.7, 0), "->", bend: 38deg, stroke: 0.7pt + luma(130), label: [#text(size: 8pt)[drain again]], label-fill: white),
+)
+#+END_SRC
+
+Set a breakpoint on line 4 and open *Event loop* — both queues are already populated before the synchronous body finishes.
+
+#+NAME: event-loop
 #+BEGIN_SRC javascript
 console.log('1 sync');
 setTimeout(function () { console.log('4 macrotask'); }, 0);
@@ -92,22 +161,31 @@ console.log('2 still sync');
 : 3 microtask
 : 4 macrotask
 
-Set a breakpoint on line 4 and check the *Event loop* panel to see both queues lined up before the body finishes.
+*Try editing:* schedule a second =Promise.resolve().then(...)= *inside* the first microtask and step through *Event loop* — it still runs before ='4 macrotask'=.
 
-* Stepping inside =filter= and =map=
+* Exercise: filter evens, double, and join
 
-Array methods here run inside the interpreter itself, so you can drop a breakpoint inside a callback and watch the *Call stack* push a frame for every element.
+Fix the =filter= callback so it keeps only even numbers, doubles them, and prints =4 · 8 · 12=. Drop a breakpoint inside the callback to watch *Call stack* push a frame per element.
 
+#+NAME: ex-filter-map
+#+EXERCISE: Keep even numbers, double them, and print 4 · 8 · 12
+#+CHECK: 4 · 8 · 12
+#+BEGIN_SRC javascript
+var numbers = [1, 2, 3, 4, 5, 6];
+var evens = numbers.filter(function (n) { return n % 2 !== 0; });
+var doubled = evens.map(function (n) { return n * 2; });
+console.log(doubled.join(' · '));
+#+END_SRC
+
+#+BEGIN_HINT
+Change ~n % 2 !== 0~ to ~n % 2 === 0~.
+#+END_HINT
+
+#+BEGIN_SOLUTION
 #+BEGIN_SRC javascript
 var numbers = [1, 2, 3, 4, 5, 6];
 var evens = numbers.filter(function (n) { return n % 2 === 0; });
 var doubled = evens.map(function (n) { return n * 2; });
-console.log(evens);
-console.log(doubled);
 console.log(doubled.join(' · '));
 #+END_SRC
-
-#+RESULTS:
-: [ 2, 4, 6 ]
-: [ 4, 8, 12 ]
-: 4 · 8 · 12
+#+END_SOLUTION

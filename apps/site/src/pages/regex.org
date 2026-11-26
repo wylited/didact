@@ -1,17 +1,46 @@
 #+TITLE: Regex Without Backtracking
-#+SUBTITLE: Compile patterns to a Thompson NFA and advance every active state together, one character per step
+#+SUBTITLE: Compile patterns to a Thompson NFA and advance the whole active state set, one character per step
 
-* How blocks work
+Every block here starts with a pattern between slashes (=/pattern/=, no flags), followed by one test input per line (=#= lines are comments). Unlike backtracking engines in [[file:javascript.org][JavaScript]] or [[file:python.org][Python]], this kernel compiles the pattern to a *Thompson NFA* and advances the entire set of active states simultaneously. Click *Step* to inspect *The machine* (compiled NFA states), *NFA states* (currently live states), *Input* (character caret and match brackets), *Captures*, and *console*.
 
-The first non-comment line is a pattern between slashes (=/a(b|c)+d/=, no flags), and each line after it is a test input (=#= lines are comments; inputs decode =\n=, =\t=, =\r=, =\f=, =\v=, and =\\=).
+* How a Thompson NFA runs
 
-Instead of backtracking like [[file:javascript.org][JS]] or [[file:python.org][Python]]'s =re=, this engine compiles the regex into a Thompson NFA and tracks the full *set* of active states at every character. Open *The machine* to see the compiled graph, *NFA states* to see which states are currently alive, and *Input* to watch the scan cursor move.
+Instead of guessing one branch and backtracking on failure, a Thompson NFA keeps every reachable state alive at once through $epsilon$-transitions. After reading each character, duplicate states are merged into a set.
 
-Literals match themselves, =.= matches anything except =\n=, character classes like =[a-z]= and =[^0-9]= take no escapes inside =[...]=, and =^=/=$= anchor to the start and end of the whole string.
+#+CAPTION: Thompson NFA for /(a|b)+c/ with epsilon split and loop-back transitions
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let st(pos, body, hl: false) = node(
+  pos, body, shape: circle, inset: 4pt, width: 28pt,
+  stroke: 0.9pt + if hl { rgb("#1A9988") } else { luma(120) },
+  fill: if hl { rgb("#F2F8F6") } else { white },
+)
+
+#diagram(
+  spacing: (18pt, 10pt),
+  st((0, 0.7), [$s_0$], hl: true),
+  st((1.2, 0), [$a$]),
+  st((1.2, 1.4), [$b$]),
+  st((2.4, 0.7), [$s_3$]),
+  st((3.6, 0.7), [$c$]),
+  st((4.8, 0.7), [acc], hl: true),
+  edge((0, 0.7), (1.2, 0), "->", stroke: 0.8pt + luma(120), label: [$epsilon$], label-fill: white),
+  edge((0, 0.7), (1.2, 1.4), "->", stroke: 0.8pt + luma(120), label: [$epsilon$], label-fill: white),
+  edge((1.2, 0), (2.4, 0.7), "->", stroke: 0.8pt + rgb("#1A9988"), label: ['a'], label-fill: white),
+  edge((1.2, 1.4), (2.4, 0.7), "->", stroke: 0.8pt + rgb("#1A9988"), label: ['b'], label-fill: white),
+  edge((2.4, 0.7), (0, 0.7), "->", bend: -42deg, stroke: 0.8pt + rgb("#C2553F"), label: [$epsilon$ (loop)], label-fill: white),
+  edge((2.4, 0.7), (3.6, 0.7), "->", stroke: 0.8pt + luma(120), label: [$epsilon$], label-fill: white),
+  edge((3.6, 0.7), (4.8, 0.7), "->", stroke: 0.9pt + rgb("#1A9988"), label: ['c'], label-fill: white),
+)
+#+END_SRC
+
+Unanchored searches try start positions $0, 1, 2, dots.c$ until one succeeds and keep the longest span from that earliest start (POSIX leftmost-longest). Step through =regex-classes= watching the caret in *Input* advance across =zzabcaz=.
 
 #+NAME: regex-classes
 #+BEGIN_SRC regex
-# leftmost start, longest span — watch the Input panel
+# leftmost start, longest span — watch Input and NFA states
 /[abc]+/
 zzabcaz
 zzz
@@ -21,41 +50,15 @@ zzz
 : match [2,6)
 : no match
 
-Unanchored searches try start positions =0, 1, 2, ...= until one succeeds, keeping the longest match from that earliest start (POSIX leftmost-longest).
+*Try editing:* anchor the pattern to =/^[abc]+/= and re-run — =zzabcaz= immediately flips to =no match= because position 0 is =z=.
 
-#+NAME: regex-anchors
+* Alternation, quantifiers, and capturing groups
+
+Because both sides of =|= stay alive in the same state set, =/a|ab/= and =/ab|a/= always agree on the longest span (unlike JS/Python, where =/a|ab/= stops early at ="a"=). Counted quantifiers like ={2,3}= expand into repeated NFA states that you can see directly in *The machine*.
+
+#+NAME: regex-alt-quant
 #+BEGIN_SRC regex
-/^b.*d$/
-bcd
-bcdex
-xbcd
-#+END_SRC
-
-#+RESULTS:
-: match [0,3)
-: no match
-: no match
-
-Since =.= refuses newlines, =a\nb= fails =/a.b/= while =axb= matches:
-
-#+NAME: regex-dot
-#+BEGIN_SRC regex
-/a.b/
-a\nb
-axb
-#+END_SRC
-
-#+RESULTS:
-: no match
-: match [0,3)
-
-* Alternation and quantifiers
-
-In JS or Python, =/a|ab/= stops at ="a"= because the first branch matched. Here both branches stay alive in the same state set and the longest span wins, so =/a|ab/= and =/ab|a/= always agree.
-
-#+NAME: regex-alt
-#+BEGIN_SRC regex
-/ab|a/
+/a|ab/
 ab
 a
 xab
@@ -66,37 +69,7 @@ xab
 : match [0,1)
 : match [1,3)
 
-Quantifiers include =*=, =+=, =?=, and counted ranges ={n}=, ={n,}=, ={n,m}=. Counted ranges expand into repeated states when compiled (=a{2,3}= becomes =a a a?=), which you can see directly in *The machine* panel. Escape literal braces with =\{=.
-
-#+NAME: regex-quant
-#+BEGIN_SRC regex
-/a{2,3}/
-aaaa
-aa
-a
-#+END_SRC
-
-#+RESULTS:
-: match [0,3)
-: match [0,2)
-: no match
-
-#+NAME: regex-optional
-#+BEGIN_SRC regex
-/colou?r/
-color
-colour
-colr
-#+END_SRC
-
-#+RESULTS:
-: match [0,5)
-: match [0,6)
-: no match
-
-* Capturing groups
-
-=(...)= captures half-open =[start, end)= spans numbered by opening paren; =(?:...)= groups without capturing. Repeated groups like =(ab)+= report their final iteration's span. Step through =regex-groups= with *Captures* open to watch the zero-width open and close marker states fire.
+Capturing groups =(...)= emit zero-width open and close marker states in the NFA. Step through =regex-groups= with *Captures* open to watch group 1 and group 2 record their half-open =[start, end)= spans.
 
 #+NAME: regex-groups
 #+BEGIN_SRC regex
@@ -107,56 +80,62 @@ xabc
 #+RESULTS:
 : match [1,4) groups: 1=[1,3) 2=[2,3)
 
-#+NAME: regex-iterate
-#+BEGIN_SRC regex
-/(ab)+/
-abab
-ab
+*Try editing:* change =/(a(b))c/= to =/(?:a(b))c/= (non-capturing outer group) and re-run — group 1 is now =[2,3)=.
+
+* Why =/(a*)*/= stays linear ($O(n dot.c |Q|)$)
+
+A backtracking engine can take $O(2^n)$ steps on nested quantifiers like =/(a*)*/= against =aaa...ab=, because it retries every way of splitting the =a=s. A Thompson NFA merges duplicate active states at every character, bounding total work to $O(n dot.c |Q|)$.
+
+#+CAPTION: Backtracking O(2^n) blowup versus Thompson NFA linear O(n) work
+#+BEGIN_SRC typst :results svg
+#set text(size: 9pt)
+#import "@preview/lilaq:0.6.0" as lq
+
+#let ns = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+#let bt = ns.map(n => calc.pow(2, n))
+#let nfa = ns.map(n => 6 * n)
+
+#lq.diagram(
+  width: 8.5cm, height: 3.8cm,
+  xlabel: [input length $n$], ylabel: [state visits],
+  legend: (position: top + left),
+  lq.plot(ns, bt, mark: none, stroke: rgb("#C2553F"), label: [backtracking $2^n$]),
+  lq.plot(ns, nfa, mark: none, stroke: rgb("#1A9988"), label: [Thompson NFA $O(n)$]),
+)
 #+END_SRC
 
-#+RESULTS:
-: match [0,4) groups: 1=[2,4)
-: match [0,2) groups: 1=[0,2)
-
-* ASCII shorthands
-
-=\d= is =[0-9]=, =\w= is =[A-Za-z0-9_]=, and =\s= is =[ \t\r\n\f\v]= (strict ASCII, with =\D=, =\W=, =\S= as their complements). Shorthands are not allowed inside =[...]= classes.
-
-#+NAME: regex-words
-#+BEGIN_SRC regex
-/\w+ \d+/
-room 404
-room 4o4
-#+END_SRC
-
-#+RESULTS:
-: match [0,8)
-: match [0,6)
-
-#+NAME: regex-space
-#+BEGIN_SRC regex
-/\s[a-z]+/
-hi there
-hi\tthere
-#+END_SRC
-
-#+RESULTS:
-: match [2,8)
-: match [2,8)
-
-* What gets rejected at load time
-
-Anything outside pure one-pass regular matching fails up front with its line number: backreferences (=\1=, =\k<name>=, because matching =ww= is not regular and needs unbounded memory), lookaround (=(?=...)=, =(?<=...)=), lazy quantifiers (=*?=), named groups, Unicode classes (=\p{L}=), and =\b=/=\B= word boundaries. Syntax errors like dangling =*=, reversed =[z-a]=, or bad ={2,1}= also point to the exact line.
-
-* Why =/(a*)*/= stays linear
-
-A backtracking engine chokes in O(2^n) time on =/(a*)*/= against 1,000 =a=s followed by =b=. A Thompson NFA merges duplicate states at every step, so each character does at most one pass over the state graph. All 1,001 characters finish in 1,001 steps (runs cap at 4,096 NFA states, 100,000 character steps, and 5,000,000 state visits).
+Even 200 =a=s followed by =b= finishes in 201 character steps — no catastrophic backtracking anywhere.
 
 #+NAME: regex-linear
 #+BEGIN_SRC regex
 /(a*)*/
-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab
 #+END_SRC
 
 #+RESULTS:
-: match [0,1000) groups: 1=[0,1000)
+: match [0,200) groups: 1=[0,200)
+
+*Try editing:* replace the pattern with =/(a)\1/= (a backreference) or =/(?=a)a/= (lookahead) and hit *Run* — anything outside pure regular languages is rejected at load time with its exact line number.
+
+* Exercise: match a room code with ASCII shorthands
+
+Write a pattern using =\w+= and =\d+= so =room 404= matches its full span =[0,8)=.
+
+#+NAME: ex-room-code
+#+EXERCISE: Match "room 404" across [0,8) using \w and \d
+#+CHECK: match [0,8)
+#+BEGIN_SRC regex
+/\w+/
+room 404
+#+END_SRC
+
+#+BEGIN_HINT
+Use =/\w+ \d+/= — =\w= is =[A-Za-z0-9_]= and =\d= is =[0-9]=.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC regex
+/\w+ \d+/
+room 404
+#+END_SRC
+#+END_SOLUTION
