@@ -1,33 +1,16 @@
 # didact
 
-A client-side literate-programming site framework. Drop `.org` files in and
-get a site where prose interleaves with executable, steppable code blocks;
-each block drives an under-the-hood machine panel — registers, disassembly,
-memory, console; a disassembly row shows its source line's `;` comment on
-hover. Seventeen kernels ship out of the box: x86-64, RV32IM, MIPS32, C,
-C++, Fortran, WebAssembly, Python, SQL, MATLAB, Lua, JavaScript, regex,
-Lisp, Emacs Lisp, Prolog, and Typst. No server, no runtime network beyond
-same-origin vendor assets: parsing, assembly, execution, and stepping are
-all client-side.
+A browser-only literate-programming framework. Write lessons in Org mode
+(`.org`) with runnable, steppable code blocks that drive a live inspector
+(registers, memory, query plans, call stacks, console output, and more). No
+backend, and no runtime network requests beyond same-origin vendor assets.
 
-## What it looks like
+Live examples: **[wylited.github.io/didact](https://wylited.github.io/didact/)**
 
-Every block is real: assemble, step, and watch the machine. Below, the
-first x86-64 syscall block five steps in — registers that changed since the
-last step are tinted, the disassembly row about to execute is highlighted,
-and the console shows the bytes `write` just emitted.
-
-![x86-64: stepping the first syscall block](docs/screenshots/asm64-hello-step.png)
-
-The same right-rail panel hosts a different machine per kernel.
-
-| regex: Thompson NFA mid-match | SQL: one `SELECT` under the plan panel |
-| --- | --- |
-| ![two live NFA states highlighted as just-arrived, the input caret at `zza│bcaz` — no backtracking anywhere](docs/screenshots/regex-nfa-step.png) | ![plan counters — `Scan` read 5 rows, `Filter` passed 2, `Project` emitted 2, with the psql-style result below](docs/screenshots/sql-plan-step.png) |
-
-More demos — a loop mid-iteration, RISC-V, MIPS `mult`, the Lisp
-cons-heap, and MATLAB's column-major memory — live in
-[`docs/showcase/`](docs/showcase/).
+Seventeen kernels ship out of the box: x86-64, RV32IM, MIPS32, C, C++,
+Fortran, WebAssembly, Python, SQL, MATLAB, Lua, JavaScript, regex, Lisp,
+Emacs Lisp, Prolog, and Typst. Parsing, assembly, execution, and stepping
+are all client-side.
 
 ## Quickstart
 
