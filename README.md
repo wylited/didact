@@ -4,9 +4,9 @@ A client-side literate-programming site framework. Drop `.org` files in and
 get a site where prose interleaves with executable, steppable code blocks;
 each block drives an under-the-hood machine panel — registers, disassembly,
 memory, console; a disassembly row shows its source line's `;` comment on
-hover. Sixteen kernels ship out of the box: x86-64, RV32IM, MIPS32, C,
-C++, WebAssembly, Python, SQL, MATLAB, Lua, JavaScript, regex, Lisp,
-Emacs Lisp, Prolog, and Typst. No server, no runtime network beyond
+hover. Seventeen kernels ship out of the box: x86-64, RV32IM, MIPS32, C,
+C++, Fortran, WebAssembly, Python, SQL, MATLAB, Lua, JavaScript, regex,
+Lisp, Emacs Lisp, Prolog, and Typst. No server, no runtime network beyond
 same-origin vendor assets: parsing, assembly, execution, and stepping are
 all client-side.
 
@@ -54,6 +54,7 @@ Open the printed URL. (esbuild's build script is pre-approved in
 | `mips` | MIPS32 · interpreter | `asm-mips` | `packages/kernel-mips` | none (pure TypeScript CPU) |
 | `c` | C · clang wasm | `c` | `packages/kernel-c` | `public/vendor-c/` (~105 MB, clang → wasm32-wasip1) |
 | `cpp` | C++ · clang wasm | `cpp` | `packages/kernel-cpp` | shares `public/vendor-c/` with `c` (same clang engine) |
+| `fortran` | Fortran · interpreter | `fortran` | `packages/kernel-fortran` | none (pure TypeScript interpreter) |
 | `python` | Python · Pyodide | `python` | `packages/kernel-python` | `public/vendor-python/` (~13 MB, CPython 3.14 wasm) |
 | `wasm` | WebAssembly · interpreter | `wat` | `packages/kernel-wasm` | none (pure TypeScript interpreter) |
 | `sql` | SQL · query engine | `sql` | `packages/kernel-sql` | none (pure TypeScript engine) |
