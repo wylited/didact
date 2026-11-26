@@ -19,6 +19,7 @@ the same change.
 | `mips` | `asm-mips` | Stream (`asm.ts`) | good | `$` registers, `#` comments |
 | `c` | `c` | Stream (legacy `clike/c`) | good | C keywords/types/strings cover lesson C |
 | `cpp` | `cpp` | Lezer `@codemirror/lang-cpp` | good | full grammar |
+| `fortran` | `fortran` | Stream (legacy `fortran`) | good | free-form F90 keywords, types, `!` comments, `.and.`/`.eq.` operators |
 | `javascript` | `javascript` | Lezer `@codemirror/lang-javascript` | good | full grammar |
 | `python` | `python` | Stream (legacy `python`) | good | no Lezer python dependency available offline; adequate |
 | `lua` | `lua` | Stream (legacy `lua`) | good | Lua 5.x keywords, long strings/comments |
@@ -32,8 +33,8 @@ the same change.
 | `prolog` | `prolog` | Stream (`modes.ts` `prologMode`) | good | *was `plain`*: `%` and `/* */` comments, `'atom'`/`"string"`/`` `string` ``, variables, numbers, necks `:-`/`?-`/`-->`, operators `->`/`;`/`!`/`\+`, builtins; plain atoms stay plain |
 
 Superseded ids: the README/AGENTS list of supported syntaxes was stale
-(`lua`/`octave` absent). They are listed now, alongside the four new ids.
-The union gained `prolog`, `regexp`, `typst`, `wat` and lost nothing; all sixteen
+(`lua`/`octave` absent). They are listed now, alongside the five new ids.
+The union gained `prolog`, `regexp`, `typst`, `wat`, `fortran` and lost nothing; all seventeen
 `packages/*/src/types.ts` mirrors were re-synced with `packages/core/src/kernel.ts`.
 
 Verification: `packages/core/test/languages.test.ts` scans every
@@ -65,6 +66,13 @@ the control-flow/state story *of that language*.
 | 14 | `python` | deep | **Progress** (new), **Trace · executed lines** (counts, source text, failure row, flow sentence), **Call stack**, **Traceback**, **Variables · grouped** (scalars/collections/functions/classes, previews + lengths), **Locals · failing frame**, **Types · declared vs observed**, console (traceback: the lesson's frames only) | unit: per-line "what changed" (needs a resumable run); see §5 |
 | 15 | `typst` | shallow | rendered page (html), diagnostics/warnings console, page count + compile time | unit: layout boxes; it is a compiler, so "fetch/compile/render" is its story |
 | 16 | `elisp` | good | control stack, buffer fields/text, lexical and dynamic environments, Lisp-2 symbol cells, hooks, keymaps, output | unit: dynamic vs lexical closure; macro expansion is steppable |
+| 17 | `fortran` | deep | workspace with declared type/shape, module variables, **Arrays** (last write, column-major flat addresses, lower bounds), loops, call stack, console | unit: an ALLOCATE/DEALLOCATE allocation map; procedure-local writes are atomic |
+
+Fortran limits are intentionally teaching-sized: arrays cap at 1,000,000
+elements, CHARACTER values and lengths at 100,000 characters, CHARACTER array
+payloads at 4,000,000 characters, and a procedure frame at 2,000,000 scalar
+slots; runs stop after 500,000 statements. Hitting one is a line-mapped error,
+not a hang.
 
 ## 3. Implemented this round
 

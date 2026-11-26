@@ -35,6 +35,10 @@ export default defineConfig({
         '../../packages/kernel-cpp/src',
         import.meta.url,
       ).pathname,
+      '@didact/kernel-fortran': new URL(
+        '../../packages/kernel-fortran/src',
+        import.meta.url,
+      ).pathname,
       '@didact/kernel-python': new URL(
         '../../packages/kernel-python/src',
         import.meta.url,

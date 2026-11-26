@@ -8,6 +8,7 @@ import { riscvKernel } from '@didact/kernel-riscv';
 import { mipsKernel } from '@didact/kernel-mips';
 import { cKernel } from '@didact/kernel-c';
 import { cppKernel } from '@didact/kernel-cpp';
+import { fortranKernel } from '@didact/kernel-fortran';
 import { pythonKernel } from '@didact/kernel-python';
 import { jsKernel } from '@didact/kernel-javascript';
 import { lispKernel } from '@didact/kernel-lisp';
@@ -60,7 +61,7 @@ if (!root) throw new Error('apps/site: #root not found');
 
 mountSite({
   root,
-  kernels: [asm64Kernel, riscvKernel, mipsKernel, cKernel, cppKernel, wasmKernel, pythonKernel, sqlKernel, matlabKernel, jsKernel, regexKernel, lispKernel, elispKernel, prologKernel, luaKernel, typstKernel],
+  kernels: [asm64Kernel, riscvKernel, mipsKernel, cKernel, cppKernel, fortranKernel, wasmKernel, pythonKernel, sqlKernel, matlabKernel, jsKernel, regexKernel, lispKernel, elispKernel, prologKernel, luaKernel, typstKernel],
   pages,
   brand: 'Didact',
   // the lesson list is the primary way around the site; the in-page

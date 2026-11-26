@@ -202,6 +202,9 @@ importers:
       '@didact/kernel-elisp':
         specifier: workspace:*
         version: link:../../packages/kernel-elisp
+      '@didact/kernel-fortran':
+        specifier: workspace:*
+        version: link:../../packages/kernel-fortran
       '@didact/kernel-javascript':
         specifier: workspace:*
         version: link:../../packages/kernel-javascript
@@ -319,6 +322,8 @@ importers:
         version: 22.0.0-git20542-10
 
   packages/kernel-elisp: {}
+
+  packages/kernel-fortran: {}
 
   packages/kernel-javascript: {}
 

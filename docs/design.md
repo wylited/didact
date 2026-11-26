@@ -15,7 +15,7 @@ Kernels: `asm` (x86-64 via Unicorn/Keystone/Capstone wasm,
 `packages/kernel-asm64`), `riscv` (RV32I+M) and `mips` (MIPS32) interpreters,
 `c`/`cpp` via `@yowasp/clang`, `python` via Pyodide, `typst` via its compiler
 wasm, and pure-TypeScript `wasm`, `sql`, `matlab`, `lua`, `javascript`,
-`regex`, `lisp`, `elisp`, `prolog` — sixteen ids, all registered in
+`regex`, `lisp`, `elisp`, `prolog`, `fortran` — seventeen ids, all registered in
 `apps/site/src/main.ts`. The system must make
 adding kernels a matter of implementing one package against
 `docs/architecture.md`.

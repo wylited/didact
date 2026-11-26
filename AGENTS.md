@@ -13,6 +13,7 @@ build pipeline, and `vite build` cover everything. No per-package build step.
 - `packages/kernel-mips` — `@didact/kernel-mips`: MIPS32 interpreter kernel (SPIM/MARS-style, pure TypeScript).
 - `packages/kernel-c` — `@didact/kernel-c`: C kernel on the clang wasm engine.
 - `packages/kernel-cpp` — `@didact/kernel-cpp`: C++ kernel on the same clang wasm engine (libc++, c++20, no exceptions).
+- `packages/kernel-fortran` — `@didact/kernel-fortran`: Fortran 90/95/2003 teaching interpreter (free-form source, column-major array panels; pure TypeScript).
 - `packages/kernel-javascript` — `@didact/kernel-javascript`: JavaScript teaching-subset interpreter kernel (pure TypeScript).
 - `packages/kernel-lisp` — `@didact/kernel-lisp`: Scheme-flavored Lisp interpreter kernel with cons-heap panels (pure TypeScript).
 - `packages/kernel-elisp` — `@didact/kernel-elisp`: Emacs Lisp teaching kernel (Lisp-2, dynamic/lexical binding, macros, simulated buffers/hooks/keymaps; pure TypeScript).

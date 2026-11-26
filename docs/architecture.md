@@ -11,6 +11,7 @@ packages/kernel-riscv      @didact/kernel-riscv      RV32IM interpreter (pure Ty
 packages/kernel-mips       @didact/kernel-mips       MIPS32 interpreter (pure TypeScript)
 packages/kernel-c          @didact/kernel-c          C via vendored clang wasm (wasm32-wasip1)
 packages/kernel-cpp        @didact/kernel-cpp        C++ via the same clang engine (libc++, -fno-exceptions)
+packages/kernel-fortran    @didact/kernel-fortran    Fortran 90/95/2003 teaching interpreter, column-major array panels (pure TypeScript)
 packages/kernel-wasm       @didact/kernel-wasm       WebAssembly WAT-subset stack machine (pure TypeScript)
 packages/kernel-python     @didact/kernel-python     Python via vendored Pyodide
 packages/kernel-sql        @didact/kernel-sql        SQL engine with per-row plan panels (pure TypeScript)

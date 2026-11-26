@@ -31,7 +31,7 @@ function unionMembers(): Syntax[] {
 /** The kernel ids apps/site registers (mountSite's `kernels` array). */
 const REGISTERED = [
   'asm', 'riscv', 'mips', 'c', 'cpp', 'wasm', 'python', 'sql', 'matlab',
-  'lua', 'javascript', 'regex', 'lisp', 'elisp', 'prolog', 'typst',
+  'lua', 'javascript', 'regex', 'lisp', 'elisp', 'prolog', 'typst', 'fortran',
 ];
 
 /** id → editorSyntax for every kernel package's src/kernel.ts declaration. */
@@ -109,7 +109,7 @@ describe('editorLanguage: syntax → CM6 extension mapping', () => {
     expect(members).toContain('asm-intel');
     expect(members).toContain('sql');
     expect(new Set(members).size).toBe(members.length); // no duplicates
-    expect(members.length).toBe(16);
+    expect(members.length).toBe(17);
   });
 
   it('resolves every union member except plain, and never null for a declared mode', () => {

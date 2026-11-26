@@ -16,6 +16,7 @@ import { cpp } from '@codemirror/lang-cpp';
 import { javascript } from '@codemirror/lang-javascript';
 import { StreamLanguage } from '@codemirror/language';
 import { c } from '@codemirror/legacy-modes/mode/clike';
+import { fortran } from '@codemirror/legacy-modes/mode/fortran';
 import { lua } from '@codemirror/legacy-modes/mode/lua';
 import { octave } from '@codemirror/legacy-modes/mode/octave';
 import { python } from '@codemirror/legacy-modes/mode/python';
@@ -31,6 +32,7 @@ const LANGUAGES: Record<NonNullable<Kernel['editorSyntax']>, Extension | null> =
   'asm-mips': mipsAsm,
   c: StreamLanguage.define(c),
   cpp: cpp(),
+  fortran: StreamLanguage.define(fortran),
   javascript: javascript(),
   lua: StreamLanguage.define(lua),
   octave: StreamLanguage.define(octave),

@@ -38,6 +38,9 @@
       "@didact/kernel-cpp": [
         "../../packages/kernel-cpp/src"
       ],
+      "@didact/kernel-fortran": [
+        "../../packages/kernel-fortran/src"
+      ],
       "@didact/kernel-python": [
         "../../packages/kernel-python/src"
       ],

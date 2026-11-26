@@ -28,13 +28,14 @@ const kernels = readdirSync(PACKAGES, { withFileTypes: true })
   .filter((name) => existsSync(join(PACKAGES, name, 'src/types.ts')));
 
 describe('kernel contract mirrors', () => {
-  it('found the sixteen kernel packages', () => {
+  it('found the seventeen kernel packages', () => {
     // Guards the test itself: a silent zero-match glob would pass vacuously.
     expect(kernels.sort()).toEqual([
       'kernel-asm64', 'kernel-c', 'kernel-cpp', 'kernel-elisp',
-      'kernel-javascript', 'kernel-lisp', 'kernel-lua', 'kernel-matlab',
-      'kernel-mips', 'kernel-prolog', 'kernel-python', 'kernel-regex',
-      'kernel-riscv', 'kernel-sql', 'kernel-typst', 'kernel-wasm',
+      'kernel-fortran', 'kernel-javascript', 'kernel-lisp', 'kernel-lua',
+      'kernel-matlab', 'kernel-mips', 'kernel-prolog', 'kernel-python',
+      'kernel-regex', 'kernel-riscv', 'kernel-sql', 'kernel-typst',
+      'kernel-wasm',
     ]);
   });
 

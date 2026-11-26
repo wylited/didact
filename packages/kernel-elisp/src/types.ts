@@ -79,6 +79,7 @@ export interface Kernel {
     | 'asm-mips'
     | 'c'
     | 'cpp'
+    | 'fortran'
     | 'javascript'
     | 'lua'
     | 'octave'
