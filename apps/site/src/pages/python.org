@@ -9,24 +9,39 @@ In Python, a =for= loop does not create its own block scope: the loop variable =
 
 #+CAPTION: Python names live in a namespace dict pointing to heap objects; for-loops do not isolate n
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
-#let slot(pos, body, hl: false) = node(
-  pos, body, shape: rect, inset: 6pt, width: 92pt,
-  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
-  fill: if hl { rgb("#F2F8F6") } else { white },
-)
+#let mono(s) = text(font: "DejaVu Sans Mono", size: 8pt, s)
+#let entry(name, val) = [*#name* #linebreak() #mono(val)]
 
-#diagram(
-  spacing: (22pt, 10pt),
-  slot((0, 0), [*globals* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[squares]]),
-  slot((0, 1.05), [*globals* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[n (still live!)]], hl: true),
-  slot((1.8, 0), [*list (len 5)* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[[1, 4, 9, 16, 25]]]),
-  slot((1.8, 1.05), [*int* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[5]], hl: true),
-  edge((0, 0), (1.8, 0), "->", stroke: 0.8pt + luma(120)),
-  edge((0, 1.05), (1.8, 1.05), "->", stroke: 0.9pt + rgb("#1A9988")),
-)
+#context {
+  let left = (entry[globals][squares], entry[globals][n (still live!)])
+  let right = (entry[list (len 5)][[1, 4, 9, 16, 25]], entry[int][5])
+  let pad-x = 16pt
+  let wl = calc.max(..left.map(b => measure(b).width)) + 2 * pad-x
+  let wr = calc.max(..right.map(b => measure(b).width)) + 2 * pad-x
+  let hh = calc.max(..left.map(b => measure(b).height)) + 18pt
+  let gap = 48pt
+  let row-gap = 17pt
+  let y2 = -(hh + row-gap)
+  let xr = wl + gap
+  let slot(x, y, w, body, hl: false) = node(
+    (x, y), body, shape: rect, width: w, height: hh, inset: 0pt,
+    stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+    fill: if hl { rgb("#F2F8F6") } else { white },
+  )
+  diagram(
+    spacing: (1pt, 1pt),
+    slot(0pt, 0pt, wl, left.at(0)),
+    slot(0pt, y2, wl, left.at(1), hl: true),
+    slot(xr, 0pt, wr, right.at(0)),
+    slot(xr, y2, wr, right.at(1), hl: true),
+    edge((0pt, 0pt), (xr, 0pt), "->", stroke: 0.8pt + luma(120)),
+    edge((0pt, y2), (xr, y2), "->", stroke: 0.9pt + rgb("#1A9988")),
+  )
+}
 #+END_SRC
 
 Run =squares= and inspect *Trace · executed lines*: line 3 executes 5 times while lines 1 and 4 execute once. Then check *Variables · grouped* to see both =squares= (=list · len 5=) and ~n = 5~.
@@ -50,23 +65,48 @@ Python annotations are not enforced at runtime — dividing an =int= with =/= al
 
 #+CAPTION: Declared annotations vs observed runtime types checked after execution
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
-#let card(pos, body, warn: false) = node(
-  pos, body, shape: rect, inset: 6pt, width: 108pt,
-  stroke: 0.8pt + if warn { rgb("#C2553F") } else { rgb("#1A9988") },
-  fill: if warn { rgb("#FDF3F1") } else { rgb("#F2F8F6") },
-)
+#let mono(s) = text(font: "DejaVu Sans Mono", size: 8pt, s)
 
-#diagram(
-  spacing: (18pt, 10pt),
-  card((0, 0), [*declared* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[total: int = 10]]),
-  card((1.65, 0), [*rebound* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[total = total / 2]], warn: true),
-  card((3.3, 0), [*observed* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[int -> float (5.0)]], warn: true),
-  edge((0, 0), (1.65, 0), "->", stroke: 0.8pt + luma(120)),
-  edge((1.65, 0), (3.3, 0), "->", stroke: 0.9pt + rgb("#C2553F")),
-)
+#context {
+  let rows = (
+    ([*declared*], mono[total: int = 10], false),
+    ([*rebound*], mono[total = total / 2], true),
+    ([*observed*], mono[int -> float (5.0)], true),
+  )
+  let pad-x = 16pt
+  let pad-h = 6.5pt
+  let pad-c = 6.5pt
+  let w = calc.max(
+    ..rows.map(r => calc.max(measure(r.at(0)).width, measure(r.at(1)).width)),
+  ) + 2 * pad-x + 6pt
+  let h0 = measure([*declared*]).height + 2 * pad-h
+  let h1 = measure(mono[total: int = 10]).height + 2 * pad-c
+  let hh = h0 + h1 + 0.5pt
+  let y-arrow = (h1 - hh) / 2
+  let gap = 32pt
+  let step = w + gap
+  let card(i, warn) = {
+    let (r0, r1, _) = rows.at(i)
+    let body = grid(columns: (w - 1.4pt,),
+      block(width: 100%, inset: (x: pad-x, y: pad-h), align(center, r0)),
+      line(length: w - 1.4pt, stroke: 0.5pt + luma(140)),
+      block(width: 100%, inset: (x: pad-x, y: pad-c), align(center, r1)),
+    )
+    node((i * step, 0pt), body, shape: rect, width: w, inset: 0pt,
+      stroke: 0.8pt + if warn { rgb("#B3402E") } else { rgb("#1A9988") },
+      fill: if warn { rgb("#FDF3F1") } else { rgb("#F2F8F6") })
+  }
+  diagram(
+    spacing: (1pt, 1pt),
+    card(0, false), card(1, true), card(2, true),
+    edge((0pt, y-arrow), (step, y-arrow), "->", stroke: 0.8pt + luma(120)),
+    edge((step, y-arrow), (2 * step, y-arrow), "->", stroke: 0.9pt + rgb("#B3402E")),
+  )
+}
 #+END_SRC
 
 #+NAME: type-drift

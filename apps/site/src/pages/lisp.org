@@ -9,33 +9,49 @@ A proper list like =(1 2)= is just a chain of cons cells ending in ='()=: =(cons
 
 #+CAPTION: Box-and-pointer heap layout of (1 2) versus dotted pair (1 . 2)
 #+BEGIN_SRC typst :results svg
+#set page(margin: 8pt)
 #set text(size: 9pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
-#canvas(length: 1cm, {
+// All coordinates in pt, cell height 30pt, each half 34pt wide.
+#canvas(length: 1pt, {
   import draw: *
-  // Proper list (1 2)
-  content((2.6, 2.2), [*Proper list (1 2)*])
-  // Cell 0x0010
-  rect((0.2, 1.1), (1.1, 1.8), stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
-  rect((1.1, 1.1), (2.0, 1.8), stroke: 0.8pt + rgb("#1A9988"), fill: white)
-  content((0.65, 1.45), text(font: "DejaVu Sans Mono", weight: "bold")[1])
-  content((1.1, 0.8), text(font: "DejaVu Sans Mono", size: 7.5pt, fill: luma(90))[0x0010])
-  line((1.55, 1.45), (2.95, 1.45), stroke: 0.8pt + rgb("#1A9988"), mark: (end: ">"))
-  // Cell 0x0000
-  rect((3.0, 1.1), (3.9, 1.8), stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
-  rect((3.9, 1.1), (4.8, 1.8), stroke: 0.8pt + rgb("#1A9988"), fill: white)
-  content((3.45, 1.45), text(font: "DejaVu Sans Mono", weight: "bold")[2])
-  content((4.35, 1.45), text(font: "DejaVu Sans Mono", size: 8pt)[()])
-  content((3.9, 0.8), text(font: "DejaVu Sans Mono", size: 7.5pt, fill: luma(90))[0x0000])
+  let teal = rgb("#1A9988")
+  let red = rgb("#C2553F")
+  let tint = rgb("#F2F8F6")
+  let rtint = rgb("#FDF3F1")
+  let mono = "DejaVu Sans Mono"
+  let half = 34pt
+  let cw = 2 * half
+  let h = 30pt
+  let gap = 40pt
+  let gutter = 52pt
 
-  // Dotted pair (1 . 2)
-  content((7.4, 2.2), [*Dotted pair (1 . 2)*])
-  rect((6.3, 1.1), (7.2, 1.8), stroke: 0.8pt + rgb("#C2553F"), fill: rgb("#FDF3F1"))
-  rect((7.2, 1.1), (8.1, 1.8), stroke: 0.8pt + rgb("#C2553F"), fill: rgb("#FDF3F1"))
-  content((6.75, 1.45), text(font: "DejaVu Sans Mono", weight: "bold")[1])
-  content((7.65, 1.45), text(font: "DejaVu Sans Mono", weight: "bold")[2])
-  content((7.2, 0.8), text(font: "DejaVu Sans Mono", size: 7.5pt, fill: luma(90))[0x0020])
+  let cell(x, car, cdr, addr, col, fll) = {
+    rect((x, 0pt), (x + half, h), stroke: 0.8pt + col, fill: fll)
+    rect((x + half, 0pt), (x + cw, h), stroke: 0.8pt + col, fill: white)
+    content((x + half / 2, h / 2), text(font: mono, size: 9pt, weight: "bold", car))
+    content((x + 1.5 * half, h / 2), text(font: mono, size: 9pt, weight: "bold", cdr))
+    content((x + half, -9pt), text(font: mono, size: 8pt, fill: luma(130), addr))
+  }
+
+  // Proper list (1 2): 0x0010 -> 0x0000 -> '()
+  let ax = 0pt
+  let bx = cw + gap
+  let dx = bx + cw + gutter
+  cell(ax, [1], [], [0x0010], teal, tint)
+  cell(bx, [2], [()], [0x0000], teal, tint)
+  line(
+    (ax + 1.5 * half, h / 2),
+    (bx - 0.4pt, h / 2),
+    stroke: 0.8pt + teal,
+    mark: (end: ">", scale: 0.9),
+  )
+  content((ax + (bx + cw - ax) / 2, 40pt), [*Proper list (1 2)*])
+
+  // Dotted pair (1 . 2): cdr is the atom 2, so no arrow
+  cell(dx, [1], [2], [0x0020], red, rtint)
+  content((dx + half, 40pt), [*Dotted pair (1 . 2)*])
 })
 #+END_SRC
 
@@ -68,25 +84,47 @@ In =fact=, the outer multiplication =(* n ...)= must wait for =(fact (- n 1))= t
 
 #+CAPTION: Non-tail recursion stacks waiting multiply frames; tail recursion reuses one frame
 #+BEGIN_SRC typst :results svg
+#set page(margin: 8pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
-#let frame(pos, body, warn: false) = node(
-  pos, body, shape: rect, inset: 5pt, width: 108pt,
-  stroke: 0.8pt + if warn { rgb("#C2553F") } else { rgb("#1A9988") },
+#let teal = rgb("#1A9988")
+#let red = rgb("#C2553F")
+#let mono8 = text.with(font: "DejaVu Sans Mono", size: 8pt)
+#let frame(pos, body, warn: false, name: none) = node(
+  pos,
+  align(center + horizon)[#body],
+  name: name,
+  width: 128pt,
+  height: 26pt,
+  inset: 0pt,
+  stroke: 0.8pt + if warn { red } else { teal },
   fill: if warn { rgb("#FDF3F1") } else { rgb("#F2F8F6") },
 )
 
 #diagram(
-  spacing: (22pt, 9pt),
-  frame((0, 0), text(font: "DejaVu Sans Mono", size: 8pt)[(\* 3 ...)], warn: true),
-  frame((0, 0.85), text(font: "DejaVu Sans Mono", size: 8pt)[(\* 2 ...)], warn: true),
-  frame((0, 1.7), text(font: "DejaVu Sans Mono", size: 8pt)[(\* 1 ...) -> O(n)], warn: true),
-  edge((0, 0), (0, 0.85), "->", stroke: 0.7pt + rgb("#C2553F")),
-  edge((0, 0.85), (0, 1.7), "->", stroke: 0.7pt + rgb("#C2553F")),
-
-  frame((2.1, 0.85), text(font: "DejaVu Sans Mono", size: 8pt)[(sum-to n acc) -> O(1)]),
-  edge((2.1, 0.85), (2.1, 0.85), "->", bend: 120deg, stroke: 0.9pt + rgb("#1A9988"), label: [#text(size: 8pt)[reuse frame]], label-fill: white),
+  spacing: (30pt, 24pt),
+  node-stroke: none,
+  mark-scale: 120%,
+  edge-corner-radius: 3pt,
+  // Non-tail: one pending multiply frame per level, stacked
+  frame((0, 0), mono8[(\* 3 ...)], warn: true),
+  frame((0, 1), mono8[(\* 2 ...)], warn: true),
+  frame((0, 2), mono8[(\* 1 ...) -> O(n)], warn: true),
+  edge((0, 0), (0, 1), "->", stroke: 0.8pt + red),
+  edge((0, 1), (0, 2), "->", stroke: 0.8pt + red),
+  // Tail: the same frame, reused
+  frame((1, 1), mono8[(sum-to n acc) -> O(1)], name: <tail>),
+  edge(
+    (rel: (-16pt, 0pt), to: <tail.north>),
+    (rel: (-16pt, 17pt), to: <tail.north>),
+    (rel: (16pt, 17pt), to: <tail.north>),
+    (rel: (16pt, 3.5pt), to: <tail.north>),
+    "->",
+    stroke: 0.8pt + teal,
+    label: text(size: 8pt)[reuse frame],
+    label-sep: 4pt,
+  ),
 )
 #+END_SRC
 

@@ -5,25 +5,34 @@ Every block here compiles with actual =clang= (fetched once and cached locally, 
 
 #+CAPTION: In-browser C compilation and WASI execution pipeline
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
-#let stage(pos, body, hl: false) = node(
-  pos, body, shape: rect, inset: 6pt, width: 78pt,
-  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
-  fill: if hl { rgb("#F2F8F6") } else { white },
-)
-
-#diagram(
-  spacing: (14pt, 10pt),
-  stage((0, 0), [*lesson.c* #linebreak() #text(size: 8pt)[source buffer]]),
-  stage((1.35, 0), [*clang* #linebreak() #text(size: 8pt)[C -> wasm32 obj]]),
-  stage((2.7, 0), [*wasm-ld* #linebreak() #text(size: 8pt)[links libc]]),
-  stage((4.05, 0), [*WASI shim* #linebreak() #text(size: 8pt)[stdout & exit]], hl: true),
-  edge((0, 0), (1.35, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
-  edge((1.35, 0), (2.7, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
-  edge((2.7, 0), (4.05, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
-)
+#context {
+  let bodies = (
+    [*lesson.c* #linebreak() #text(size: 8pt)[source buffer]],
+    [*clang* #linebreak() #text(size: 8pt)[C -> wasm32 obj]],
+    [*wasm-ld* #linebreak() #text(size: 8pt)[links libc]],
+    [*WASI shim* #linebreak() #text(size: 8pt)[stdout & exit]],
+  )
+  let bw = calc.max(..bodies.map(b => measure(b).width)) + 2 * 9pt
+  let stage(pos, body, hl: false) = node(
+    pos, body, shape: rect, inset: 9pt, width: bw,
+    stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
+    fill: if hl { rgb("#F2F8F6") } else { white },
+  )
+  diagram(
+    spacing: (22pt, 10pt),
+    stage((0, 0), bodies.at(0)),
+    stage((1, 0), bodies.at(1)),
+    stage((2, 0), bodies.at(2)),
+    stage((3, 0), bodies.at(3), hl: true),
+    edge((0, 0), (1, 0), "->", stroke: 0.9pt + rgb("#1A9988"), mark-scale: 80%),
+    edge((1, 0), (2, 0), "->", stroke: 0.9pt + rgb("#1A9988"), mark-scale: 80%),
+    edge((2, 0), (3, 0), "->", stroke: 0.9pt + rgb("#1A9988"), mark-scale: 80%),
+  )
+}
 #+END_SRC
 
 * Data model sizes on =wasm32=
@@ -59,24 +68,39 @@ In C, adding =1= to a pointer =int *p= does not add 1 byte — it advances by ~s
 
 #+CAPTION: Contiguous 4-byte int array layout and scaled pointer arithmetic
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
-#canvas(length: 1cm, {
-  import draw: *
-  let vals = ("10", "20", "30", "40")
-  let offs = ("+0", "+4", "+8", "+12")
-  for i in range(4) {
-    let x = i * 2.1
-    rect((x, 0.2), (x + 2.1, 1.1), stroke: 0.8pt + if i == 1 { rgb("#1A9988") } else { luma(120) }, fill: if i == 1 { rgb("#F2F8F6") } else { white })
-    content((x + 1.05, 0.65), text(font: "DejaVu Sans Mono", weight: "bold")[#vals.at(i)])
-    content((x + 1.05, -0.1), text(font: "DejaVu Sans Mono", size: 8pt, fill: luma(90))[a[#i] (#offs.at(i) B)])
-  }
-  line((1.05, 1.7), (1.05, 1.15), stroke: 0.8pt + luma(100), mark: (end: ">"))
-  content((1.05, 1.95), text(font: "DejaVu Sans Mono", size: 8.5pt)[p])
-  line((3.15, 1.7), (3.15, 1.15), stroke: 0.9pt + rgb("#1A9988"), mark: (end: ">"))
-  content((3.15, 1.95), text(font: "DejaVu Sans Mono", size: 8.5pt, fill: rgb("#1A9988"))[p + 1 (+4 bytes)])
-})
+#let mono = "DejaVu Sans Mono"
+#let vals = ("10", "20", "30", "40")
+#let offs = ("+0", "+4", "+8", "+12")
+
+#context {
+  let labels = range(4).map(i => text(font: mono, size: 8pt, fill: luma(90))[a[#i] (#offs.at(i) B)])
+  let cw = calc.max(..labels.map(l => measure(l).width)) + 20pt
+  let ptr(c) = canvas(length: 1pt, {
+    import draw: *
+    line((0, 13), (0, 0), stroke: 0.9pt + c, mark: (end: ">", scale: 0.8))
+  })
+  grid(
+    columns: (cw,) * 4,
+    rows: (auto, auto, 30pt, auto),
+    align: center + horizon,
+    inset: 0pt,
+    grid.cell(align: bottom + center, inset: (bottom: 6pt))[
+      #text(font: mono, size: 9pt, weight: "bold", fill: luma(70))[p]],
+    grid.cell(align: bottom + center, inset: (bottom: 6pt))[
+      #text(font: mono, size: 9pt, weight: "bold", fill: rgb("#1A9988"))[p + 1 #linebreak() #text(size: 8pt)[(+4 bytes)]]],
+    [], [],
+    ptr(luma(110)), ptr(rgb("#1A9988")), [], [],
+    ..range(4).map(i => grid.cell(
+      fill: if i == 1 { rgb("#F2F8F6") } else { white },
+      stroke: 0.8pt + if i == 1 { rgb("#1A9988") } else { luma(120) },
+    )[#text(font: mono, size: 10pt, weight: "bold")[#vals.at(i)]]),
+    ..labels.map(l => grid.cell(inset: (top: 6pt))[#l]),
+  )
+}
 #+END_SRC
 
 #+NAME: pointer-math

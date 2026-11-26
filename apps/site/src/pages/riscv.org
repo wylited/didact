@@ -12,32 +12,84 @@ Two design choices separate RISC-V from [[file:x86-64-assembly.org][x86-64]]:
 
 #+CAPTION: RV32IM register-direct branch versus x86-style flags
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
-#import "@preview/fletcher:0.5.8": diagram, node, edge, shapes
+#import "@preview/cetz:0.5.2": canvas, draw
 
-#let boxnode(pos, body, hl: false) = node(
-  pos, body, shape: rect, inset: 6pt, width: 84pt,
-  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
-  fill: if hl { rgb("#F2F8F6") } else { white },
-)
+#context {
+  let mono = "DejaVu Sans Mono"
+  let teal = rgb("#1A9988")
+  let tealfill = rgb("#F2F8F6")
+  let tw(body, size: 9pt, font: "DejaVu Sans", weight: "regular") = measure(
+    text(body, size: size, font: font, weight: weight),
+  ).width / 1pt
+  let th(body, size: 9pt, font: "DejaVu Sans", weight: "regular") = measure(
+    text(body, size: size, font: font, weight: weight),
+  ).height / 1pt
 
-#diagram(
-  spacing: (18pt, 12pt),
-  boxnode((0, 0), [*t1* = 10 #linebreak() #text(size: 8pt)[rs1 (limit)]]),
-  boxnode((0, 1.1), [*t0* = i #linebreak() #text(size: 8pt)[rs2 (counter)]]),
-  node(
-    (1.5, 0.55),
-    [*blt t1, t0* #linebreak() #text(size: 8pt)[10 \< i ?]],
-    shape: shapes.diamond, inset: 8pt, width: 84pt,
-    stroke: 0.9pt + rgb("#1A9988"), fill: rgb("#F2F8F6"),
-  ),
-  boxnode((3.1, 0), [*pc \<- done* #linebreak() #text(size: 8pt)[taken]]),
-  boxnode((3.1, 1.1), [*pc \<- pc + 4* #linebreak() #text(size: 8pt)[fall-through]]),
-  edge((0, 0), (1.5, 0.55), "->", stroke: 0.8pt + luma(120)),
-  edge((0, 1.1), (1.5, 0.55), "->", stroke: 0.8pt + luma(120)),
-  edge((1.5, 0.55), (3.1, 0), "->", stroke: 0.9pt + rgb("#1A9988"), label: [yes], label-fill: white),
-  edge((1.5, 0.55), (3.1, 1.1), "->", stroke: 0.8pt + luma(120), label: [no], label-fill: white),
-)
+  let lh1 = th("t1 = 10", font: mono, weight: "bold")
+  let lh2 = th("rs1 (limit)", size: 8pt)
+  let lead = 5
+  let texth = lh1 + lh2 + lead
+  let boxh = texth + 14
+  let pad = 9
+  let vgap = 10
+  let gap = 26
+  let hw = 64
+  let hh = 30
+
+  let wl = calc.max(
+      tw("t1 = 10", font: mono, weight: "bold"),
+      tw("rs1 (limit)", size: 8pt),
+      tw("t0 = i", font: mono, weight: "bold"),
+      tw("rs2 (counter)", size: 8pt),
+    ) + 2 * pad
+  let wr = calc.max(
+      tw("pc <- done", font: mono, weight: "bold"),
+      tw("taken", size: 8pt),
+      tw("pc <- pc + 4", font: mono, weight: "bold"),
+      tw("fall-through", size: 8pt),
+    ) + 2 * pad
+
+  let yb = boxh / 2
+  let yt = boxh + vgap + boxh / 2
+  let cy = (yb + yt) / 2
+  let cx = wl + gap + hw
+  let xr = cx + hw + gap
+  let dx = hw * (1 - (yt - cy) / hh)
+
+  canvas(length: 1pt, {
+    import draw: *
+
+    let box(x0, y, w, primary, secondary) = {
+      rect((x0, y - boxh / 2), (x0 + w, y + boxh / 2), stroke: 0.8pt + luma(130), fill: white)
+      content((x0 + w / 2, y + texth / 2 - lh1 / 2), text(primary, font: mono, weight: "bold"))
+      content((x0 + w / 2, y + texth / 2 - lh1 - lead - lh2 / 2), text(secondary, size: 8pt))
+    }
+
+    // Arrows first: each end overshoots its target by 3.5pt so the boxes and
+    // diamond painted on top hide the spill and the head meets the border.
+    line((wl, yt), (cx - dx + 1.2, yt), stroke: 0.9pt + teal, mark: (end: (symbol: ">", fill: teal)))
+    line((wl, yb), (cx - dx + 1.2, yb), stroke: 0.8pt + luma(110), mark: (end: (symbol: ">", fill: luma(110))))
+    line((cx + dx - 1.2, yt), (xr + 1.2, yt), stroke: 0.9pt + teal, mark: (end: (symbol: ">", fill: teal)))
+    line((cx + dx - 1.2, yb), (xr + 1.2, yb), stroke: 0.8pt + luma(110), mark: (end: (symbol: ">", fill: luma(110))))
+
+    box(0, yt, wl, "t1 = 10", "rs1 (limit)")
+    box(0, yb, wl, "t0 = i", "rs2 (counter)")
+    box(xr, yt, wr, "pc <- done", "taken")
+    box(xr, yb, wr, "pc <- pc + 4", "fall-through")
+
+    line(
+      (cx, cy + hh), (cx + hw, cy), (cx, cy - hh), (cx - hw, cy),
+      close: true, stroke: 0.9pt + teal, fill: tealfill,
+    )
+    content((cx, cy + texth / 2 - lh1 / 2), text("blt t1, t0", font: mono, weight: "bold"))
+    content((cx, cy + texth / 2 - lh1 - lead - lh2 / 2), text("10 < i ?", size: 8pt))
+
+    content((cx + hw - 6, yt + 9), text("yes", size: 8.5pt))
+    content((cx + hw - 6, yb - 9), text("no", size: 8.5pt))
+  })
+}
 #+END_SRC
 
 | Register      | ABI name | Role                      |
@@ -116,32 +168,55 @@ When a 32-bit RISC-V core loads a single byte from memory, it has to fill the up
 
 #+CAPTION: Loading byte 0xFF into a 32-bit register with lb vs lbu
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
-#import "@preview/cetz:0.5.2": canvas, draw
+#let mono = "DejaVu Sans Mono"
+#let teal = rgb("#1A9988")
+#let tealfill = rgb("#F2F8F6")
+#let red = rgb("#B3402E")
+#let redfill = rgb("#FDF3F1")
+#let grey = luma(150)
+#let greyfill = luma(247)
 
-#canvas(length: 1cm, {
-  import draw: *
-  // Byte in memory
-  content((0.5, 2.3), [memory byte:], anchor: "east")
-  rect((0.7, 2.0), (2.7, 2.6), stroke: 0.9pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
-  content((1.7, 2.3), text(font: "DejaVu Sans Mono")[11111111 (0xFF)])
+#let byte(body, stroke: teal, fill: tealfill, ink: black) = table.cell(
+  align: center + horizon,
+  inset: (x: 4pt, y: 3.5pt),
+  stroke: 0.9pt + stroke,
+  fill: fill,
+  text(body, font: mono, size: 9pt, fill: ink),
+)
 
-  // lb
-  content((0.5, 1.15), text(font: "DejaVu Sans Mono", weight: "bold")[lb], anchor: "east")
-  rect((0.7, 0.85), (5.5, 1.45), stroke: 0.8pt + rgb("#C2553F"), fill: rgb("#FDF3F1"))
-  content((3.1, 1.15), text(font: "DejaVu Sans Mono", fill: rgb("#8B1A1A"))[11111111 11111111 11111111])
-  rect((5.5, 0.85), (7.3, 1.45), stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
-  content((6.4, 1.15), text(font: "DejaVu Sans Mono")[11111111])
-  content((7.6, 1.15), [= -1], anchor: "west")
+#table(
+  columns: (auto, 9pt, auto, auto, auto, auto, 9pt, auto),
+  row-gutter: 8pt,
+  stroke: none,
+  align: (right + horizon, left, left, left, left, left, left, left + horizon),
 
-  // lbu
-  content((0.5, 0.15), text(font: "DejaVu Sans Mono", weight: "bold")[lbu], anchor: "east")
-  rect((0.7, -0.15), (5.5, 0.45), stroke: 0.8pt + luma(140), fill: rgb("#F7F7F7"))
-  content((3.1, 0.15), text(font: "DejaVu Sans Mono", fill: luma(80))[00000000 00000000 00000000])
-  rect((5.5, -0.15), (7.3, 0.45), stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
-  content((6.4, 0.15), text(font: "DejaVu Sans Mono")[11111111])
-  content((7.6, 0.15), [= 255], anchor: "west")
-})
+  table.cell(text("memory byte:", size: 9pt)),
+  table.cell[],
+  table.cell(colspan: 3)[],
+  byte("11111111"),
+  table.cell[],
+  table.cell(text("(0xFF)", size: 8pt, fill: luma(90))),
+
+  table.cell(text("lb", font: mono, weight: "bold")),
+  table.cell[],
+  byte("11111111", stroke: red, fill: redfill, ink: rgb("#8B1A1A")),
+  byte("11111111", stroke: red, fill: redfill, ink: rgb("#8B1A1A")),
+  byte("11111111", stroke: red, fill: redfill, ink: rgb("#8B1A1A")),
+  byte("11111111"),
+  table.cell[],
+  table.cell(text("= -1", size: 9pt)),
+
+  table.cell(text("lbu", font: mono, weight: "bold")),
+  table.cell[],
+  byte("00000000", stroke: grey, fill: greyfill, ink: luma(90)),
+  byte("00000000", stroke: grey, fill: greyfill, ink: luma(90)),
+  byte("00000000", stroke: grey, fill: greyfill, ink: luma(90)),
+  byte("11111111"),
+  table.cell[],
+  table.cell(text("= 255", size: 9pt)),
+)
 #+END_SRC
 
 Run =bytes= and inspect *.data*: =sw t0, 0(t1)= writes four =FF= bytes into =buf=, then =lb= and =lbu= read the very same address =0(t1)= into =a0= with opposite interpretations.

@@ -40,39 +40,73 @@ A closure holds a reference to the environment slot where a variable lives, not 
 
 #+CAPTION: Shared var i slot versus per-iteration let j slots captured by loop closures
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
-#import "@preview/fletcher:0.5.8": diagram, node, edge
+#import "@preview/cetz:0.5.2": canvas, draw
 
-#let fn(pos, body) = node(
-  pos, body, shape: rect, inset: 5pt, width: 66pt,
-  stroke: 0.8pt + luma(130), fill: white,
-)
-#let slot(pos, body, warn: false) = node(
-  pos, body, shape: rect, inset: 6pt, width: 66pt,
-  stroke: 0.9pt + if warn { rgb("#C2553F") } else { rgb("#1A9988") },
-  fill: if warn { rgb("#FDF3F1") } else { rgb("#F2F8F6") },
-)
+#let mono = "DejaVu Sans Mono"
+#let accent = rgb("#1A9988")
+#let accent-fill = rgb("#F2F8F6")
+#let warn = rgb("#C2553F")
+#let warn-fill = rgb("#FDF3F1")
+#let fn-text(t) = text(font: mono, size: 8pt)[#t]
+#let slot-text(t) = text(font: mono, size: 9pt, weight: "bold")[#t]
+#let arrow-mark(c) = (end: ">", fill: c, length: 4pt, width: 3.6pt)
 
-#diagram(
-  spacing: (16pt, 10pt),
-  fn((0, 0), text(font: "DejaVu Sans Mono", size: 8pt)[withVar[0]]),
-  fn((0, 0.85), text(font: "DejaVu Sans Mono", size: 8pt)[withVar[1]]),
-  fn((0, 1.7), text(font: "DejaVu Sans Mono", size: 8pt)[withVar[2]]),
-  slot((1.4, 0.85), text(font: "DejaVu Sans Mono", weight: "bold")[var i = 3], warn: true),
-  edge((0, 0), (1.4, 0.85), "->", stroke: 0.8pt + rgb("#C2553F")),
-  edge((0, 0.85), (1.4, 0.85), "->", stroke: 0.8pt + rgb("#C2553F")),
-  edge((0, 1.7), (1.4, 0.85), "->", stroke: 0.8pt + rgb("#C2553F")),
+// Boxes are sized from measured labels, so nothing clips or wraps; the shared
+// var cell spans all three rows, and every arrow is a straight horizontal run
+// whose head lands on a cell border.
+#context {
+  let var-labels = ("withVar[0]", "withVar[1]", "withVar[2]")
+  let let-labels = ("withLet[0]", "withLet[1]", "withLet[2]")
+  let slot-labels = ("let j = 0", "let j = 1", "let j = 2")
+  let fn-w = (var-labels + let-labels)
+    .map(l => measure(fn-text(l)).width)
+    .fold(0pt, calc.max) + 14pt
+  let slot-w = slot-labels
+    .map(l => measure(slot-text(l)).width)
+    .fold(0pt, calc.max) + 16pt
 
-  fn((2.9, 0), text(font: "DejaVu Sans Mono", size: 8pt)[withLet[0]]),
-  fn((2.9, 0.85), text(font: "DejaVu Sans Mono", size: 8pt)[withLet[1]]),
-  fn((2.9, 1.7), text(font: "DejaVu Sans Mono", size: 8pt)[withLet[2]]),
-  slot((4.3, 0), text(font: "DejaVu Sans Mono", weight: "bold")[let j = 0]),
-  slot((4.3, 0.85), text(font: "DejaVu Sans Mono", weight: "bold")[let j = 1]),
-  slot((4.3, 1.7), text(font: "DejaVu Sans Mono", weight: "bold")[let j = 2]),
-  edge((2.9, 0), (4.3, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
-  edge((2.9, 0.85), (4.3, 0.85), "->", stroke: 0.8pt + rgb("#1A9988")),
-  edge((2.9, 1.7), (4.3, 1.7), "->", stroke: 0.8pt + rgb("#1A9988")),
-)
+  let h = 21pt
+  let row-gap = 8pt
+  let pitch = h + row-gap
+  let stack-h = 3 * h + 2 * row-gap
+  let arrow-gap = 26pt
+  let group-gap = 42pt
+
+  let x-a = 0pt
+  let x-a-r = x-a + fn-w
+  let x-var-l = x-a-r + arrow-gap
+  let x-var-r = x-var-l + slot-w
+  let x-b = x-var-r + group-gap
+  let x-b-r = x-b + fn-w
+  let x-let-l = x-b-r + arrow-gap
+  let x-let-r = x-let-l + slot-w
+  let cy(i) = -(i * pitch + h / 2)
+
+  canvas(length: 1pt, {
+    import draw: *
+    for (i, l) in var-labels.enumerate() {
+      rect((x-a, cy(i) - h / 2), (x-a-r, cy(i) + h / 2),
+        stroke: 0.8pt + luma(130), fill: white)
+      content(((x-a + x-a-r) / 2, cy(i)), fn-text(l))
+      line((x-a-r, cy(i)), (x-var-l, cy(i)), stroke: 0.8pt + warn, mark: arrow-mark(warn))
+    }
+    rect((x-var-l, cy(1) - stack-h / 2), (x-var-r, cy(1) + stack-h / 2),
+      stroke: 0.9pt + warn, fill: warn-fill)
+    content(((x-var-l + x-var-r) / 2, cy(1)), slot-text("var i = 3"))
+
+    for (i, l) in let-labels.enumerate() {
+      rect((x-b, cy(i) - h / 2), (x-b-r, cy(i) + h / 2),
+        stroke: 0.8pt + luma(130), fill: white)
+      content(((x-b + x-b-r) / 2, cy(i)), fn-text(l))
+      rect((x-let-l, cy(i) - h / 2), (x-let-r, cy(i) + h / 2),
+        stroke: 0.9pt + accent, fill: accent-fill)
+      content(((x-let-l + x-let-r) / 2, cy(i)), slot-text(slot-labels.at(i)))
+      line((x-b-r, cy(i)), (x-let-l, cy(i)), stroke: 0.8pt + accent, mark: arrow-mark(accent))
+    }
+  })
+}
 #+END_SRC
 
 Set a breakpoint on line 9 and click *Run* to inspect *Scopes*: =i= is already =3= in the outer scope, while each =withLet= function closed over its own =j=.
@@ -123,26 +157,55 @@ Synchronous top-level code runs to completion first. Next, the engine drains the
 
 #+CAPTION: Event loop priority: synchronous stack, then full microtask drain, then next macrotask
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
-#import "@preview/fletcher:0.5.8": diagram, node, edge
+#import "@preview/cetz:0.5.2": canvas, draw
 
-#let q(pos, title, sub, hl: false) = node(
-  pos,
-  [*#title* #linebreak() #text(size: 8pt)[#sub]],
-  shape: rect, inset: 6pt, width: 102pt,
-  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
-  fill: if hl { rgb("#F2F8F6") } else { white },
+#let accent = rgb("#1A9988")
+#let accent-fill = rgb("#F2F8F6")
+#let lanes = (
+  (title: "1. Call stack", sub: "sync code to empty", hl: false),
+  (title: "2. Microtask queue", sub: "drain ALL Promise.then", hl: true),
+  (title: "3. Macrotask queue", sub: "run ONE setTimeout", hl: false),
 )
 
-#diagram(
-  spacing: (16pt, 10pt),
-  q((0, 0), [1. Call stack], [sync code to empty]),
-  q((1.7, 0), [2. Microtask queue], [drain ALL Promise.then], hl: true),
-  q((3.4, 0), [3. Macrotask queue], [run ONE setTimeout]),
-  edge((0, 0), (1.7, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
-  edge((1.7, 0), (3.4, 0), "->", stroke: 0.8pt + rgb("#1A9988")),
-  edge((3.4, 0), (1.7, 0), "->", bend: 38deg, stroke: 0.7pt + luma(130), label: [#text(size: 8pt)[drain again]], label-fill: white),
-)
+// Lanes are measured from their longest line, so the captions keep a real inset
+// from the border; the ordering arrows run in the gaps only.
+#context {
+  let lane-w = lanes
+    .map(l => calc.max(
+      measure(text(weight: "bold", size: 9pt)[#l.title]).width,
+      measure(text(size: 8pt)[#l.sub]).width,
+    ))
+    .fold(0pt, calc.max) + 26pt
+  let lane-h = 38pt
+  let lane-gap = 30pt
+  let x0(i) = i * (lane-w + lane-gap)
+  let y-top = 0pt
+  let y-bot = y-top - lane-h
+  let y-run = y-bot - 14pt
+
+  canvas(length: 1pt, {
+    import draw: *
+    for (i, l) in lanes.enumerate() {
+      rect((x0(i), y-bot), (x0(i) + lane-w, y-top),
+        stroke: 0.9pt + if l.hl { accent } else { luma(130) },
+        fill: if l.hl { accent-fill } else { white })
+      content((x0(i) + lane-w / 2, y-top - 12pt), text(weight: "bold")[#l.title])
+      content((x0(i) + lane-w / 2, y-top - 27pt), text(size: 8pt)[#l.sub])
+      if i < 2 {
+        line((x0(i) + lane-w, y-top - lane-h / 2), (x0(i + 1), y-top - lane-h / 2),
+          stroke: 0.9pt + accent, mark: (end: ">", fill: accent, length: 4.2pt, width: 3.6pt))
+      }
+    }
+    // once a macrotask has run, the next drain starts at the microtask lane again
+    line((x0(2) + lane-w / 2, y-bot), (x0(2) + lane-w / 2, y-run),
+      (x0(1) + lane-w / 2, y-run), (x0(1) + lane-w / 2, y-bot),
+      stroke: 0.7pt + luma(130), mark: (end: ">", fill: luma(130), length: 4pt, width: 3.6pt))
+    content(((x0(1) + x0(2)) / 2 + lane-w / 2, y-run - 5pt),
+      text(size: 8pt)[drain again], anchor: "north")
+  })
+}
 #+END_SRC
 
 Set a breakpoint on line 4 and open *Event loop* — both queues are already populated before the synchronous body finishes.

@@ -27,27 +27,64 @@ A rule =grandparent(X, Z) :- parent(X, Y), parent(Y, Z).= rewrites one goal into
 
 #+CAPTION: SLD resolution tree for grandparent(tom, G) showing choice points and backtracking
 #+BEGIN_SRC typst :results svg
+#set page(margin: 10pt)
 #set text(size: 9pt)
-#import "@preview/fletcher:0.5.8": diagram, node, edge
+#import "@preview/cetz:0.5.2" as cetz
 
-#let g(pos, body, hl: false, alt: false) = node(
-  pos, body, shape: rect, inset: 5pt, width: 112pt,
-  stroke: 0.8pt + if hl { rgb("#1A9988") } else if alt { rgb("#C2553F") } else { luma(130) },
-  fill: if hl { rgb("#F2F8F6") } else if alt { rgb("#FDF3F1") } else { white },
-)
+#let mono(body) = text(font: "DejaVu Sans Mono", size: 8pt, body)
+#let pad = 7pt
+#let q1 = mono[?- grandparent(tom, G)]
+#let q2 = mono[parent(tom, Y), parent(Y, G)]
+#let q3 = mono[parent(mary, G)  (Y = mary)]
+#let solved = [*G = ann* #linebreak() #text(size: 8pt)[1st solution]]
+#let choice = [*G = pat* #linebreak() #text(size: 8pt)[via choice point]]
+#let teal = rgb("#1A9988")
+#let red = rgb("#C2553F")
 
-#diagram(
-  spacing: (16pt, 12pt),
-  g((1, 0), text(font: "DejaVu Sans Mono", size: 8pt)[?- grandparent(tom, G)]),
-  g((1, 1), text(font: "DejaVu Sans Mono", size: 8pt)[parent(tom, Y), parent(Y, G)]),
-  g((1, 2), text(font: "DejaVu Sans Mono", size: 8pt)[parent(mary, G)  (Y = mary)]),
-  g((0, 3.1), [*G = ann* #linebreak() #text(size: 8pt)[1st solution]], hl: true),
-  g((2, 3.1), [*G = pat* #linebreak() #text(size: 8pt)[via choice point]], alt: true),
-  edge((1, 0), (1, 1), "->", stroke: 0.8pt + luma(120)),
-  edge((1, 1), (1, 2), "->", stroke: 0.8pt + rgb("#1A9988")),
-  edge((1, 2), (0, 3.1), "->", stroke: 0.9pt + rgb("#1A9988"), label: [#text(size: 8pt)[clause 2]], label-fill: white),
-  edge((1, 2), (2, 3.1), "->", stroke: 0.8pt + rgb("#C2553F"), label: [#text(size: 8pt)[redo -> clause 3]], label-fill: white),
-)
+#context {
+  let maxw(bodies) = calc.max(..bodies.map(body => measure(body).width))
+  let maxh(bodies) = calc.max(..bodies.map(body => measure(body).height))
+  // boxes are sized from the measured text, so no goal can wrap or clip
+  let W = maxw((q1, q2, q3)) + 2 * pad
+  let H = maxh((q1, q2, q3)) + 2 * pad
+  let WO = maxw((solved, choice)) + 2 * pad
+  let HO = maxh((solved, choice)) + 2 * pad
+  let vgap = 20pt
+  let bgap = 44pt
+  let hgap = 22pt
+  let y1 = H / 2
+  let y2 = y1 - H - vgap
+  let y3 = y2 - H - vgap
+  let y4 = y3 - H / 2 - bgap - HO / 2
+  let X = W / 2 + hgap + WO / 2
+  let ytop = y3 - H / 2
+
+  cetz.canvas(length: 1pt, {
+    import cetz.draw: *
+    let bx(name, pos, w, h, body, stroke: luma(130), fill: white) = content(
+      pos, box(width: w - 2 * pad, height: h - 2 * pad, align(center + horizon, body)),
+      name: name, frame: "rect", padding: pad, stroke: stroke, fill: fill,
+    )
+    bx("q1", (0, y1), W, H, q1, stroke: 0.8pt + luma(130))
+    bx("q2", (0, y2), W, H, q2, stroke: 0.8pt + luma(130))
+    bx("q3", (0, y3), W, H, q3, stroke: 0.8pt + luma(130))
+    bx("ok", (-X, y4), WO, HO, solved, stroke: 0.8pt + teal, fill: rgb("#F2F8F6"))
+    bx("co", (X, y4), WO, HO, choice, stroke: 0.8pt + red, fill: rgb("#FDF3F1"))
+    let arrow(from, to, paint, weight: 0.8pt) = line(
+      from, to, stroke: weight + paint, mark: (end: "stealth", fill: paint, scale: 0.7))
+    arrow("q1.south", "q2.north", luma(120))
+    arrow("q2.south", "q3.north", teal)
+    arrow("q3.south", "ok.north", teal, weight: 0.9pt)
+    arrow("q3.south", "co.north", red)
+    // both tags share one baseline in the empty band above the branches; the lift
+    // covers the drop of the slanted stroke across the wider tag, so ink stays clear
+    let first = text(size: 8pt)[clause 2]
+    let second = text(size: 8pt)[redo -> clause 3]
+    let tag-y = ytop - bgap * 0.72 + 6pt + maxw((first, second)) / 2 * (bgap / X)
+    content((-X * 0.72, tag-y), first, anchor: "south")
+    content((X * 0.72, tag-y), second, anchor: "south")
+  })
+}
 #+END_SRC
 
 Step through =rules-and-conjunction= with *Goal stack* and *Search* open to watch ~Y = mary~ bind and a choice point appear at =parent(mary, G)=.
@@ -90,23 +127,53 @@ The cut operator =!= always succeeds and immediately discards every choice point
 
 #+CAPTION: Cut (!) discards the choice point to clause 2 once X >= Y succeeds
 #+BEGIN_SRC typst :results svg
+#set page(margin: 10pt)
 #set text(size: 9pt)
-#import "@preview/fletcher:0.5.8": diagram, node, edge
+#import "@preview/cetz:0.5.2" as cetz
 
-#let boxnode(pos, body, hl: false, cut: false) = node(
-  pos, body, shape: rect, inset: 5pt, width: 108pt,
-  stroke: 0.8pt + if hl { rgb("#1A9988") } else if cut { rgb("#C2553F") } else { luma(130) },
-  fill: if hl { rgb("#F2F8F6") } else if cut { rgb("#FDF3F1") } else { white },
-)
+#let mono(body) = text(font: "DejaVu Sans Mono", size: 8pt, body)
+#let pad = 7pt
+#let query = mono[max3(5, 3, M)]
+#let taken = [*clause 1: 5 >= 3, !* #linebreak() #text(size: 8pt)[commits -> M = 5]]
+#let pruned = [#strike[*clause 2: pruned*] #linebreak() #text(size: 8pt)[choice point dropped]]
+#let teal = rgb("#1A9988")
+#let red = rgb("#C2553F")
 
-#diagram(
-  spacing: (18pt, 12pt),
-  boxnode((1, 0), text(font: "DejaVu Sans Mono", size: 8pt)[max3(5, 3, M)]),
-  boxnode((0, 1.2), [*clause 1: 5 >= 3, !* #linebreak() #text(size: 8pt)[commits -> M = 5]], hl: true),
-  boxnode((2, 1.2), [*clause 2: pruned* #linebreak() #text(size: 8pt)[choice point dropped]], cut: true),
-  edge((1, 0), (0, 1.2), "->", stroke: 0.9pt + rgb("#1A9988")),
-  edge((1, 0), (2, 1.2), "->", stroke: (paint: rgb("#C2553F"), thickness: 0.8pt, dash: "dashed"), label: [#text(size: 8pt)[cut!]], label-fill: white),
-)
+#context {
+  let maxw(bodies) = calc.max(..bodies.map(body => measure(body).width))
+  let maxh(bodies) = calc.max(..bodies.map(body => measure(body).height))
+  let WT = maxw((query,)) + 2 * pad
+  let HT = maxh((query,)) + 2 * pad
+  let WB = maxw((taken, pruned)) + 2 * pad
+  let HB = maxh((taken, pruned)) + 2 * pad
+  let bgap = 46pt
+  let hgap = 110pt
+  let X = WB / 2 + hgap / 2
+  let ytop = -HT / 2
+  let ybot = ytop - bgap - HB / 2
+
+  cetz.canvas(length: 1pt, {
+    import cetz.draw: *
+    let bx(name, pos, w, h, body, stroke: luma(130), fill: white) = content(
+      pos, box(width: w - 2 * pad, height: h - 2 * pad, align(center + horizon, body)),
+      name: name, frame: "rect", padding: pad, stroke: stroke, fill: fill,
+    )
+    bx("q", (0, 0), WT, HT, query, stroke: 0.8pt + luma(130))
+    bx("c1", (-X, ybot), WB, HB, taken, stroke: 0.8pt + teal, fill: rgb("#F2F8F6"))
+    // the discarded clause is faded, struck through and framed with a dashed rule
+    bx("c2", (X, ybot), WB, HB, {
+      set text(fill: luma(118))
+      pruned
+    }, stroke: (paint: luma(150), thickness: 0.8pt, dash: "dashed"), fill: luma(247))
+    line("q.south", "c1.north", stroke: 0.9pt + teal,
+      mark: (end: "stealth", fill: teal, scale: 0.7))
+    line("q.south", "c2.north", stroke: (paint: red, thickness: 0.8pt, dash: "dashed"),
+      mark: (end: "stealth", fill: red, scale: 0.7))
+    let cut = text(size: 8pt)[cut!]
+    let lift = 6pt + measure(cut).width / 2 * (bgap / X)
+    content((X * 0.72, ytop - bgap * 0.72 + lift), cut, anchor: "south")
+  })
+}
 #+END_SRC
 
 #+NAME: cut-prunes

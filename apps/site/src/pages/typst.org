@@ -5,19 +5,20 @@ Didact uses the exact same Typst 0.15 compiler in two distinct layers. Everythin
 
 #+CAPTION: Two lifecycles for Typst in Didact: build-time static artifacts vs in-browser kernel
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
 #let boxnode(pos, title, sub, hl: false) = node(
   pos,
   [*#title* #linebreak() #text(size: 8pt)[#sub]],
-  shape: rect, inset: 6pt, width: 112pt,
+  shape: rect, inset: 6pt, width: 132pt,
   stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
   fill: if hl { rgb("#F2F8F6") } else { white },
 )
 
 #diagram(
-  spacing: (18pt, 12pt),
+  spacing: (12pt, 17.5pt),
   boxnode((0, 0), [Prose math & :results svg], [compiled at build time]),
   boxnode((1.95, 0), [Static MathML + SVG], [instant paint, zero JS], hl: true),
   boxnode((0, 1.25), [Plain typst src block], [editable in browser]),
@@ -37,10 +38,11 @@ Static diagram blocks (=:results svg=) can import any =@preview= package — the
 
 #+CAPTION: Damped oscillation curve computed and plotted at build time with @preview/lilaq
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9.5pt)
 #import "@preview/lilaq:0.6.0" as lq
 
-#let xs = lq.linspace(0, 4, num: 61)
+#let xs = lq.linspace(0, 4, num: 121)
 #let ys = xs.map(t => calc.exp(-t / 1.6) * calc.sin(2 * calc.pi * 0.9 * t))
 
 #lq.diagram(
@@ -53,6 +55,7 @@ Static diagram blocks (=:results svg=) can import any =@preview= package — the
 
 #+CAPTION: Unit circle with radius, perpendicular tangent, and angle drawn with @preview/cetz
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 10pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
@@ -60,17 +63,17 @@ Static diagram blocks (=:results svg=) can import any =@preview= package — the
 #let c = calc.cos(a)
 #let s = calc.sin(a)
 
-#canvas(length: 1.6cm, {
+#canvas(length: 2.6cm, {
   import draw: *
   circle((0, 0), radius: 1, stroke: 0.9pt + rgb("#1A9988"))
   line((0, 0), (1, 0), stroke: 0.7pt + rgb("#1A9988"))
   line((0, 0), (c, s), stroke: (paint: rgb("#8A5A44"), thickness: 0.7pt, dash: "dashed"))
-  line((c - 0.8 * s, s + 0.8 * c), (c + 0.8 * s, s - 0.8 * c), stroke: 0.9pt + rgb("#1A9988"))
-  arc((0.48, 0), start: 0deg, stop: a, radius: 0.48, stroke: 0.7pt + rgb("#1A9988"))
+  line((c - 0.7 * s, s + 0.7 * c), (c + 0.7 * s, s - 0.7 * c), stroke: 0.9pt + rgb("#1A9988"))
+  arc((0.52, 0), start: 0deg, stop: a, radius: 0.52, stroke: 0.7pt + rgb("#1A9988"))
   circle((0, 0), radius: 0.04, fill: rgb("#1A9988"), stroke: none)
-  content((0.27, 0.13), [$theta$], anchor: "center")
-  content((0.33, 0.43), [$r$], anchor: "south-east")
-  content((-0.07, -0.07), [$O$], anchor: "north-east")
+  content((0.334, 0.135), [$theta$], anchor: "center")
+  content((0.212, 0.385), [$r$], anchor: "center")
+  content((-0.09, -0.09), [$O$], anchor: "north-east")
 })
 #+END_SRC
 

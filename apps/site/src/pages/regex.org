@@ -9,31 +9,78 @@ Instead of guessing one branch and backtracking on failure, a Thompson NFA keeps
 
 #+CAPTION: Thompson NFA for /(a|b)+c/ with epsilon split and loop-back transitions
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
-#import "@preview/fletcher:0.5.8": diagram, node, edge
+#import "@preview/cetz:0.5.2": canvas, draw
 
-#let st(pos, body, hl: false) = node(
-  pos, body, shape: circle, inset: 4pt, width: 28pt,
-  stroke: 0.9pt + if hl { rgb("#1A9988") } else { luma(120) },
-  fill: if hl { rgb("#F2F8F6") } else { white },
-)
+#canvas(length: 1cm, {
+  import draw: *
+  let mono(body) = text(font: "DejaVu Sans Mono", size: 8pt, body)
 
-#diagram(
-  spacing: (18pt, 10pt),
-  st((0, 0.7), [$s_0$], hl: true),
-  st((1.2, 0), [$a$]),
-  st((1.2, 1.4), [$b$]),
-  st((2.4, 0.7), [$s_3$]),
-  st((3.6, 0.7), [$c$]),
-  st((4.8, 0.7), [acc], hl: true),
-  edge((0, 0.7), (1.2, 0), "->", stroke: 0.8pt + luma(120), label: [$epsilon$], label-fill: white),
-  edge((0, 0.7), (1.2, 1.4), "->", stroke: 0.8pt + luma(120), label: [$epsilon$], label-fill: white),
-  edge((1.2, 0), (2.4, 0.7), "->", stroke: 0.8pt + rgb("#1A9988"), label: ['a'], label-fill: white),
-  edge((1.2, 1.4), (2.4, 0.7), "->", stroke: 0.8pt + rgb("#1A9988"), label: ['b'], label-fill: white),
-  edge((2.4, 0.7), (0, 0.7), "->", bend: -42deg, stroke: 0.8pt + rgb("#C2553F"), label: [$epsilon$ (loop)], label-fill: white),
-  edge((2.4, 0.7), (3.6, 0.7), "->", stroke: 0.8pt + luma(120), label: [$epsilon$], label-fill: white),
-  edge((3.6, 0.7), (4.8, 0.7), "->", stroke: 0.9pt + rgb("#1A9988"), label: ['c'], label-fill: white),
-)
+  // 31pt-diameter states: widest label is "acc", leaving ~9pt on either side
+  let r = 0.55cm
+
+  let s0 = (0cm, 0cm)
+  let a = (2.3cm, 1cm)
+  let b = (2.3cm, -1cm)
+  let s3 = (4.6cm, 0cm)
+  let c = (7cm, 0cm)
+  let acc = (9.4cm, 0cm)
+
+  // point on the circle around `center` in the direction of `toward`
+  let rim(center, toward) = {
+    let dx = (toward.at(0) - center.at(0)) / 1cm
+    let dy = (toward.at(1) - center.at(1)) / 1cm
+    let l = calc.sqrt(dx * dx + dy * dy)
+    (center.at(0) + dx / l * r, center.at(1) + dy / l * r)
+  }
+
+  let disc(pos, body, hi: false) = {
+    circle(pos, radius: r,
+      stroke: 0.9pt + if hi { rgb("#1A9988") } else { luma(120) },
+      fill: if hi { rgb("#F2F8F6") } else { white })
+    content(pos, body)
+  }
+
+  // one transition: rim to rim, symbol label parked to one side of the stroke
+  let spoke(from, to, lbl, side: 1, color: luma(130)) = {
+    let p = rim(from, to)
+    let q = rim(to, from)
+    let m = ((p.at(0) + q.at(0)) / 2, (p.at(1) + q.at(1)) / 2)
+    let dx = (to.at(0) - from.at(0)) / 1cm
+    let dy = (to.at(1) - from.at(1)) / 1cm
+    let l = calc.sqrt(dx * dx + dy * dy)
+    let off = 0.33cm * side
+    line(p, q, stroke: 0.8pt + color, mark: (end: ">", fill: color, scale: 0.85))
+    content((m.at(0) - dy / l * off, m.at(1) + dx / l * off), lbl)
+  }
+
+  disc(s0, [$s_0$], hi: true)
+  disc(a, [$a$])
+  disc(b, [$b$])
+  disc(s3, [$s_3$])
+  disc(c, [$c$])
+  disc(acc, [acc], hi: true)
+
+  spoke(s0, a, [$epsilon$])
+  spoke(s0, b, [$epsilon$], side: -1)
+  spoke(a, s3, mono("a"), color: rgb("#1A9988"))
+  spoke(b, s3, mono("b"), side: -1, color: rgb("#1A9988"))
+  spoke(s3, c, [$epsilon$])
+  spoke(c, acc, mono("c"), color: rgb("#1A9988"))
+
+  // the `+` loop back to the split runs in its own lane above every state
+  let lane = 2.05cm
+  line(
+    (s3.at(0), r), (s3.at(0), lane), (s0.at(0), lane), (s0.at(0), r),
+    stroke: 0.8pt + rgb("#B3402E"), radius: 0.14cm,
+    mark: (end: ">", fill: rgb("#B3402E"), scale: 0.85),
+  )
+  content(
+    ((s0.at(0) + s3.at(0)) / 2, lane + 0.38cm),
+    [$epsilon$ (loop)],
+  )
+})
 #+END_SRC
 
 Unanchored searches try start positions $0, 1, 2, dots.c$ until one succeeds and keep the longest span from that earliest start (POSIX leftmost-longest). Step through =regex-classes= watching the caret in *Input* advance across =zzabcaz=.
@@ -88,19 +135,35 @@ A backtracking engine can take $O(2^n)$ steps on nested quantifiers like =/(a*)*
 
 #+CAPTION: Backtracking O(2^n) blowup versus Thompson NFA linear O(n) work
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/lilaq:0.6.0" as lq
 
 #let ns = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 #let bt = ns.map(n => calc.pow(2, n))
 #let nfa = ns.map(n => 6 * n)
+#let hot = rgb("#B3402E")
+#let cool = rgb("#1A9988")
+#let key(c) = box(width: 16pt, line(length: 16pt, stroke: 1.5pt + c))
 
-#lq.diagram(
-  width: 8.5cm, height: 3.8cm,
-  xlabel: [input length $n$], ylabel: [state visits],
-  legend: (position: top + left),
-  lq.plot(ns, bt, mark: none, stroke: rgb("#C2553F"), label: [backtracking $2^n$]),
-  lq.plot(ns, nfa, mark: none, stroke: rgb("#1A9988"), label: [Thompson NFA $O(n)$]),
+#grid(
+  columns: (auto, auto, auto, auto),
+  column-gutter: (5pt, 22pt, 5pt),
+  row-gutter: 10pt,
+  align: horizon,
+  key(hot), [backtracking $2^n$],
+  key(cool), [Thompson NFA $O(n)$],
+  grid.cell(colspan: 4, align: center, lq.diagram(
+    width: 12cm, height: 4.8cm,
+    xlabel: [input length $n$],
+    ylabel: [state visits],
+    ylim: (0, 1150),
+    xaxis: (tick-distance: 1, subticks: none),
+    yaxis: (tick-distance: 250, subticks: none, exponent: 0),
+    legend: none,
+    lq.plot(ns, bt, mark: none, stroke: hot),
+    lq.plot(ns, nfa, mark: none, stroke: cool),
+  )),
 )
 #+END_SRC
 

@@ -11,41 +11,63 @@ $$ "addr"(r, c) = (c - 1) dot.c R + (r - 1) $$
 
 #+CAPTION: 2x3 matrix A laid out column-major in linear memory (0-based offsets)
 #+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
-#canvas(length: 1cm, {
+#canvas(length: 1pt, {
   import draw: *
-  // 2x3 logical matrix
-  content((1.5, 2.35), [*Logical 2x3 matrix A*])
+
+  let accent = rgb("#1A9988")
+  let tint = rgb("#F2F8F6")
+  let edge = luma(140)
+  let sub = luma(105)
+  let mono = "DejaVu Sans Mono"
+
+  let gut = 36   // gutter for row labels
+  let cw = 76    // matrix column width
+  let mg = 4     // gap between neighbouring tiles
+  let mw = 36    // flat-memory tile width (2 * mw + mg = cw, so a column maps onto its pair)
+  let mh = 28    // tile height
+  let ch = 28    // matrix row height
+
+  // flat memory strip, y in [0, mh]
+  let flat = ("1", "4", "2", "5", "3", "6")
+  for i in range(6) {
+    let x = gut + i * (mw + mg)
+    let hl = i < 2
+    rect((x, 0), (x + mw, mh),
+      fill: if hl { tint } else { white },
+      stroke: (if hl { 0.9pt } else { 0.7pt }) + (if hl { accent } else { edge }),
+      radius: 0)
+    content((x + mw / 2, mh / 2), text(font: mono, size: 12pt, weight: "bold")[#flat.at(i)])
+    content((x + mw / 2, -9), text(font: mono, size: 8pt, fill: sub)[#i])
+  }
+  content((gut - 7, -9), anchor: "east", text(size: 8pt, fill: sub)[offset])
+
+  // which column each pair of cells comes from
+  for c in range(3) {
+    content((gut + c * (cw + mg) + cw / 2, 38), text(size: 8pt, fill: sub)[column #(c + 1)])
+  }
+
+  // logical 2x3 matrix A, first row on top
   let rows = (("1", "2", "3"), ("4", "5", "6"))
   for r in range(2) {
     for c in range(3) {
-      let x = c * 1.0
-      let y = 1.2 - r * 0.8
+      let x = gut + c * (cw + mg)
+      let y = 48 + (1 - r) * 32
       let hl = c == 0
-      rect((x, y), (x + 0.9, y + 0.7),
-        stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
-        fill: if hl { rgb("#F2F8F6") } else { white })
-      content((x + 0.45, y + 0.35), text(font: "DejaVu Sans Mono", weight: "bold")[#rows.at(r).at(c)])
+      rect((x, y), (x + cw, y + ch),
+        fill: if hl { tint } else { white },
+        stroke: (if hl { 0.9pt } else { 0.7pt }) + (if hl { accent } else { edge }),
+        radius: 0)
+      content((x + cw / 2, y + ch / 2), text(font: mono, size: 12pt, weight: "bold")[#rows.at(r).at(c)])
     }
+    content((gut - 7, 48 + (1 - r) * 32 + ch / 2), anchor: "east", text(size: 8pt, fill: sub)[row #(r + 1)])
   }
 
-  // Arrow
-  line((3.15, 1.15), (4.05, 1.15), stroke: 0.9pt + rgb("#1A9988"), mark: (end: ">"))
-
-  // Flat column-major memory
-  content((7.1, 2.35), [*Flat column-major memory*])
-  let flat = ("1", "4", "2", "5", "3", "6")
-  for i in range(6) {
-    let x = 4.2 + i * 0.96
-    let hl = i < 2
-    rect((x, 0.8), (x + 0.9, 1.5),
-      stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
-      fill: if hl { rgb("#F2F8F6") } else { white })
-    content((x + 0.45, 1.15), text(font: "DejaVu Sans Mono", weight: "bold")[#flat.at(i)])
-    content((x + 0.45, 0.5), text(font: "DejaVu Sans Mono", size: 7.5pt, fill: luma(90))[+#i])
-  }
+  content((gut + (3 * cw + 2 * mg) / 2, 119), text(weight: "bold")[Logical 2x3 matrix A])
+  content((gut + (3 * cw + 2 * mg) / 2, -23), text(size: 8pt, fill: sub)[Flat column-major memory #sym.dash.en 0-based offsets])
 })
 #+END_SRC
 
@@ -76,16 +98,19 @@ Bare =*= performs matrix multiplication; dotted =.*= multiplies element by eleme
 
 #+CAPTION: Quadratic fit p(x) = 12 - 13x + 7x^2 solved via M \ b
 #+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/lilaq:0.6.0" as lq
 
-#let xs = lq.linspace(0.5, 3.4, num: 50)
+#let xs = lq.linspace(0.55, 3.3, num: 60)
 #let ys = xs.map(x => 12 - 13 * x + 7 * x * x)
 
 #lq.diagram(
-  width: 8.5cm, height: 3.8cm,
+  width: 11.2cm, height: 5.0cm,
+  xlim: (0.4, 3.4),
+  xaxis: (ticks: (0.5, 1.0, 1.5, 2.0, 2.5, 3.0)),
   xlabel: [$x$], ylabel: [$p(x)$],
-  legend: (position: top + left),
+  legend: (position: bottom + right, pad: 5pt, fill: white, stroke: 0.4pt + luma(185), inset: 3pt),
   lq.plot(xs, ys, mark: none, stroke: rgb("#1A9988"), label: [$12 - 13x + 7x^2$]),
   lq.scatter((1, 2, 3), (6, 14, 36), size: (36, 36, 36), color: rgb("#C2553F"), label: [data points]),
 )

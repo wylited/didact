@@ -9,22 +9,35 @@ Unlike Scheme (see [[file:lisp.org][Lisp from Cons Cells Up]]), Emacs Lisp is a 
 
 #+CAPTION: One Elisp symbol holding independent value and function cells
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
-#let boxnode(pos, body, hl: false) = node(
-  pos, body, shape: rect, inset: 6pt, width: 112pt,
+#let cell(pos, title, body, hl: false) = node(
+  pos,
+  align(center, [*#title* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[#body]]),
+  shape: rect, inset: 7pt, width: 132pt,
   stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
   fill: if hl { rgb("#F2F8F6") } else { white },
 )
 
 #diagram(
-  spacing: (20pt, 10pt),
-  boxnode((0, 0.55), [*symbol* #linebreak() #text(font: "DejaVu Sans Mono", weight: "bold")[double]]),
-  boxnode((1.8, 0), [*value cell* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[99  (from setq)]]),
-  boxnode((1.8, 1.1), [*function cell* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[(lambda (x) (\* 2 x))]], hl: true),
-  edge((0, 0.55), (1.8, 0), "->", stroke: 0.8pt + luma(120), label: [#text(size: 8pt)[double]], label-fill: white),
-  edge((0, 0.55), (1.8, 1.1), "->", stroke: 0.9pt + rgb("#1A9988"), label: [#text(size: 8pt)[(double 4)]], label-fill: white),
+  spacing: (1pt, 1pt),
+  mark-scale: 1.3,
+  node(
+    (0pt, 0pt),
+    align(center, [*symbol* #linebreak() #text(font: "DejaVu Sans Mono", weight: "bold")[double]]),
+    shape: rect, inset: 7pt, width: 100pt,
+    stroke: 0.8pt + luma(130), fill: white,
+  ),
+  cell((306pt, 52pt), [value cell], [99  (from setq)]),
+  cell((306pt, -52pt), [function cell], [(lambda (x) (\* 2 x))], hl: true),
+  edge((50pt, 0pt), (118pt, 0pt), stroke: 0.9pt + luma(120), snap-to: (none, none)),
+  edge((118pt, 52pt), (118pt, -52pt), stroke: 0.9pt + luma(120), snap-to: (none, none)),
+  edge((118pt, 52pt), (240pt, 52pt), "->", stroke: 0.9pt + luma(120), snap-to: (none, none)),
+  edge((118pt, -52pt), (240pt, -52pt), "->", stroke: 0.9pt + rgb("#1A9988"), snap-to: (none, none)),
+  node((180pt, 65pt), text(size: 8pt)[double], shape: rect, inset: 5pt, width: 44pt, fill: white, stroke: 0.5pt + luma(160)),
+  node((180pt, -65pt), text(size: 8pt)[(double 4)], shape: rect, inset: 5pt, width: 58pt, fill: white, stroke: 0.5pt + luma(160)),
 )
 #+END_SRC
 
@@ -49,23 +62,27 @@ Without a file-local header on line 1, Emacs Lisp uses *dynamic binding*: a =let
 
 #+CAPTION: Dynamic lookup walks the call stack; lexical lookup follows the defining scope
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
-#let card(pos, body, warn: false) = node(
-  pos, body, shape: rect, inset: 6pt, width: 118pt,
+#let card(pos, title, body, warn: false) = node(
+  pos,
+  align(center, [*#title* #linebreak() #text(size: 8pt)[#body]]),
+  shape: rect, inset: 7pt, width: 136pt,
   stroke: 0.8pt + if warn { rgb("#C2553F") } else { rgb("#1A9988") },
   fill: if warn { rgb("#FDF3F1") } else { rgb("#F2F8F6") },
 )
 
 #diagram(
-  spacing: (18pt, 10pt),
-  card((0, 0), [*dynamic (default)* #linebreak() #text(size: 8pt)[let binds x=2 on stack]], warn: true),
-  card((1.9, 0), [*(get-x) -> 2* #linebreak() #text(size: 8pt)[reads caller's dynamic x]], warn: true),
-  card((0, 1.15), [*lexical-binding: t* #linebreak() #text(size: 8pt)[let binds x=2 in local env]]),
-  card((1.9, 1.15), [*(get-x) -> 1* #linebreak() #text(size: 8pt)[reads top-level global x]]),
-  edge((0, 0), (1.9, 0), "->", stroke: 0.8pt + rgb("#C2553F")),
-  edge((0, 1.15), (1.9, 1.15), "->", stroke: 0.8pt + rgb("#1A9988")),
+  spacing: (1pt, 1pt),
+  mark-scale: 1.3,
+  card((0pt, 27pt), [dynamic (default)], [let binds x=2 on stack], warn: true),
+  card((186pt, 27pt), [(get-x) -> 2], [reads caller's dynamic x], warn: true),
+  card((0pt, -27pt), [lexical-binding: t], [let binds x=2 in local env]),
+  card((186pt, -27pt), [(get-x) -> 1], [reads top-level global x]),
+  edge((68pt, 27pt), (118pt, 27pt), "->", stroke: 0.8pt + rgb("#C2553F"), snap-to: (none, none)),
+  edge((68pt, -27pt), (118pt, -27pt), "->", stroke: 0.8pt + rgb("#1A9988"), snap-to: (none, none)),
 )
 #+END_SRC
 

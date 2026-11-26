@@ -13,16 +13,16 @@ MIPS assembly lets you write convenient pseudo-instructions like =la= (load 32-b
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
 #let src(pos, body) = node(
-  pos, body, shape: rect, inset: 6pt, width: 112pt,
+  pos, body, shape: rect, inset: 7pt, width: 120pt,
   stroke: 0.8pt + luma(120), fill: white,
 )
 #let real(pos, body) = node(
-  pos, body, shape: rect, inset: 6pt, width: 150pt,
+  pos, body, shape: rect, inset: 7pt, width: 136pt,
   stroke: 0.8pt + rgb("#1A9988"), fill: rgb("#F2F8F6"),
 )
 
 #diagram(
-  spacing: (22pt, 12pt),
+  spacing: (26pt, 15pt),
   src((0, 0), text(font: "DejaVu Sans Mono")[la \$a0, msg]),
   real((1.8, 0), text(font: "DejaVu Sans Mono")[lui \$a0, 0x1001 #linebreak() ori \$a0, \$a0, 0x0000]),
   src((0, 1.2), text(font: "DejaVu Sans Mono")[ble \$t1, 10, loop]),
@@ -94,27 +94,54 @@ Multiplying two 32-bit integers can produce up to 64 bits. Rather than writing t
 #+CAPTION: 64-bit mult result split across hi (bits 63..32) and lo (bits 31..0)
 #+BEGIN_SRC typst :results svg
 #set text(size: 9pt)
+#set page(margin: 12pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
-#canvas(length: 1cm, {
+#context {
+  let mono(body, size: 9pt, fill: black) = text(font: "DejaVu Sans Mono", size: size, fill: fill, body)
+  let half-w = calc.max(
+    measure(mono[hi (bits 63..32)]).width,
+    measure(mono[lo (bits 31..0)]).width,
+    measure(mono(size: 8pt)[mfhi -> high 32]).width,
+    measure(mono(size: 8pt)[mflo -> low 32]).width,
+    ) + 42pt
+  let op-w = measure(mono[\$v0 (32-bit)]).width + 20pt
+
+  canvas({
   import draw: *
-  rect((0, 1.5), (2.4, 2.2), stroke: 0.8pt + luma(120), fill: white)
-  content((1.2, 1.85), text(font: "DejaVu Sans Mono")[\$v0 (32-bit)])
-  content((2.9, 1.85), [$times$])
-  rect((3.4, 1.5), (5.8, 2.2), stroke: 0.8pt + luma(120), fill: white)
-  content((4.6, 1.85), text(font: "DejaVu Sans Mono")[\$t0 (32-bit)])
+  let accent = rgb("#1A9988")
+  let warm = rgb("#B3402E")
+  let cx = half-w
+  let right = 2 * half-w
+  let y-bot = 0pt
+  let y-mid = 26pt
+  let y-arrow = y-mid + 46pt
+  let y-op = y-mid + 40pt
+  let y-op-top = y-op + 26pt
+  let mid = (y-bot + y-mid) / 2
 
-  line((2.9, 1.45), (2.9, 0.95), stroke: 0.9pt + rgb("#1A9988"), mark: (end: ">"))
-  content((4.1, 1.2), text(font: "DejaVu Sans Mono", size: 8.5pt, fill: rgb("#1A9988"))[mult \$v0, \$t0])
+  // 64-bit product split into hi / lo halves
+  rect((0pt, y-bot), (cx, y-mid), stroke: 1pt + warm, fill: rgb("#FDF3F1"))
+  rect((cx, y-bot), (right, y-mid), stroke: 1pt + accent, fill: rgb("#F2F8F6"))
+  content((cx / 2, mid), mono[hi (bits 63..32)])
+  content((cx + cx / 2, mid), mono[lo (bits 31..0)])
 
-  rect((0, 0.1), (2.9, 0.85), stroke: 0.9pt + rgb("#C2553F"), fill: rgb("#FDF3F1"))
-  content((1.45, 0.475), text(font: "DejaVu Sans Mono")[hi (bits 63..32)])
-  rect((2.9, 0.1), (5.8, 0.85), stroke: 0.9pt + rgb("#1A9988"), fill: rgb("#F2F8F6"))
-  content((4.35, 0.475), text(font: "DejaVu Sans Mono")[lo (bits 31..0)])
+  // operands
+  rect((cx / 2 - op-w / 2, y-op), (cx / 2 + op-w / 2, y-op-top), stroke: 0.8pt + luma(120), fill: white)
+  rect((cx + cx / 2 - op-w / 2, y-op), (cx + cx / 2 + op-w / 2, y-op-top), stroke: 0.8pt + luma(120), fill: white)
+  content((cx / 2, (y-op + y-op-top) / 2), mono[\$v0 (32-bit)])
+  content((cx + cx / 2, (y-op + y-op-top) / 2), mono[\$t0 (32-bit)])
+  content((cx, (y-op + y-op-top) / 2), text(size: 11pt)[×])
 
-  content((1.45, -0.3), text(font: "DejaVu Sans Mono", size: 8pt, fill: rgb("#8B1A1A"))[mfhi -> high 32])
-  content((4.35, -0.3), text(font: "DejaVu Sans Mono", size: 8pt, fill: rgb("#1A9988"))[mflo -> low 32])
-})
+  // mult writes the full 64-bit product into hi:lo
+  line((cx, y-arrow), (cx, y-mid), stroke: 1pt + accent, mark: (end: ">", fill: accent))
+  content((cx + 9pt, (y-mid + y-arrow) / 2), anchor: "west", mono(size: 8.5pt, fill: accent)[mult \$v0, \$t0])
+
+  // reads back out
+  content((cx / 2, y-bot - 15pt), mono(size: 8pt, fill: warm)[mfhi -> high 32])
+  content((cx + cx / 2, y-bot - 15pt), mono(size: 8pt, fill: accent)[mflo -> low 32])
+  })
+}
 #+END_SRC
 
 Step into =jal fact= below and watch =$ra= capture the return address (=pc + 4=) while *hi · lo · pc* updates on every =mult=.

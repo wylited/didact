@@ -9,24 +9,28 @@ C++ ties resource lifetimes to lexical scopes instead of a garbage collector or 
 
 #+CAPTION: Stack-frame construction and reverse-order destruction (RAII)
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
-#let step(pos, body, hl: false) = node(
-  pos, body, shape: rect, inset: 6pt, width: 88pt,
-  stroke: 0.8pt + if hl { rgb("#C2553F") } else { rgb("#1A9988") },
+#let mono(body) = text(font: "DejaVu Sans Mono", size: 8pt, body)
+#let step(pos, lead, detail, hl: false) = node(
+  pos,
+  [*#lead* #linebreak() #mono(detail)],
+  shape: rect, inset: 6pt, width: 104pt,
+  stroke: 0.8pt + if hl { rgb("#B3402E") } else { rgb("#1A9988") },
   fill: if hl { rgb("#FDF3F1") } else { rgb("#F2F8F6") },
 )
 
 #diagram(
-  spacing: (14pt, 12pt),
-  step((0, 0), [*construct* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[outer]]),
-  step((1.4, 0), [*construct* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[inner]]),
-  step((2.8, 0), [*~Trace()* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[inner leaves {}]], hl: true),
-  step((4.2, 0), [*~Trace()* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[outer leaves main]], hl: true),
-  edge((0, 0), (1.4, 0), "->", stroke: 0.8pt + luma(120)),
-  edge((1.4, 0), (2.8, 0), "->", stroke: 0.8pt + luma(120)),
-  edge((2.8, 0), (4.2, 0), "->", stroke: 0.8pt + luma(120)),
+  spacing: (18pt, 12pt),
+  step((0, 0), [construct], [outer]),
+  step((1, 0), [construct], [inner]),
+  step((2, 0), [\~Trace()], [inner leaves {}], hl: true),
+  step((3, 0), [\~Trace()], [outer leaves main], hl: true),
+  edge((0, 0), (1, 0), "->", stroke: 0.8pt + luma(120)),
+  edge((1, 0), (2, 0), "->", stroke: 0.8pt + luma(120)),
+  edge((2, 0), (3, 0), "->", stroke: 0.8pt + luma(120)),
 )
 #+END_SRC
 
@@ -69,20 +73,37 @@ When =push_back= fills a vector's heap buffer, =std::vector= allocates a new buf
 
 #+CAPTION: std::vector size vs geometric capacity doubling across 9 pushes
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/lilaq:0.6.0" as lq
 
-#let xs = (1, 2, 3, 4, 5, 6, 7, 8, 9)
 #let sz = (1, 2, 3, 4, 5, 6, 7, 8, 9)
-#let cap = (1, 2, 4, 4, 8, 8, 8, 8, 16)
+#let stepx = (1, 2, 2, 3, 3, 5, 5, 9, 9)
+#let stepy = (1, 1, 2, 2, 4, 4, 8, 8, 16)
+#let teal = rgb("#1A9988")
+#let brown = rgb("#8A5A44")
 
-#lq.diagram(
-  width: 9cm, height: 4cm,
-  xlabel: [push count], ylabel: [elements],
-  legend: (position: top + left),
-  lq.plot(xs, cap, stroke: rgb("#1A9988"), label: [capacity]),
-  lq.plot(xs, sz, stroke: (paint: rgb("#8A5A44"), thickness: 0.8pt, dash: "dashed"), label: [size]),
-)
+#let entry(stroke, body) = grid(
+  columns: (16pt, 8pt, auto), align: horizon,
+  box(width: 16pt, height: 9pt, align(horizon, line(length: 16pt, stroke: stroke))),
+  [], text(size: 8pt, body))
+
+#show: lq.set-grid(stroke: 0.35pt + luma(205))
+#show: lq.cond-set(lq.grid.with(kind: "x"), stroke: none)
+
+#align(center, grid(
+  rows: (auto, 10pt, auto),
+  grid(columns: (auto, 30pt, auto), entry(1.2pt + teal, [capacity]), [], entry((paint: brown, thickness: 0.9pt, dash: "dashed"), [size])),
+  [],
+  lq.diagram(
+    width: 11.2cm, height: 5.4cm,
+    xlabel: [push count], ylabel: [elements],
+    xaxis: (tick-distance: 1, lim: (0.5, 9.5), mirror: none, subticks: none),
+    yaxis: (tick-distance: 4, lim: (0, 17), mirror: none, subticks: none),
+    lq.plot(sz, sz, stroke: (paint: brown, thickness: 0.9pt, dash: "dashed"), mark: none, color: brown),
+    lq.plot(stepx, stepy, stroke: (paint: teal, thickness: 1.2pt), mark: none, color: teal),
+  ),
+))
 #+END_SRC
 
 #+NAME: vector-growth

@@ -9,33 +9,50 @@ WebAssembly has no CPU registers. Every instruction pushes onto or pops from a t
 
 #+CAPTION: Operand stack transitions for (i32.add (i32.const 20) (i32.const 22))
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
-#canvas(length: 1cm, {
-  import draw: *
-  let cols = (
-    (x: 0.0, op: "start", items: ()),
-    (x: 2.3, op: "i32.const 20", items: ("20",)),
-    (x: 4.9, op: "i32.const 22", items: ("20", "22")),
-    (x: 7.5, op: "i32.add", items: ("42",)),
-  )
-  for c in cols {
-    rect((c.x, 0.2), (c.x + 1.7, 1.9), stroke: 0.7pt + luma(160), fill: rgb("#FAFAFA"))
-    content((c.x + 0.85, -0.15), text(font: "DejaVu Sans Mono", size: 8pt)[#c.op])
-    for (idx, val) in c.items.enumerate() {
-      let y = 0.3 + idx * 0.7
-      let hl = val == "42"
-      rect((c.x + 0.15, y), (c.x + 1.55, y + 0.58),
-        stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(110) },
-        fill: if hl { rgb("#F2F8F6") } else { white })
-      content((c.x + 0.85, y + 0.29), text(font: "DejaVu Sans Mono", weight: "bold")[#val])
+#context {
+  canvas(length: 1pt, {
+    import draw: *
+    let mono = "DejaVu Sans Mono"
+    let accent = rgb("#1A9988")
+    let soft = rgb("#F2F8F6")
+    let cols = (
+      (op: "start", items: ()),
+      (op: "i32.const 20", items: ("20",)),
+      (op: "i32.const 22", items: ("20", "22")),
+      (op: "i32.add", items: ("42",)),
+    )
+    let capw = cols
+      .map(c => measure(text(font: mono, size: 8pt)[#c.op]).width)
+      .fold(0pt, calc.max)
+    let cw = calc.max(capw + 20pt, 76pt)
+    let gap = 26pt
+    let step = cw + gap
+    let cellh = 17pt
+    let fh = 48pt
+    for (i, c) in cols.enumerate() {
+      let x = i * step
+      rect((x, 0pt), (x + cw, fh), stroke: 0.7pt + luma(170), fill: rgb("#FAFAFA"))
+      content((x + cw / 2, fh + 6pt), text(font: mono, size: 8pt, fill: luma(60))[#c.op], anchor: "south")
+      for (j, v) in c.items.enumerate() {
+        let hl = v == "42"
+        let y = 5pt + j * (cellh + 2.5pt)
+        rect((x + 10pt, y), (x + cw - 10pt, y + cellh),
+          stroke: 0.8pt + if hl { accent } else { luma(110) },
+          fill: if hl { soft } else { white })
+        content((x + cw / 2, y + cellh / 2), text(font: mono, size: 9.5pt, weight: "bold")[#v])
+      }
+      if i < cols.len() - 1 {
+        let y = fh / 2
+        line((x + cw, y), (x + step, y),
+          stroke: 0.9pt + accent, mark: (end: ">", fill: accent))
+      }
     }
-  }
-  for x in (1.75, 4.05, 6.65) {
-    line((x, 1.05), (x + 0.5, 1.05), stroke: 0.8pt + rgb("#1A9988"), mark: (end: ">"))
-  }
-})
+  })
+}
 #+END_SRC
 
 Step through =stack-arith= below and watch *Operand stack* grow and shrink. Notice =i32= multiplication wraps modulo $2^(32)$ ($65536^2 equiv 0 (mod 2^(32))$), and signed division =i32.div_s= truncates toward zero ($-7 / 2 = -3$).
@@ -82,24 +99,51 @@ WebAssembly forbids arbitrary =goto= so bytecode can be validated in a single li
 
 #+CAPTION: Opposite branch directions for block (exit forward) vs loop (repeat backward)
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
-#import "@preview/fletcher:0.5.8": diagram, node, edge
+#import "@preview/cetz:0.5.2": canvas, draw
 
-#let boxnode(pos, body, hl: false) = node(
-  pos, body, shape: rect, inset: 6pt, width: 108pt,
-  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
-  fill: if hl { rgb("#F2F8F6") } else { white },
-)
-
-#diagram(
-  spacing: (20pt, 12pt),
-  boxnode((0, 0), [*loop \$again* #linebreak() #text(size: 8pt)[check i > 5 -> br_if \$done]], hl: true),
-  boxnode((0, 1.2), [*body* #linebreak() #text(size: 8pt)[sum += i; i += 1; br \$again]]),
-  boxnode((2.1, 0.6), [*end of block \$done* #linebreak() #text(size: 8pt)[call \$print(sum)]]),
-  edge((0, 0), (0, 1.2), "->", stroke: 0.8pt + luma(120)),
-  edge((0, 1.2), (0, 0), "->", bend: -55deg, stroke: 0.9pt + rgb("#1A9988"), label: [#text(size: 8pt)[br \$again]], label-fill: white),
-  edge((0, 0), (2.1, 0.6), "->", stroke: 0.9pt + rgb("#C2553F"), label: [#text(size: 8pt)[br_if \$done]], label-fill: white),
-)
+#context canvas(length: 1pt, {
+  import draw: *
+  let accent = rgb("#1A9988")
+  let red = rgb("#B3402E")
+  let soft = rgb("#F2F8F6")
+  let mono = "DejaVu Sans Mono"
+  let blk(head, note) = stack(
+    dir: ttb, spacing: 4pt,
+    align(center, text(weight: "bold")[#head]),
+    align(center, text(font: mono, size: 8pt)[#note]),
+  )
+  let loop-blk = blk([loop \$again], [check i > 5 -> br_if \$done])
+  let body-blk = blk([body], [sum += i; i += 1; br \$again])
+  let end-blk = blk([end of block \$done], [call \$print(sum)])
+  let wl = calc.max(measure(loop-blk).width, measure(body-blk).width) + 24pt
+  let wr = measure(end-blk).width + 24pt
+  let h = 40pt
+  let v = 40pt
+  let g = 78pt
+  let top = h + v
+  // body (top of the loop body)
+  rect((0pt, 0pt), (wl, h), stroke: 0.8pt + luma(130), fill: white)
+  content((wl / 2, h / 2), body-blk)
+  // loop header
+  rect((0pt, top), (wl, top + h), stroke: 0.8pt + accent, fill: soft)
+  content((wl / 2, top + h / 2), loop-blk)
+  // exit target
+  rect((wl + g, top), (wl + g + wr, top + h), stroke: 0.8pt + luma(130), fill: white)
+  content((wl + g + wr / 2, top + h / 2), end-blk)
+  // fall-through lane, left of centre
+  let fx = wl / 2 - 20pt
+  line((fx, top), (fx, h), stroke: 0.9pt + luma(120), mark: (end: ">", fill: luma(120)))
+  // repeat lane, right of centre, labelled beside the arrow
+  let bx = wl / 2 + 20pt
+  line((bx, h), (bx, top), stroke: 1pt + accent, mark: (end: ">", fill: accent))
+  content((bx + 6pt, h + v / 2), text(size: 8pt, fill: luma(50))[br \$again], anchor: "west")
+  // forward exit lane to the block end
+  let ey = top + h / 2
+  line((wl, ey), (wl + g, ey), stroke: 1pt + red, mark: (end: ">", fill: red))
+  content((wl + g / 2, ey + 7pt), text(size: 8pt, fill: luma(50))[br_if \$done], anchor: "south")
+})
 #+END_SRC
 
 #+NAME: counted-loop

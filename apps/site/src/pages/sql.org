@@ -9,25 +9,46 @@ When you step through a =SELECT ... WHERE= query, rows flow upward from the tabl
 
 #+CAPTION: Row-flow operator pipeline with seen / passed / emitted counts
 #+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 12pt)
 #set text(size: 9pt)
-#import "@preview/fletcher:0.5.8": diagram, node, edge
+#import "@preview/cetz:0.5.2": canvas, draw
 
-#let op(pos, title, sub, hl: false) = node(
-  pos,
-  [*#title* #linebreak() #text(font: "DejaVu Sans Mono", size: 8pt)[#sub]],
-  shape: rect, inset: 6pt, width: 102pt,
-  stroke: 0.8pt + if hl { rgb("#1A9988") } else { luma(130) },
-  fill: if hl { rgb("#F2F8F6") } else { white },
+#let ops = (
+  (t: "Scan users", s: "5 / 5 / 5", hl: false),
+  (t: "Filter age >= 30", s: "5 / 2 / 2", hl: true),
+  (t: "Project name, age", s: "2 / 2 / 2", hl: false),
 )
+#let labels = ("5 rows", "2 rows")
 
-#diagram(
-  spacing: (16pt, 10pt),
-  op((0, 0), [Scan users], [5 / 5 / 5]),
-  op((1.65, 0), [Filter age >= 30], [5 / 2 / 2], hl: true),
-  op((3.3, 0), [Project name, age], [2 / 2 / 2]),
-  edge((0, 0), (1.65, 0), "->", stroke: 0.8pt + rgb("#1A9988"), label: [#text(size: 8pt)[5 rows]], label-fill: white),
-  edge((1.65, 0), (3.3, 0), "->", stroke: 0.8pt + rgb("#1A9988"), label: [#text(size: 8pt)[2 rows]], label-fill: white),
-)
+#context {
+  let tw(s) = measure(box[*#s*]).width
+  let sw(s) = measure(box[#text(font: "DejaVu Sans Mono", size: 8pt)[#s]]).width
+  let box-w = calc.max(..ops.map(o => tw(o.t)), ..ops.map(o => sw(o.s))) + 2 * 9pt
+  let gap = 62pt
+  canvas(length: 1pt, {
+    import draw: *
+    for (i, o) in ops.enumerate() {
+      content((i * (box-w + gap) + box-w / 2, 0),
+        box(width: box-w - 18pt)[
+          #set align(center)
+          *#o.t* \
+          #text(font: "DejaVu Sans Mono", size: 8pt)[#o.s]
+        ],
+        frame: "rect", padding: 9,
+        stroke: 0.8pt + (if o.hl { rgb("#1A9988") } else { luma(130) }),
+        fill: if o.hl { rgb("#F2F8F6") } else { white },
+      )
+    }
+    for i in range(2) {
+      let x1 = i * (box-w + gap) + box-w
+      line((x1, 0), (x1 + gap, 0),
+        stroke: 0.8pt + rgb("#1A9988"),
+        mark: (end: ">", fill: rgb("#1A9988"), scale: 0.6),
+      )
+      content((x1 + gap / 2, 10), text(size: 8pt)[#labels.at(i)])
+    }
+  })
+}
 #+END_SRC
 
 Notice =eve= (whose =age= is =NULL=) is dropped by =Filter=: in SQL's three-valued logic, ~NULL >= 30~ evaluates to *unknown*, not true.
@@ -60,31 +81,34 @@ This engine executes =JOIN= as a plain nested loop so the quadratic probe cost i
 
 #+CAPTION: Nested-loop join probing all 3 x 3 = 9 (user, order) pairs
 #+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 12pt)
 #set text(size: 9pt)
-#import "@preview/cetz:0.5.2": canvas, draw
 
-#canvas(length: 1cm, {
-  import draw: *
-  let users = ("1: alice", "2: Bob", "3: carol")
-  let orders = ("u=1 ($100)", "u=3 ($60)", "u=9 ($999)")
-  let hits = ((0, 0), (2, 1))
+#let mono(s) = text(font: "DejaVu Sans Mono", size: 8pt, s)
+#let users = ("1: alice", "2: Bob", "3: carol")
+#let orders = ("u=1 ($100)", "u=3 ($60)", "u=9 ($999)")
+#let hits = ((0, 0), (2, 1))
 
-  for c in range(3) {
-    content((2.4 + c * 2.1, 2.75), text(font: "DejaVu Sans Mono", size: 8pt)[#orders.at(c)])
-  }
-  for r in range(3) {
-    let y = 1.9 - r * 0.8
-    content((1.2, y + 0.3), text(font: "DejaVu Sans Mono", size: 8pt)[#users.at(r)], anchor: "east")
-    for c in range(3) {
-      let x = 1.45 + c * 2.1
-      let hit = hits.contains((r, c))
-      rect((x, y), (x + 1.9, y + 0.62),
-        stroke: 0.8pt + if hit { rgb("#1A9988") } else { luma(180) },
-        fill: if hit { rgb("#F2F8F6") } else { white })
-      content((x + 0.95, y + 0.31), text(size: 8pt, fill: if hit { rgb("#1A9988") } else { luma(140) })[#if hit { "match" } else { "skip" }])
-    }
-  }
-})
+#let head(s) = table.cell(inset: (x: 10pt, y: 0pt))[#mono(s)]
+#let row-label(s) = table.cell(inset: (x: 0pt))[#mono(s)]
+#let state(hit) = table.cell(
+  stroke: 0.8pt + (if hit { rgb("#1A9988") } else { luma(140) }),
+  fill: if hit { rgb("#F2F8F6") } else { white },
+)[#text(size: 9pt, fill: if hit { rgb("#1A9988") } else { luma(120) })[#if hit { "match" } else { "skip" }]]
+
+#table(
+  columns: (auto, 76pt, 76pt, 76pt),
+  column-gutter: 8pt,
+  row-gutter: 8pt,
+  inset: (x: 10pt, y: 7pt),
+  stroke: none,
+  align: (right + horizon, center + horizon, center + horizon, center + horizon),
+  [], head(orders.at(0)), head(orders.at(1)), head(orders.at(2)),
+  ..users.enumerate().map(((r, u)) => (
+    row-label(u),
+    ..range(3).map(c => state(hits.contains((r, c)))),
+  )).flatten(),
+)
 #+END_SRC
 
 #+NAME: nested-loop-join
