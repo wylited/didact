@@ -1,9 +1,55 @@
 {
   "name": "@didact/core",
-  "version": "0.2.0",
+  "version": "1.0.0-rc.1",
   "type": "module",
+  "license": "MIT",
   "description": "Org parser, block runtime, panel host, and textbook-light theme for the didact system",
   "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./org": "./src/org.ts",
+    "./typst": "./src/typst-source.ts",
+    "./babel": "./src/babel.ts",
+    "./kernel": "./src/kernel.ts",
+    "./theme.css": "./src/theme.css"
+  },
+  "sideEffects": [
+    "src/theme.css",
+    "src/index.ts",
+    "dist/theme.css",
+    "dist/index.js"
+  ],
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./org": {
+        "types": "./dist/org.d.ts",
+        "import": "./dist/org.js"
+      },
+      "./typst": {
+        "types": "./dist/typst-source.d.ts",
+        "import": "./dist/typst-source.js"
+      },
+      "./babel": {
+        "types": "./dist/babel.d.ts",
+        "import": "./dist/babel.js"
+      },
+      "./kernel": {
+        "types": "./dist/kernel.d.ts",
+        "import": "./dist/kernel.js"
+      },
+      "./theme.css": "./dist/theme.css"
+    }
+  },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-cpp": "^6.0.3",
@@ -14,7 +60,6 @@
     "@codemirror/view": "^6.30.0",
     "@fontsource/atkinson-hyperlegible": "^5.1.0",
     "@lezer/highlight": "^1.2.1",
-    "codemirror": "^6.0.1",
     "thememirror": "^2.0.1"
   }
 }

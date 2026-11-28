@@ -1,11 +1,31 @@
 {
   "name": "@didact/cli",
-  "private": true,
+  "version": "1.0.0-rc.1",
   "type": "module",
+  "license": "MIT",
   "main": "src/check.ts",
   "types": "src/check.ts",
+  "exports": {
+    ".": "./src/check.ts"
+  },
   "bin": {
     "didact": "src/cli.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "main": "dist/check.js",
+    "types": "dist/check.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/check.d.ts",
+        "import": "./dist/check.js"
+      }
+    },
+    "bin": {
+      "didact": "dist/cli.js"
+    }
   },
   "dependencies": {
     "@didact/core": "workspace:*"

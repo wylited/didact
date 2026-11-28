@@ -1,0 +1,45 @@
+{
+  "name": "@didact/vite",
+  "version": "1.0.0-rc.1",
+  "type": "module",
+  "license": "MIT",
+  "description": "Vite plugins for Didact sites: build-time Typst prerendering and WASM kernel vendor asset serving/emission",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./typst": "./src/typst/index.ts",
+    "./vendors": "./src/vendors.ts",
+    "./client": "./src/client.d.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./typst": {
+        "types": "./dist/typst/index.d.ts",
+        "import": "./dist/typst/index.js"
+      },
+      "./vendors": {
+        "types": "./dist/vendors.d.ts",
+        "import": "./dist/vendors.js"
+      },
+      "./client": "./dist/client.d.ts"
+    }
+  },
+  "dependencies": {
+    "@didact/core": "workspace:*",
+    "@typst-wasm/fonts": "1.0.0",
+    "typst-wasm": "1.0.0"
+  },
+  "peerDependencies": {
+    "vite": ">=6.0.0"
+  }
+}

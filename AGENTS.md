@@ -3,12 +3,24 @@
 pnpm monorepo. TypeScript strict, no UI framework, Vite only at the app layer.
 Packages ship **source TS** (`main: src/index.ts`); only `apps/site` builds —
 one DOM `tsc --noEmit`, one Node `tsc -p apps/site/tsconfig.typst.json` for the
-build pipeline, and `vite build` cover everything. No per-package build step.
+build pipeline, and `vite build` cover everything. No per-package build step
+for development.
+
+Publishing the packages needs compiled output, because Node never strips types
+inside `node_modules`: `pnpm build:packages` (`tsdown.config.ts`) derives one
+bundled ESM entry per manifest `exports`/`main`/`bin` target and emits
+`packages/*/dist` (declared dependencies stay external; `?raw` imports are
+inlined). Each manifest's `publishConfig` points `main`/`types`/`exports`/`bin`
+at `dist/`, and `files` ships `dist` (plus `vendor/` license texts where they
+exist); `pnpm publish` applies those overrides and rewrites `workspace:*`.
+`apps/site` is private and never published.
 
 ## Repo map
 
-- `packages/core` — `@didact/core`: org parser, block runtime, panel host, theme.
-- `packages/kernel-asm64` — `@didact/kernel-asm64`: x86-64 kernel on vendored Unicorn/Keystone/Capstone wasm.
+- `packages/core` — `@didact/core`: org parser, block runtime, panel host, theme, `resolvePages`.
+- `packages/cli` — `@didact/cli`: Node 24 native `didact check` CLI for linting `.org` pages and verifying `#+RESULTS:` / `#+CHECK:` blocks.
+- `packages/vite` — `@didact/vite`: reusable Vite plugins (`didactVite`, `didactTypst`, `didactVendors`) and the Node build-time Typst prerender pipeline (`src/typst/`).
+- `packages/kernel-asm64` — `@didact/kernel-asm64`: x86-64 kernel on vendored Unicorn/Keystone/Capstone wasm (GPL-2.0 opt-in).
 - `packages/kernel-riscv` — `@didact/kernel-riscv`: RV32IM interpreter kernel (pure TypeScript).
 - `packages/kernel-mips` — `@didact/kernel-mips`: MIPS32 interpreter kernel (SPIM/MARS-style, pure TypeScript).
 - `packages/kernel-c` — `@didact/kernel-c`: C kernel on the clang wasm engine.
@@ -25,7 +37,7 @@ build pipeline, and `vite build` cover everything. No per-package build step.
 - `packages/kernel-lua` — `@didact/kernel-lua`: Lua teaching-subset interpreter kernel (pure TypeScript).
 - `packages/kernel-regex` — `@didact/kernel-regex`: Thompson-NFA regex engine with state-set panels (pure TypeScript).
 - `packages/kernel-prolog` — `@didact/kernel-prolog`: SLD-resolution Prolog engine with choice-point panels (pure TypeScript).
-- `apps/site` — `@didact/site`: the website — `src/pages/*.org` + kernel registration in `src/main.ts`, the Node build pipeline in `typst/` (see `docs/architecture.md`), `vite.config.ts`, `index.html`.
+- `apps/site` — `@didact/site`: the showcase website — 17 lesson pages (`src/pages/*.org`, one per kernel including `fortran.org`), kernel registration in `src/main.ts`, `vite.config.ts` (wired via `@didact/vite`), `index.html`.
 
 ## Kernel contract
 
@@ -35,42 +47,46 @@ The rendering↔execution interface lives in `packages/core/src/kernel.ts`
 
 ## Recipe: add a kernel
 
-1. Create `packages/kernel-<name>/` with `package.json` — `private: true`,
-   `main: "src/index.ts"`, `types: "src/index.ts"` (copy any existing
-   `packages/kernel-*/package.json` as a pattern). Add a local
-   `src/types.ts` mirror of the `Kernel`/`Session` contract so the package
-   typechecks standalone (see `packages/kernel-mips/src/types.ts` for the
-   pattern); the contract text from `/** One rendered under-the-hood
-   section. */` to EOF MUST stay byte-identical to
-   `packages/core/src/kernel.ts` (each mirror keeps its own short header;
-   enforced by `packages/core/test/mirror.test.ts`).
+1. Create `packages/kernel-<name>/` with `package.json` — `"type": "module"`,
+   `"main": "src/index.ts"`, `"types": "src/index.ts"`, and
+   `"exports": { ".": "./src/index.ts" }` (copy any existing
+   `packages/kernel-*/package.json` as a pattern; workspace packages are
+   publishable, not `private: true`). Add a local `src/types.ts` mirror of
+   the `Kernel`/`Session` contract so the package typechecks standalone (see
+   `packages/kernel-mips/src/types.ts` for the pattern); the contract text
+   from `/** One rendered under-the-hood section. */` to EOF MUST stay
+   byte-identical to `packages/core/src/kernel.ts` (each mirror keeps its
+   own short header; enforced by `packages/core/test/mirror.test.ts`).
 2. Implement the `Kernel` interface in `src/kernel.ts` and export it from
    `src/index.ts` (see the contract in `packages/core/src/kernel.ts`). The
    kernel's `id` must match the org `#+BEGIN_SRC <lang>` word; declare
    `editorSyntax` with one of the ids supported in
    `packages/core/src/languages.ts` (`asm-intel`, `asm-riscv`, `asm-mips`,
-   `c`, `cpp`, `javascript`, `lua`, `octave`, `python`, `prolog`, `regexp`,
-   `scheme`, `sql`, `typst`, `wat`, `plain`; missing/unknown → plain text).
-3. Declare the wasm engine as an npm dependency of the kernel package
-   (exact version, no caret) and record licenses in `THIRD-PARTY.md`;
+   `c`, `cpp`, `fortran`, `javascript`, `lua`, `octave`, `python`, `prolog`,
+   `regexp`, `scheme`, `sql`, `typst`, `wat`, `plain`; missing/unknown →
+   plain text).
+3. For WASM kernels, declare the engine as an npm dependency of the kernel
+   package (exact version, no caret) and record licenses in `THIRD-PARTY.md`;
    keep upstream license texts under `packages/kernel-<name>/vendor/` when
-   the upstream ships them. Add the `node_modules → public` file mapping to
-   `GROUPS` in `scripts/sync-vendors.mjs`; it copies the files into
-   `apps/site/public/vendor-<name>/` automatically on `pnpm dev`/`pnpm
-   build` (git-ignored build inputs; naming follows `GROUPS` — asm64 keeps
-   the historical `vendor/`, c/cpp share `vendor-c/clang/`). Engine payload never lives in git —
-   `pnpm-lock.yaml` pins versions and integrity.
+   the upstream ships them. Add the asset group to `@didact/vite`
+   (`packages/vite/src/vendors.ts`), which serves the files directly from
+   `node_modules` in dev and emits them into `dist/vendor-<name>/` on build
+   (never writing to `public/`; asm64 keeps the historical `vendor/`, c/cpp
+   share `vendor-c/clang/`). Export a `create<Name>Kernel({ vendorBase })`
+   factory alongside the default singleton. Engine payload never lives in
+   git — `pnpm-lock.yaml` pins versions and integrity.
 4. Add `"@didact/kernel-<name>": "workspace:*"` to `apps/site/package.json`
-   dependencies.
-5. Add `@didact/kernel-<name>` → `../../packages/kernel-<name>/src` to
-   both `apps/site/tsconfig.json` `paths` and `apps/site/vite.config.ts`
-   `resolve.alias`.
-6. Register it in `apps/site/src/main.ts`: import the kernel and add it to
+   dependencies (pnpm workspace `exports` wire up both TypeScript and Vite
+   automatically — no `tsconfig.json` `paths` or `vite.config.ts`
+   `resolve.alias` needed). If it is a WASM kernel, also add its id to
+   `kernels` in `apps/site/vite.config.ts`.
+5. Register it in `apps/site/src/main.ts`: import the kernel and add it to
    the `kernels` array passed to `mountSite`.
-7. Add `test/` (vitest; the root config globs `packages/*/test/**`) and, for
+6. Add `test/` (vitest; the root config globs `packages/*/test/**`) and, for
    headless-capable kernels, `test/smoke.ts` plus a
    `bun packages/kernel-<name>/test/smoke.ts` clause in the root
-   `test:smoke` script.
+   `test:smoke` script (all pure-TS kernels including `kernel-elisp`, plus
+   headless WASM kernels `kernel-python`, `kernel-c`, `kernel-cpp`).
 
 ## Recipe: add a page
 
@@ -109,9 +125,11 @@ Run from the repo root before handing off:
 ```
 pnpm typecheck   # apps/site tsc --noEmit (DOM) + tsconfig.typst.json (Node)
 pnpm build       # apps/site production build
-pnpm test        # vitest run (packages/*/test + apps/site/typst) then test:smoke (needs bun)
+pnpm test        # vitest run (packages/*/test) then test:smoke (needs bun; includes kernel-elisp)
+pnpm check       # org lesson linter via @didact/cli (didact check)
+pnpm verify      # org linter + Python #+RESULTS:/#+CHECK: verification (didact check --run)
 pnpm lint        # eslint .
-pnpm typst:check # typst content gate (apps/site/typst/cli.ts)
+pnpm typst:check # typst content gate (packages/vite/src/typst/cli.ts)
 ```
 
 esbuild's build script is pre-approved in `pnpm-workspace.yaml`; if pnpm asks
@@ -129,10 +147,10 @@ environment is node. The assembler tests inject a deterministic fake
 ## Vendor policy
 
 Runtime assets are npm dependencies pinned by `pnpm-lock.yaml`;
-`scripts/sync-vendors.mjs` materializes them as static files under the
-app's `public/` on `pnpm dev`/`pnpm build`. Licenses for vendored engines are
-recorded in that package's `THIRD-PARTY.md` (`kernel-asm64`, `kernel-c`,
-`kernel-cpp`, `kernel-python`, `kernel-typst`), with upstream license texts
-under `vendor/` where the package ships one (`kernel-python` links them by
-URL instead). No CDN and no network requests at runtime beyond same-origin
-asset fetches.
+`@didact/vite` (`didactVendors()` / `didactVite()`) serves them straight from
+`node_modules` during `pnpm dev` and emits them into `dist/` on `pnpm build`
+(never writing to `public/`). Licenses for vendored engines are recorded in
+that package's `THIRD-PARTY.md` (`kernel-asm64`, `kernel-c`, `kernel-cpp`,
+`kernel-python`, `kernel-typst`), with upstream license texts under `vendor/`
+where the package ships one (`kernel-python` links them by URL instead). No
+CDN and no network requests at runtime beyond same-origin asset fetches.
