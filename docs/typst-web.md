@@ -120,17 +120,18 @@ persisted.
 
 ## Artifact delivery and size
 
-`virtual:didact-typst` is one static module, so every page's pre-rendered
-math and diagram strings land in the entry chunk (both MathML and an SVG
-fallback per formula, plus each compiled SVG diagram and Typst's MathML layout
-CSS). Visiting any page avoids runtime compilation completely, at the cost of
-bundling the site's static figures up front.
+By default, `virtual:didact-typst` is one static module, so every page's
+pre-rendered math and diagram strings land in the entry chunk (both MathML and
+an SVG fallback per formula, plus each compiled SVG diagram and Typst's MathML
+layout CSS). Visiting any page avoids runtime compilation completely, at the
+cost of bundling the site's static figures up front.
 
-The next step, if bundle size matters for a large multi-chapter book, is one
-artifact module per page selected on navigation (Vite code-splits the dynamic
-import), or emitting each diagram as a standalone `.svg` asset. Dropping the
-SVG math fallback is the cheapest win: it only serves browsers without
-`MathMLElement`.
+For multi-page sites, pass `typst: { perPage: true }` to `didactVite()` (or
+`didactTypst({ perPage: true })`), as `apps/site/vite.config.ts` does. In
+per-page mode, `virtual:didact-typst` keeps only `mathCss` and a `pages` map of
+lazy loaders importing `virtual:didact-typst/page/<stem>` on navigation, so the
+entry chunk stays small and each page loads only its own pre-rendered math and
+diagrams.
 
 ## Authoring rules
 

@@ -44,11 +44,12 @@ export default defineConfig({
 });
 ```
 
-If you need finer control, you can compose `didactTypst({ pagesDir })` and
-`didactVendors({ kernels })` individually as Vite plugins instead of
-`didactVite()`. Pure-TypeScript kernels require no vendor assets at all; if
-your site only uses pure-TS kernels and no Typst math/diagrams, no plugin is
-required.
+If you need finer control, you can pass `typst: { perPage: true }` to
+code-split pre-rendered math and diagrams into one lazy chunk per page, or
+compose `didactTypst({ pagesDir })` and `didactVendors({ kernels })`
+individually as Vite plugins instead of `didactVite()`. Pure-TypeScript kernels
+require no vendor assets at all; if your site only uses pure-TS kernels and no
+Typst math/diagrams, no plugin is required.
 
 ## 3. Add `index.html`
 

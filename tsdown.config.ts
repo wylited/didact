@@ -63,14 +63,14 @@ const packageConfig = (dir: string, manifest: Manifest): UserConfig => {
       copy.push(source);
     }
   }
-  const isCli = manifest.bin !== undefined;
+  const isNode = manifest.bin !== undefined || manifest.name === '@didact/vite';
   return {
     cwd: join(packagesDir, dir),
     name: manifest.name,
     entry: entries,
     outDir: 'dist',
     format: ['esm'],
-    platform: isCli ? 'node' : 'neutral',
+    platform: isNode ? 'node' : 'neutral',
     target: 'node22',
     dts: true,
     clean: true,
@@ -80,9 +80,8 @@ const packageConfig = (dir: string, manifest: Manifest): UserConfig => {
     // side-effect imports for the consuming bundler, with theme.css copied
     // to dist so `@didact/core/theme.css` still resolves after publish.
     css: false,
-    external: [/\.css$/],
+    deps: { neverBundle: [/\.css$/] },
     outExtensions: () => ({ js: '.js' }),
-
   };
 };
 

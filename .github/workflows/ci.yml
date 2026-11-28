@@ -39,3 +39,4 @@ jobs:
       - run: pnpm check
       - run: pnpm typst:check
       - run: pnpm build
+      - run: pnpm build:packages
