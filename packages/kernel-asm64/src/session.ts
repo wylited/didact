@@ -27,7 +27,6 @@ export class Asm64Session implements Session {
     } catch (e) {
       return {
         ok: false,
-        line: 1,
         message: `failed to load the emulator engines: ${e instanceof Error ? e.message : String(e)}`,
       };
     }

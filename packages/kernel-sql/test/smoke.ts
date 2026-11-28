@@ -1,6 +1,7 @@
 // smoke.ts (bun run): every lesson block loads, runs, and reproduces its
 // #+RESULTS byte-for-byte (trailing psql padding included); plus a few
 // end-to-end session checks that need no DOM.
+import { readFileSync } from 'node:fs';
 import { sqlKernel } from '../src/index';
 import type { Panel, RunResult, Session } from '../src/index';
 
@@ -100,7 +101,7 @@ console.log('session · lesson round-trip');
 {
   const blocks: string[] = [];
   const expected: string[] = [];
-  const org = await Bun.file(`${import.meta.dir}/../lesson/lesson.org`).text();
+  const org = readFileSync(new URL('../lesson/lesson.org', import.meta.url), 'utf8');
   const lines = org.split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (lines[i]!.startsWith('#+BEGIN_SRC sql')) {

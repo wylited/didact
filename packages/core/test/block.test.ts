@@ -1029,4 +1029,348 @@ describe('BlockRuntime: reset wins over in-flight work', () => {
     expect(resumed).toEqual([aCode, bCode]);
     expect(b.results.textContent).toContain('hello from fake kernel');
   });
+
+  it('reloads when identical-source shared siblings take turns stepping', async () => {
+    const { kernel, session } = fakeResumableKernel('python');
+    const sameCode = 'x = 1';
+    const shared: SharedSession = {
+      session,
+      name: 'demo',
+      supported: true,
+      loadedSource: null,
+      loadedBlock: null,
+      queue: Promise.resolve(),
+      blocks: [],
+    };
+    const mountShared = (id: string): BlockRuntime => {
+      const root = document.createElement('div');
+      document.body.appendChild(root);
+      const runtime = new BlockRuntime(
+        srcNode(sameCode, null),
+        shared.blocks.length + 1,
+        kernel,
+        root,
+        null,
+        { onActivity: () => {} },
+        shared,
+        { id },
+      );
+      runtimes.push(runtime);
+      return runtime;
+    };
+    const a = mountShared('dup-a');
+    const b = mountShared('dup-b');
+
+    await a.run();
+    expect(session.resumedWith).toEqual([sameCode]);
+    expect(shared.loadedBlock).toBe(a);
+
+    // Stepping B (same source as A) must still resume B, not skip reload.
+    await b.step();
+    expect(session.resumedWith).toEqual([sameCode, sameCode]);
+    expect(shared.loadedBlock).toBe(b);
+  });
+
+  it('steps a shared program it already owns without reloading, and reloads a sibling', async () => {
+    const { kernel, session } = fakeResumableKernel('python');
+    const aCode = 'print("A")';
+    const bCode = 'print("B")';
+    const shared: SharedSession = {
+      session,
+      name: 'lab',
+      supported: true,
+      loadedSource: null,
+      loadedBlock: null,
+      queue: Promise.resolve(),
+      blocks: [],
+    };
+    const mountShared = (code: string, id: string): BlockRuntime => {
+      const root = document.createElement('div');
+      document.body.appendChild(root);
+      const runtime = new BlockRuntime(
+        srcNode(code, null),
+        shared.blocks.length + 1,
+        kernel,
+        root,
+        null,
+        { onActivity: () => {} },
+        shared,
+        { id },
+      );
+      runtimes.push(runtime);
+      return runtime;
+    };
+    const a = mountShared(aCode, 'step-a');
+    const b = mountShared(bCode, 'step-b');
+
+    let stepCalls = 0;
+    const step = session.step.bind(session);
+    session.step = async () => {
+      stepCalls++;
+      return step();
+    };
+
+    // B loads and runs its program in the shared session.
+    await b.run();
+    expect(session.resumedWith).toEqual([bCode]);
+    expect(shared.loadedBlock).toBe(b);
+
+    // Stepping A resumes A's source once.
+    await a.step();
+    expect(session.resumedWith).toEqual([bCode, aCode]);
+    expect(shared.loadedBlock).toBe(a);
+
+    // A second step continues A's program: no reload/resume.
+    const before = stepCalls;
+    await a.step();
+    expect(session.resumedWith).toEqual([bCode, aCode]);
+    expect(stepCalls).toBe(before + 1);
+
+    // Stepping the sibling goes back to B's program and does reload.
+    await b.step();
+    expect(session.resumedWith).toEqual([bCode, aCode, bCode]);
+    expect(shared.loadedBlock).toBe(b);
+  });
+
+  it('steps an ownerless shared program record without reloading it', async () => {
+    const { kernel, session } = fakeResumableKernel('python');
+    const code = 'x = 1';
+    // loadedSource exists but no block has claimed it yet: the session
+    // already holds this program, so Step must continue it.
+    const shared: SharedSession = {
+      session,
+      name: 'lab',
+      supported: true,
+      loadedSource: code,
+      queue: Promise.resolve(),
+      blocks: [],
+    };
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const runtime = new BlockRuntime(
+      srcNode(code, null),
+      1,
+      kernel,
+      root,
+      null,
+      { onActivity: () => {} },
+      shared,
+      { id: 'ownerless' },
+    );
+    runtimes.push(runtime);
+
+    let stepCalls = 0;
+    const step = session.step.bind(session);
+    session.step = async () => {
+      stepCalls++;
+      return step();
+    };
+
+    await runtime.step();
+    expect(session.resumedWith).toEqual([]);
+    expect(stepCalls).toBe(1);
+    expect(shared.loadedBlock).toBeUndefined();
+  });
+
+  it("clears a sibling's current-line mark when it takes over the shared session", async () => {
+    const { kernel, session } = fakeKernel('mips');
+    const aCode = 'addi $t0, $zero, 1\naddi $t1, $zero, 2';
+    const bCode = 'addi $t2, $zero, 3';
+    const shared: SharedSession = {
+      session,
+      name: 'lab',
+      supported: true,
+      loadedSource: null,
+      loadedBlock: null,
+      queue: Promise.resolve(),
+      blocks: [],
+    };
+    const mountShared = (
+      code: string,
+      id: string,
+    ): { runtime: BlockRuntime; root: HTMLElement } => {
+      const root = document.createElement('div');
+      document.body.appendChild(root);
+      const runtime = new BlockRuntime(
+        srcNode(code, null),
+        shared.blocks.length + 1,
+        kernel,
+        root,
+        null,
+        { onActivity: () => {} },
+        shared,
+        { id },
+      );
+      runtimes.push(runtime);
+      return { runtime, root };
+    };
+    const a = mountShared(aCode, 'mark-a');
+    const b = mountShared(bCode, 'mark-b');
+
+    let pauseOnce = true;
+    session.run = async (breakpoints?: number[]) => {
+      session.runCalls++;
+      session.lastBreakpoints = breakpoints;
+      if (pauseOnce) {
+        pauseOnce = false;
+        return { finished: false, pausedAt: 2, steps: 1 };
+      }
+      return { finished: true, steps: 3, exit: 'exit(0)' };
+    };
+
+    // A carries a breakpoint on line 1 and pauses there; synthetic mouse
+    // events carry no layout, so CM6 resolves any gutter click to line 1.
+    a.root.querySelector<HTMLElement>("[data-test='gutter-1']")!
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await a.runtime.run();
+    expect(session.lastBreakpoints).toEqual([1]);
+    expect(a.root.querySelector('.lw-current-line')).not.toBeNull();
+
+    // B taking over the session displaces A's live line decoration.
+    await b.runtime.run();
+    expect(shared.loadedBlock).toBe(b.runtime);
+    expect(a.root.querySelector('.lw-current-line')).toBeNull();
+  });
+
+  it('does not run or emit activity if disposed while session.load is in flight', async () => {
+    const { kernel, session } = fakeKernel('mips');
+    const { promise: gate, resolve: release } = Promise.withResolvers<void>();
+    session.load = async (src: string) => {
+      session.loadedWith.push(src);
+      await gate;
+      return { ok: true, summary: 'loaded · fake' };
+    };
+    let activities = 0;
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const runtime = new BlockRuntime(
+      srcNode(SAMPLE, null),
+      1,
+      kernel,
+      root,
+      null,
+      { onActivity: () => { activities++; } },
+    );
+    runtimes.push(runtime);
+
+    const pending = runtime.run();
+    await flushAsync();
+    runtime.dispose();
+    release();
+    await pending;
+
+    expect(session.runCalls).toBe(0);
+    expect(activities).toBe(0);
+  });
+
+  it('emits onActivity exactly once when load fails', async () => {
+    const { kernel, session } = fakeKernel('mips');
+    session.loadResult = { ok: false, line: 1, message: 'syntax error' };
+    let activities = 0;
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const runtime = new BlockRuntime(
+      srcNode(SAMPLE, null),
+      1,
+      kernel,
+      root,
+      null,
+      { onActivity: () => { activities++; } },
+    );
+    runtimes.push(runtime);
+
+    await runtime.run();
+    expect(activities).toBe(1);
+  });
+
+  it('reports actual console text when step() throws in an exercise block', async () => {
+    const outcomes: ExerciseOutcome[] = [];
+    const { root, session } = mountBlock({
+      exercise: { title: 'Step throw', expected: 'expected' },
+      runtimeOptions: { id: 'ex-step-throw', onExerciseResult: (o) => outcomes.push(o) },
+    });
+    session.step = async () => {
+      throw new Error('fault');
+    };
+
+    root.querySelector<HTMLButtonElement>("[data-test='block-step']")!.click();
+    await flushAsync();
+
+    expect(outcomes).toEqual([{
+      id: 'ex-step-throw',
+      title: 'Step throw',
+      passed: false,
+      actual: 'hello from fake kernel',
+    }]);
+  });
+});
+
+describe('BlockRuntime: undo/redo, a11y, and extensibility', () => {
+  it('supports Cmd/Ctrl+Z undo and redo in the editor', () => {
+    const { root, runtime } = mountBlock();
+    expect(runtime.source).toBe(SAMPLE);
+
+    setSource(root, 'first edit');
+    expect(runtime.source).toBe('first edit');
+
+    const undoEvent = pressKey(root, 'z', MOD_KEY);
+    expect(undoEvent.defaultPrevented).toBe(true);
+    expect(runtime.source).toBe(SAMPLE);
+
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+    const redoEvent = isMac
+      ? pressKey(root, 'z', { ...MOD_KEY, shiftKey: true })
+      : pressKey(root, 'y', MOD_KEY);
+    expect(redoEvent.defaultPrevented).toBe(true);
+    expect(runtime.source).toBe('first edit');
+  });
+
+  it('sets aria-live on status and role=alert on error', () => {
+    const { root } = mountBlock();
+    const status = root.querySelector<HTMLElement>("[data-test='block-status']")!;
+    const error = root.querySelector<HTMLElement>("[data-test='block-error']")!;
+    expect(status.getAttribute('aria-live')).toBe('polite');
+    expect(error.getAttribute('role')).toBe('alert');
+  });
+
+  it('honors custom storagePrefix and readOnly options', () => {
+    const storage = new MemoryStorage();
+    const { root, runtime } = mountBlock({
+      runtimeOptions: {
+        id: 'block-1',
+        storage,
+        storagePrefix: 'course-a',
+        readOnly: true,
+      },
+    });
+    expect(editorOf(root).state.readOnly).toBe(true);
+    // the prefix is normalized and no revert control is mounted
+    expect(root.querySelector("[data-test='block-revert']")).toBeNull();
+    setSource(root, 'custom draft');
+    expect(storage.getItem('course-a:code:block-1')).toBe('custom draft');
+    expect(storage.getItem('didact:code:block-1')).toBeNull();
+    // a read-only revert is inert: source and stored draft both survive
+    runtime.revertCode();
+    expect(runtime.source).toBe('custom draft');
+    expect(storage.getItem('course-a:code:block-1')).toBe('custom draft');
+  });
+
+  it('read-only mounts show the sample over a saved draft and never clear it', () => {
+    const storage = new MemoryStorage();
+    storage.setItem('didact:code:ro-1', 'saved draft');
+
+    const readOnly = mountBlock({
+      runtimeOptions: { id: 'ro-1', storage, readOnly: true },
+    });
+    expect(readOnly.runtime.source).toBe(SAMPLE);
+    expect(readOnly.root.querySelector("[data-test='block-revert']")).toBeNull();
+    readOnly.runtime.revertCode();
+    expect(readOnly.runtime.source).toBe(SAMPLE);
+    expect(storage.getItem('didact:code:ro-1')).toBe('saved draft');
+
+    // the same storage and id mounted writable restores the draft
+    const writable = mountBlock({ runtimeOptions: { id: 'ro-1', storage } });
+    expect(writable.runtime.source).toBe('saved draft');
+    expect(writable.root.querySelector("[data-test='block-revert']")).not.toBeNull();
+  });
 });

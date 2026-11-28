@@ -10,12 +10,12 @@
 //    explicit `locateFile` AND a pre-fetched `wasmBinary` so resolution never
 //    depends on document.currentScript or the page base path.
 //
-// The assets are served as plain static files: sync-vendors copies them
-// from node_modules into the app's public root, and the default base
-// `<page-base>/vendor/` resolves correctly under Vite dev/build/preview
-// with base './'. If the app serves them elsewhere it calls
-// setVendorBase() before creating a session. No network
-// beyond same-origin asset fetches happens at runtime.
+// The assets are served as plain static files: @didact/vite (didactVendors())
+// serves them straight from node_modules in dev and emits them into dist/vendor/
+// on build, and the default base `<page-base>/vendor/` resolves correctly under
+// Vite dev/build/preview with base './'. If the app serves them elsewhere it
+// calls setVendorBase() before creating a session. No network beyond
+// same-origin asset fetches happens at runtime.
 
 export interface KeystoneAsmResult {
   mc: Uint8Array;
@@ -104,20 +104,29 @@ declare global {
   }
 }
 
-let vendorDir = new URL('vendor/', document.baseURI).href;
+let vendorDir = typeof document !== 'undefined' ? new URL('vendor/', document.baseURI).href : '';
+let enginesPromise: Promise<Engines> | null = null;
 
 /** Point the loader at a different same-origin directory for the assets. */
 export function setVendorBase(url: string): void {
   vendorDir = url.endsWith('/') ? url : url + '/';
+  enginesPromise = null; // re-resolve on the next load
 }
 
 function loadScript(src: string): Promise<void> {
+  if (typeof document === 'undefined') {
+    return Promise.reject(
+      new Error(`cannot load ${src} without a browser DOM — call setVendorBase() in a browser context`),
+    );
+  }
   const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const fail = () =>
+    new Error(`failed to load ${src} — serve the vendored asm64 assets there or call setVendorBase()`);
   const existing = document.querySelector<HTMLScriptElement>(`script[data-vendor="${src}"]`);
   if (existing && existing.dataset.loaded === '1') return Promise.resolve();
   if (existing) {
     existing.addEventListener('load', () => resolve());
-    existing.addEventListener('error', () => reject(new Error(`failed to load ${src}`)));
+    existing.addEventListener('error', () => reject(fail()));
     return promise;
   }
   const s = document.createElement('script');
@@ -127,46 +136,70 @@ function loadScript(src: string): Promise<void> {
     s.dataset.loaded = '1';
     resolve();
   });
-  s.addEventListener('error', () => reject(new Error(`failed to load ${src}`)));
+  s.addEventListener('error', () => {
+    s.remove(); // drop the failed tag so a retry creates a fresh <script>
+    reject(fail());
+  });
   document.head.appendChild(s);
   return promise;
 }
 
-async function fetchWasm(name: string): Promise<ArrayBuffer> {
-  const res = await fetch(vendorDir + name);
-  if (!res.ok) throw new Error(`failed to fetch vendor asset ${name} from ${vendorDir} (HTTP ${res.status})`);
+async function fetchWasm(base: string, name: string): Promise<ArrayBuffer> {
+  const url = base + name;
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `failed to fetch ${url}: ${detail} — serve the vendored asm64 assets there or call setVendorBase()`,
+    );
+  }
+  if (!res.ok) {
+    throw new Error(
+      `failed to fetch ${url} (HTTP ${res.status}) — serve the vendored asm64 assets there or call setVendorBase()`,
+    );
+  }
   return res.arrayBuffer();
 }
-
-let enginesPromise: Promise<Engines> | null = null;
 
 /** Load (once) the vendored unicorn/keystone/capstone engines. */
 export function loadEngines(): Promise<Engines> {
   if (!enginesPromise) {
-    enginesPromise = (async () => {
-      const [ksWasm, csWasm] = await Promise.all([fetchWasm('keystone.wasm'), fetchWasm('capstone.wasm')]);
+    const base = vendorDir;
+    const pending = (async () => {
+      const [ksWasm, csWasm] = await Promise.all([
+        fetchWasm(base, 'keystone.wasm'),
+        fetchWasm(base, 'capstone.wasm'),
+      ]);
       await Promise.all([
-        loadScript(vendorDir + 'unicorn_x86.js'),
-        loadScript(vendorDir + 'keystone.js'),
-        loadScript(vendorDir + 'capstone.js'),
+        loadScript(base + 'unicorn_x86.js'),
+        loadScript(base + 'keystone.js'),
+        loadScript(base + 'capstone.js'),
       ]);
       const { MUnicorn, MKeystone, MCapstone } = window;
       if (!MUnicorn || !MKeystone || !MCapstone) {
-        throw new Error('vendored engine scripts did not define MUnicorn/MKeystone/MCapstone');
+        throw new Error(
+          `vendored engine scripts at ${base} did not define MUnicorn/MKeystone/MCapstone — verify the assets or call setVendorBase()`,
+        );
       }
       const [unicorn, keystone, capstone] = await Promise.all([
         MUnicorn(),
-        MKeystone({ locateFile: (path: string) => vendorDir + path, wasmBinary: ksWasm }),
-        MCapstone({ locateFile: (path: string) => vendorDir + path, wasmBinary: csWasm }),
+        MKeystone({ locateFile: (path: string) => base + path, wasmBinary: ksWasm }),
+        MCapstone({ locateFile: (path: string) => base + path, wasmBinary: csWasm }),
       ]);
       return { unicorn, keystone, capstone };
     })();
-    enginesPromise.catch(() => {
-      enginesPromise = null; // allow a retry after a transient fetch failure
+    enginesPromise = pending;
+    pending.catch(() => {
+      if (enginesPromise === pending) enginesPromise = null; // allow a retry after a transient fetch failure
     });
   }
   return enginesPromise;
 }
+
+/** Alias of `loadEngines` for consistency with the other WASM kernels. */
+export const loadEngine = loadEngines;
 
 /**
  * Thin, forgiving wrapper around one Keystone instance.

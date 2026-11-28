@@ -16,6 +16,7 @@ export interface AttachedBlock {
 }
 
 export class PanelHost {
+  private readonly doc: Document;
   private readonly root: HTMLElement;
   private readonly titleEl: HTMLElement;
   private readonly sectionsEl: HTMLElement;
@@ -26,21 +27,23 @@ export class PanelHost {
 
   constructor(mount: HTMLElement, onVisibility?: (visible: boolean) => void) {
     this.mount = mount;
+    this.doc = mount.ownerDocument ?? document;
     this.onVisibility = onVisibility;
 
-    this.root = document.createElement('aside');
+    this.root = this.doc.createElement('aside');
     this.root.className = 'lw-panel';
     this.root.dataset.test = 'uth';
+    this.root.setAttribute('aria-label', 'Execution inspector');
 
-    const head = document.createElement('div');
+    const head = this.doc.createElement('div');
     head.className = 'lw-panel-head';
 
-    this.titleEl = document.createElement('span');
+    this.titleEl = this.doc.createElement('span');
     this.titleEl.className = 'lw-panel-title';
     this.titleEl.dataset.test = 'uth-title';
     head.appendChild(this.titleEl);
 
-    const detach = document.createElement('button');
+    const detach = this.doc.createElement('button');
     detach.type = 'button';
     detach.dataset.test = 'uth-detach';
     detach.textContent = 'detach';
@@ -50,7 +53,7 @@ export class PanelHost {
 
     this.root.appendChild(head);
 
-    this.sectionsEl = document.createElement('div');
+    this.sectionsEl = this.doc.createElement('div');
     this.sectionsEl.className = 'lw-sections';
     this.sectionsEl.dataset.test = 'uth-sections';
     this.root.appendChild(this.sectionsEl);
@@ -84,19 +87,33 @@ export class PanelHost {
     this.titleEl.textContent = `${block.title} · ${block.kernelLabel}`;
     this.sectionsEl.replaceChildren();
     for (const panel of block.state()) {
-      this.sectionsEl.appendChild(renderSection(panel, this.collapsed));
+      this.sectionsEl.appendChild(renderSection(panel, this.collapsed, this.doc));
     }
+    // Scroll the listing's current instruction into view inside the panel
+    // scroller directly (never scrolling the document window).
+    const current = this.sectionsEl.querySelector<HTMLElement>('[data-test="current-instr"]');
+    if (current !== null) scrollChildIntoContainer(this.mount, current);
   }
 }
 
-function sectionShell(panel: Panel, collapsed: Set<string>): HTMLDivElement {
-  const sec = document.createElement('div');
+/** Scroll `container` by the minimal delta needed to reveal `child` without
+ *  scrolling ancestor containers or the window. No-op when not laid out. */
+function scrollChildIntoContainer(container: HTMLElement, child: HTMLElement): void {
+  const box = container.getBoundingClientRect();
+  const item = child.getBoundingClientRect();
+  if (box.height === 0 || box.bottom === box.top) return;
+  if (item.top < box.top) container.scrollTop -= box.top - item.top;
+  else if (item.bottom > box.bottom) container.scrollTop += item.bottom - box.bottom;
+}
+
+function sectionShell(panel: Panel, collapsed: Set<string>, doc: Document): HTMLDivElement {
+  const sec = doc.createElement('div');
   sec.className = 'lw-section';
   sec.dataset.kind = panel.kind;
-  const isCollapsed = collapsed.has(panel.title);
+  const isCollapsed = collapsed.has(panel.id);
   if (isCollapsed) sec.classList.add('lw-section-collapsed');
 
-  const label = document.createElement('button');
+  const label = doc.createElement('button');
   label.type = 'button';
   label.className = 'lw-sec-label';
   label.textContent = panel.title;
@@ -105,8 +122,8 @@ function sectionShell(panel: Panel, collapsed: Set<string>): HTMLDivElement {
     const next = !sec.classList.contains('lw-section-collapsed');
     sec.classList.toggle('lw-section-collapsed', next);
     label.setAttribute('aria-expanded', String(!next));
-    if (next) collapsed.add(panel.title);
-    else collapsed.delete(panel.title);
+    if (next) collapsed.add(panel.id);
+    else collapsed.delete(panel.id);
   });
   sec.appendChild(label);
   return sec;
@@ -114,28 +131,28 @@ function sectionShell(panel: Panel, collapsed: Set<string>): HTMLDivElement {
 
 const ZERO_VALUE = /^(0|0x0+|0\.0+|false)$/i;
 
-function renderSection(panel: Panel, collapsed: Set<string>): HTMLElement {
-  const sec = sectionShell(panel, collapsed);
+function renderSection(panel: Panel, collapsed: Set<string>, doc: Document): HTMLElement {
+  const sec = sectionShell(panel, collapsed, doc);
   switch (panel.kind) {
     case 'fields': {
-      const grid = document.createElement('div');
+      const grid = doc.createElement('div');
       grid.className = 'lw-fields';
       for (const f of panel.fields) {
-        const cell = document.createElement('div');
+        const cell = doc.createElement('div');
         const classes = ['lw-field'];
         if (f.changed === true) classes.push('lw-changed');
         else if (ZERO_VALUE.test(f.value.trim())) classes.push('lw-field-zero');
         cell.className = classes.join(' ');
         cell.dataset.test = `reg-${f.key}`;
-        const key = document.createElement('span');
+        const key = doc.createElement('span');
         key.className = 'lw-field-key';
         key.textContent = f.key;
-        const val = document.createElement('span');
+        const val = doc.createElement('span');
         val.className = 'lw-field-val';
         val.textContent = f.value;
         cell.append(key, val);
         if (f.sub !== undefined && f.sub !== '') {
-          const sub = document.createElement('span');
+          const sub = doc.createElement('span');
           sub.className = 'lw-field-sub';
           sub.textContent = f.sub;
           cell.appendChild(sub);
@@ -146,21 +163,21 @@ function renderSection(panel: Panel, collapsed: Set<string>): HTMLElement {
       break;
     }
     case 'listing': {
-      const table = document.createElement('table');
+      const table = doc.createElement('table');
       table.className = 'lw-listing';
-      const tbody = document.createElement('tbody');
+      const tbody = doc.createElement('tbody');
       for (const row of panel.rows) {
-        const tr = document.createElement('tr');
+        const tr = doc.createElement('tr');
         tr.className = row.current === true ? 'lw-row-current' : 'lw-row';
         if (row.current === true) tr.dataset.test = 'current-instr';
         if (row.tip !== undefined && row.tip !== '') tr.dataset.tip = row.tip;
-        const addr = document.createElement('td');
+        const addr = doc.createElement('td');
         addr.className = 'lw-addr';
         addr.textContent = hex(row.addr);
-        const bytes = document.createElement('td');
+        const bytes = doc.createElement('td');
         bytes.className = 'lw-bytes';
         bytes.textContent = row.bytes;
-        const text = document.createElement('td');
+        const text = doc.createElement('td');
         text.className = 'lw-text';
         text.textContent = row.text;
         tr.append(addr, bytes, text);
@@ -168,38 +185,36 @@ function renderSection(panel: Panel, collapsed: Set<string>): HTMLElement {
       }
       table.appendChild(tbody);
       sec.appendChild(table);
-      const current = tbody.querySelector('[data-test="current-instr"]');
-      if (current !== null) current.scrollIntoView({ block: 'nearest' });
       break;
     }
     case 'hexdump': {
-      const pre = document.createElement('pre');
+      const pre = doc.createElement('pre');
       pre.className = 'lw-hexdump';
       for (let r = 0; r < panel.rows.length; r++) {
         const row = panel.rows[r]!;
-        if (r > 0) pre.appendChild(document.createTextNode('\n'));
-        const addrSpan = document.createElement('span');
+        if (r > 0) pre.appendChild(doc.createTextNode('\n'));
+        const addrSpan = doc.createElement('span');
         addrSpan.className = 'lw-addr';
         addrSpan.textContent = `${hex(row.addr)}  `;
         pre.appendChild(addrSpan);
         for (let i = 0; i < 16; i++) {
-          if (i > 0) pre.appendChild(document.createTextNode(' '));
+          if (i > 0) pre.appendChild(doc.createTextNode(' '));
           if (i < row.bytes.length) {
             const b = row.bytes[i]!;
             const txt = byte(b);
             if (b === 0) {
-              const z = document.createElement('span');
+              const z = doc.createElement('span');
               z.className = 'lw-hex-zero';
               z.textContent = txt;
               pre.appendChild(z);
             } else {
-              pre.appendChild(document.createTextNode(txt));
+              pre.appendChild(doc.createTextNode(txt));
             }
           } else {
-            pre.appendChild(document.createTextNode('  '));
+            pre.appendChild(doc.createTextNode('  '));
           }
         }
-        const asciiSpan = document.createElement('span');
+        const asciiSpan = doc.createElement('span');
         asciiSpan.className = 'lw-hex-ascii';
         asciiSpan.textContent = `  |${row.ascii}|`;
         pre.appendChild(asciiSpan);
@@ -208,7 +223,7 @@ function renderSection(panel: Panel, collapsed: Set<string>): HTMLElement {
       break;
     }
     case 'console': {
-      const out = document.createElement('pre');
+      const out = doc.createElement('pre');
       out.className = 'lw-console';
       out.dataset.test = 'output';
       out.textContent = panel.text;
@@ -218,7 +233,7 @@ function renderSection(panel: Panel, collapsed: Set<string>): HTMLElement {
     case 'html': {
       // Trusted kernel-generated markup (e.g. rendered SVG) — never raw
       // user input; the kernel contract vouches for it.
-      const box = document.createElement('div');
+      const box = doc.createElement('div');
       box.className = 'lw-html';
       box.dataset.test = 'html-panel';
       box.innerHTML = panel.html;

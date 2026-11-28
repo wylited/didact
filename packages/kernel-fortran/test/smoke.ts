@@ -3,6 +3,8 @@
 // Covers the Session contract (load/run/step/breakpoints/resume/reset),
 // column-major panels, modules, derived types, formatted I/O and errors.
 
+import { readFileSync } from 'node:fs';
+
 import { fortranKernel } from '../src/kernel';
 import type { Panel, RunResult, Session } from '../src/types';
 
@@ -185,6 +187,159 @@ end program p`);
   read *, n
 end program p`);
   check('READ refused at load', !read.ok && read.message.includes('not in the teaching subset: READ'));
+}
+
+console.log('apps/site page round-trip');
+{
+  interface Block {
+    name: string;
+    check?: string;
+    session?: string;
+    source: string;
+    results: string;
+  }
+
+  const page = readFileSync(
+    new URL('../../../apps/site/src/pages/fortran.org', import.meta.url),
+    'utf8',
+  );
+  const lines = page.split('\n');
+  const blocks: Block[] = [];
+  let solution: Block | undefined;
+  let inSolution = false;
+  let pendingName = '';
+  let pendingCheck: string | undefined;
+
+  for (let i = 0; i < lines.length;) {
+    const line = lines[i]!;
+    if (/^#\+BEGIN_SOLUTION\s*$/.test(line)) {
+      inSolution = true;
+      i++;
+      continue;
+    }
+    if (/^#\+END_SOLUTION\s*$/.test(line)) {
+      inSolution = false;
+      i++;
+      continue;
+    }
+    const nameMatch = /^#\+NAME:\s*(\S+)/.exec(line);
+    if (nameMatch !== null) {
+      pendingName = nameMatch[1]!;
+      i++;
+      continue;
+    }
+    const checkMatch = /^#\+CHECK:\s*(.+)$/.exec(line);
+    if (checkMatch !== null) {
+      pendingCheck = checkMatch[1]!.trim();
+      i++;
+      continue;
+    }
+    const beginMatch = /^#\+BEGIN_SRC\s+(\S+)(.*)$/.exec(line);
+    if (beginMatch === null) {
+      i++;
+      continue;
+    }
+
+    const lang = beginMatch[1]!;
+    const header = beginMatch[2] ?? '';
+    const body: string[] = [];
+    let j = i + 1;
+    while (j < lines.length && !/^#\+END_SRC\s*$/.test(lines[j]!)) {
+      body.push(lines[j]!);
+      j++;
+    }
+    i = j + 1;
+
+    const resultLines: string[] = [];
+    let k = i;
+    while (k < lines.length && lines[k]!.trim() === '') k++;
+    if (k < lines.length && /^#\+RESULTS?:/.test(lines[k]!)) {
+      k++;
+      while (k < lines.length && lines[k]!.startsWith(': ')) {
+        resultLines.push(lines[k]!.slice(2));
+        k++;
+      }
+      i = k;
+    }
+
+    if (lang === 'fortran') {
+      const sessionMatch = /:session\s+(\S+)/.exec(header);
+      const block: Block = {
+        name: pendingName,
+        check: pendingCheck,
+        session: sessionMatch?.[1],
+        source: body.join('\n'),
+        results: resultLines.length === 0 ? '' : `${resultLines.join('\n')}\n`,
+      };
+      if (inSolution) solution = block;
+      else blocks.push(block);
+    }
+
+    pendingName = '';
+    pendingCheck = undefined;
+  }
+
+  eq('page fortran blocks executed', blocks.length + (solution === undefined ? 0 : 1), 7);
+
+  const sessions = new Map<string, Session>();
+  let exerciseCheck: string | undefined;
+
+  for (const block of blocks) {
+    const label = block.name === '' ? 'unnamed fortran block' : block.name;
+    let s: Session;
+    if (block.session === undefined) {
+      s = fortranKernel.createSession();
+      const r = await s.load(block.source);
+      check(`${label} loads`, r.ok, r.ok ? '' : r.message);
+      if (!r.ok) continue;
+    } else {
+      const shared = sessions.get(block.session);
+      if (shared === undefined) {
+        s = fortranKernel.createSession();
+        sessions.set(block.session, s);
+        const r = await s.load(block.source);
+        check(`${label} opens session ${block.session}`, r.ok, r.ok ? '' : r.message);
+        if (!r.ok) continue;
+      } else {
+        s = shared;
+        const r = await s.resume!(block.source);
+        check(`${label} resumes session ${block.session}`, r.ok, r.ok ? '' : r.message);
+        if (!r.ok) continue;
+      }
+    }
+
+    const r = await s.run();
+    check(`${label} runs without error`, r.error === undefined, r.error ?? '');
+    const out = consoleOf(s.state());
+    if (block.check !== undefined) {
+      const got = out.trimEnd();
+      const want = block.check;
+      exerciseCheck = want;
+      // Row 1 of the page's 2x3 column-major reshape holds 1, 3, 5.
+      eq(`${label} console`, got, '9');
+      check(`${label} rejects #+CHECK: ${want}`, got !== want, `got ${got}`);
+    } else {
+      eq(`${label} #+RESULTS`, out, block.results);
+    }
+  }
+
+  check('page has a #+SOLUTION block', solution !== undefined);
+  if (solution !== undefined) {
+    const s = fortranKernel.createSession();
+    const loaded = await s.load(solution.source);
+    check('solution loads', loaded.ok, loaded.ok ? '' : loaded.message);
+    if (loaded.ok) {
+      const r = await s.run();
+      check('solution runs without error', r.error === undefined, r.error ?? '');
+      const got = consoleOf(s.state()).trimEnd();
+      eq('solution console', got, '12');
+      check(
+        `solution satisfies #+CHECK: ${exerciseCheck ?? ''}`,
+        exerciseCheck !== undefined && got === exerciseCheck,
+        `got ${got}`,
+      );
+    }
+  }
 }
 
 if (failures.length > 0) {

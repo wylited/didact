@@ -11,7 +11,8 @@
 // Exactly those five files are served; nothing is ever fetched from a CDN
 // and no other network access happens at runtime.
 //
-// sync-vendors copies them from node_modules into the app's public root;
+// @didact/vite (didactVendors()) serves them from node_modules at
+// vendor-python/ in dev and emits them into dist/ on build;
 // <page-base>/vendor-python/ resolves under Vite dev/build/preview with
 // base './'. If the app serves the assets elsewhere it calls
 // setVendorBase() before creating a session. The engine boots lazily on
@@ -31,19 +32,28 @@ declare global {
 const pageBase = typeof document !== 'undefined' ? document.baseURI : 'file:///';
 
 let vendorDir = new URL('vendor-python/', pageBase).href;
+let enginePromise: Promise<PyodideInterface> | null = null;
 
 /** Point the loader at a different same-origin directory for the assets. */
 export function setVendorBase(url: string): void {
   vendorDir = url.endsWith('/') ? url : url + '/';
+  enginePromise = null; // re-resolve on the next load
 }
 
 function loadScript(src: string): Promise<void> {
+  if (typeof document === 'undefined') {
+    return Promise.reject(
+      new Error(`cannot load ${src} without a browser DOM — call setVendorBase() in a browser context`),
+    );
+  }
   const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const fail = () =>
+    new Error(`failed to load ${src} — serve the vendored Pyodide assets there or call setVendorBase()`);
   const existing = document.querySelector<HTMLScriptElement>(`script[data-vendor="${src}"]`);
   if (existing && existing.dataset.loaded === '1') return Promise.resolve();
   if (existing) {
     existing.addEventListener('load', () => resolve());
-    existing.addEventListener('error', () => reject(new Error(`failed to load ${src}`)));
+    existing.addEventListener('error', () => reject(fail()));
     return promise;
   }
   const s = document.createElement('script');
@@ -53,26 +63,32 @@ function loadScript(src: string): Promise<void> {
     s.dataset.loaded = '1';
     resolve();
   });
-  s.addEventListener('error', () => reject(new Error(`failed to load ${src}`)));
+  s.addEventListener('error', () => {
+    s.remove(); // drop the failed tag so a retry creates a fresh <script>
+    reject(fail());
+  });
   document.head.appendChild(s);
   return promise;
 }
 
-let enginePromise: Promise<PyodideInterface> | null = null;
-
 /** Load (once) the vendored Pyodide engine; shared by every python block. */
 export function loadEngine(): Promise<PyodideInterface> {
   if (!enginePromise) {
-    enginePromise = (async () => {
-      await loadScript(vendorDir + 'pyodide.js');
+    const base = vendorDir;
+    const scriptUrl = base + 'pyodide.js';
+    const pending = (async () => {
+      await loadScript(scriptUrl);
       const boot = window.loadPyodide;
       if (!boot) {
-        throw new Error('pyodide.js loaded but defines no loadPyodide global');
+        throw new Error(
+          `${scriptUrl} loaded but defines no loadPyodide global — verify the assets or call setVendorBase()`,
+        );
       }
-      return boot({ indexURL: vendorDir });
+      return boot({ indexURL: base });
     })();
-    enginePromise.catch(() => {
-      enginePromise = null; // allow a retry after a transient fetch failure
+    enginePromise = pending;
+    pending.catch(() => {
+      if (enginePromise === pending) enginePromise = null; // allow a retry after a transient fetch failure
     });
   }
   return enginePromise;
@@ -85,19 +101,6 @@ let queue: Promise<unknown> = Promise.resolve();
  * and namespace snapshots never interleave between concurrently-run blocks.
  */
 export function serialized<T>(job: () => Promise<T>): Promise<T> {
-  const next = queue.then(job, job);
-  queue = next.then(() => undefined, () => undefined);
-  return next;
-}
-
-/**
- * Serialize one *live* job: unlike serialized(), the job holds the engine
- * across its awaits (statements, macrotask yields) until it settles, so no
- * other session can interleave with a run that is still streaming snapshots.
- * The returned tick() drains the queue while the job is in flight; the
- * session awaits a macrotask between statements and then calls tick().
- */
-export function serializedLive<T>(job: () => Promise<T>): Promise<T> {
   const next = queue.then(job, job);
   queue = next.then(() => undefined, () => undefined);
   return next;

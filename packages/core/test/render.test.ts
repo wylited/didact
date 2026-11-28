@@ -214,6 +214,18 @@ describe('renderDocument: links', () => {
     expect(root.querySelector('a')).toBeNull();
     expect(root.querySelectorAll("[data-test='link-broken']")).toHaveLength(1);
   });
+
+  it('falls back to the target text when a link has an empty description [[target][]]', () => {
+    const { root } = renderDocument(
+      parseOrg('See [[file:other.org][]] and [[*Local][]].'),
+      () => true,
+      { resolveLink: resolve },
+    );
+    const anchors = [...root.querySelectorAll('a.lw-link')];
+    expect(anchors.map((a) => a.textContent)).toEqual(['other.org', '*Local']);
+    expect(anchors.map((a) => a.getAttribute('href')))
+      .toEqual(['#/other-page', '#/this-page/local']);
+  });
 });
 
 describe('renderDocument: folds', () => {

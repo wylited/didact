@@ -1,207 +1,34 @@
-// block.ts — executable block runtime: CM6 editor (Ayu Light), inline
-// controls (Run/Step/Reset machine/Revert code/Copy Code + mono status),
-// line-mapped error box, current-line decoration, gutter breakpoints (when
-// the kernel supports them), results-slot output (console + trusted kernel
-// markup), persisted editor text, and exercise checking.
+// block.ts — executable block runtime: CM6 editor, inline controls
+// (Run/Step/Reset machine/Revert code/Copy Code + mono status), line-mapped
+// error box, current-line decoration, gutter breakpoints (when the kernel
+// supports them), results-slot output, persisted editor text, and exercise
+// checking.
 
+import type { EditorView } from '@codemirror/view';
 import {
-  EditorState,
-  Range,
-  RangeSet,
-  StateEffect,
-  StateField,
-  type Extension,
-} from '@codemirror/state';
+  createBlockEditor,
+  dispatchLineMarks,
+  getBreakpointLines,
+  type LineMarks,
+} from './block-editor';
+import { ExerciseController } from './block-exercise';
 import {
-  Decoration,
-  EditorView,
-  GutterMarker,
-  gutter,
-  keymap,
-  lineNumbers,
-} from '@codemirror/view';
-import { defaultKeymap } from '@codemirror/commands';
-import { ayuLight } from 'thememirror';
-import { editorLanguage } from './languages';
+  DEFAULT_STORAGE_PREFIX,
+  clearSavedCode,
+  copyToClipboard,
+  defaultStorage,
+  extractConsoleText,
+  isApplePlatform,
+  normalizeStoragePrefix,
+  readSavedCode,
+  renderBlockResults,
+  writeSavedCode,
+} from './block-io';
 import type { Kernel, Panel, RunResult, Session } from './kernel';
 import type { OrgNode } from './org';
-import type {
-  BlockRuntimeOptions,
-  ExerciseOutcome,
-  ExerciseSpec,
-  StorageLike,
-} from './teaching';
+import type { BlockRuntimeOptions, StorageLike } from './teaching';
 
 type SrcNode = Extract<OrgNode, { kind: 'src' }>;
-
-type ExerciseState = 'pending' | 'running' | 'passed' | 'failed' | 'unchecked';
-
-const CODE_KEY_PREFIX = 'didact:code:';
-
-/** Trailing whitespace is insignificant when comparing exercise output. */
-function normalizeOutput(text: string): string {
-  return text
-    .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map((line) => line.replace(/[ \t]+$/, ''))
-    .join('\n')
-    .replace(/\n+$/, '');
-}
-
-/** `Mod` is Meta on Apple platforms and Control elsewhere; the Run button
- *  advertises only the key that actually works on this machine. */
-function isApplePlatform(): boolean {
-  return typeof navigator !== 'undefined'
-    && /Mac|iPhone|iPad/.test(navigator.platform);
-}
-
-/** localStorage may be absent or throw (privacy mode, sandboxed iframe). */
-function defaultStorage(): StorageLike | null {
-  try {
-    if (!('localStorage' in globalThis)) return null;
-    const storage: StorageLike | null = globalThis.localStorage;
-    return storage ?? null;
-  } catch {
-    return null;
-  }
-}
-
-interface LineMarks { current: number | null; error: number | null }
-
-const setMarks = StateEffect.define<Partial<LineMarks>>();
-
-const marksField = StateField.define<LineMarks>({
-  create: () => ({ current: null, error: null }),
-  update(value, tr) {
-    let v = value;
-    for (const e of tr.effects) {
-      if (e.is(setMarks)) v = { ...v, ...e.value };
-    }
-    if (!tr.docChanged) return v;
-    // keep marks on their text when the student edits around them
-    const shift = (line: number | null): number | null => {
-      if (line === null) return null;
-      const clamped = Math.min(tr.startState.doc.lines, Math.max(1, line));
-      const from = tr.changes.mapPos(tr.startState.doc.line(clamped).from);
-      return tr.state.doc.lineAt(Math.max(0, from)).number;
-    };
-    return { current: shift(v.current), error: shift(v.error) };
-  },
-});
-
-const markDecos = EditorView.decorations.compute([marksField], (state) => {
-  const { current, error } = state.field(marksField);
-  const ranges: Range<Decoration>[] = [];
-  const add = (line: number | null, cls: string): void => {
-    if (line !== null && line >= 1 && line <= state.doc.lines) {
-      const deco = Decoration.line({ class: cls });
-      ranges.push(deco.range(state.doc.line(line).from));
-    }
-  };
-  add(current, 'lw-current-line');
-  add(error, 'lw-error-line');
-  return Decoration.set(ranges);
-});
-
-/* ---- breakpoints (kernels with features.breakpoints): clicking a line
-   number toggles a breakpoint on that 1-based line; filled black square
-   markers live in a slim gutter; run() passes the active lines on. */
-
-const toggleBreakpoint = StateEffect.define<number>(); // 1-based line
-
-/** Sorted active breakpoint lines, mapped through doc changes with the
- * same keep-marks-on-their-text approach as `marksField`. */
-const breakpointsField = StateField.define<number[]>({
-  create: () => [],
-  update(value, tr) {
-    let v = value;
-    for (const e of tr.effects) {
-      if (!e.is(toggleBreakpoint)) continue;
-      v = v.includes(e.value)
-        ? v.filter((l) => l !== e.value)
-        : [...v, e.value].sort((a, b) => a - b);
-    }
-    if (!tr.docChanged) return v;
-    const shift = (line: number): number => {
-      const clamped = Math.min(tr.startState.doc.lines, Math.max(1, line));
-      const from = tr.changes.mapPos(tr.startState.doc.line(clamped).from);
-      return tr.state.doc.lineAt(Math.max(0, from)).number;
-    };
-    const out: number[] = [];
-    for (const line of v) {
-      const shifted = shift(line);
-      if (!out.includes(shifted)) out.push(shifted);
-    }
-    return out.sort((a, b) => a - b);
-  },
-});
-
-class BreakpointMarker extends GutterMarker {
-  constructor(readonly line: number) {
-    super();
-  }
-  override eq(other: BreakpointMarker): boolean {
-    return other.line === this.line;
-  }
-  override toDOM(): Node {
-    const el = document.createElement('div');
-    el.className = 'lw-bp';
-    el.dataset.test = `breakpoint-${this.line}`;
-    return el;
-  }
-}
-
-/** Hidden width template: the marker gutter keeps its width before the
- * first breakpoint is placed. */
-class BpSpacer extends GutterMarker {
-  override eq(): boolean {
-    return true;
-  }
-  override toDOM(): Node {
-    const el = document.createElement('div');
-    el.className = 'lw-bp';
-    return el;
-  }
-}
-
-const breakpointGutter = gutter({
-  class: 'lw-bp-gutter',
-  markers(view) {
-    const { doc } = view.state;
-    return RangeSet.of(
-      view.state
-        .field(breakpointsField)
-        .filter((line) => line >= 1 && line <= doc.lines)
-.map((line) => ({ from: doc.line(line).from, to: doc.line(line).from, value: new BreakpointMarker(line) })),
-      true,
-    );
-  },
-  lineMarkerChange: (update) =>
-    update.startState.field(breakpointsField, false)
-    !== update.state.field(breakpointsField, false),
-  initialSpacer: () => new BpSpacer(),
-});
-
-/** data-test=gutter-N on every rendered line-number element (the hidden
- * width spacer and non-numeric elements are skipped). */
-function labelLineNumberEls(view: EditorView): void {
-  for (const el of view.dom.querySelectorAll<HTMLElement>(
-    '.cm-lineNumbers .cm-gutterElement',
-  )) {
-    if (el.style.visibility === 'hidden') continue;
-    const n = Number(el.textContent);
-    if (Number.isInteger(n) && n >= 1) el.dataset.test = `gutter-${n}`;
-  }
-}
-
-const labelGutterNumbers = EditorView.updateListener.of((update) => {
-  if (
-    update.docChanged || update.viewportChanged
-    || update.geometryChanged || update.heightChanged
-  ) {
-    labelLineNumberEls(update.view);
-  }
-});
 
 /** A named org-babel session shared by several blocks on one page.
  *  `supported` is false when the kernel has no `resume`, in which case
@@ -218,6 +45,9 @@ export interface SharedSession {
    *  reset. Blocks compare this with their own text so Step/Run always
    *  acts on the right program. */
   loadedSource: string | null;
+  /** Block that loaded `loadedSource`, so identical-source siblings never
+   *  falsely skip reload or continue another sibling's mid-flight state. */
+  loadedBlock?: BlockRuntime | null;
   /** Tail of the group's serialized run/step chain: the session is a
    *  single mutable machine, so only one member may use it at a time. */
   queue: Promise<unknown>;
@@ -239,10 +69,13 @@ export class BlockRuntime {
   readonly session: Session;
   /** `#name` or `Block N`. */
   readonly title: string;
+  private readonly doc: Document;
+  private readonly win: Window;
   private readonly events: BlockEvents;
   private readonly view: EditorView;
   private readonly statusEl: HTMLElement;
-  private readonly revertBtn: HTMLButtonElement;
+  /** Null in a read-only mount: no revert control is created. */
+  private readonly revertBtn: HTMLButtonElement | null;
   private readonly errorEl: HTMLElement;
   private readonly resultsEl: HTMLElement | null;
   private readonly sample: string;
@@ -250,14 +83,8 @@ export class BlockRuntime {
   private readonly id: string | undefined;
   /** Backend for saved code; null when persistence is unavailable. */
   private readonly storage: StorageLike | null;
-  private readonly exercise: ExerciseSpec | null;
-  private exerciseBadge: HTMLElement | null = null;
-  /** Last judged outcome, kept so Reset can restore it instead of
-   *  discarding a completed pass/fail. */
-  private exerciseResult: 'passed' | 'failed' | null = null;
-  /** True once the current execution has emitted its outcome. */
-  private exerciseJudged = false;
-  private readonly onExerciseResult: ((outcome: ExerciseOutcome) => void) | undefined;
+  private readonly storagePrefix: string;
+  private readonly exerciseCtrl: ExerciseController;
   private copyTimer: number | undefined;
   /** Status text/class to restore when the "copied" flash ends. */
   private copyRestore: { text: string; error: boolean } | null = null;
@@ -287,6 +114,8 @@ export class BlockRuntime {
     shared?: SharedSession,
     options: BlockRuntimeOptions = {},
   ) {
+    this.doc = mount.ownerDocument ?? document;
+    this.win = this.doc.defaultView ?? window;
     this.kernel = kernel;
     this.kernelLabel = kernel.label;
     this.shared = shared;
@@ -298,44 +127,42 @@ export class BlockRuntime {
     this.title = node.name !== null ? `#${node.name}` : `Block ${index}`;
     this.id = options.id;
     this.storage = options.storage === undefined ? defaultStorage() : options.storage;
-    this.exercise = node.exercise;
-    this.onExerciseResult = options.onExerciseResult;
+    this.storagePrefix = normalizeStoragePrefix(
+      options.storagePrefix ?? DEFAULT_STORAGE_PREFIX,
+    );
 
     // A saved draft wins over the document's sample text; every read is
     // best-effort so unavailable/blocked storage never breaks the block.
-    let initialCode = node.code;
-    if (this.id !== undefined && this.storage !== null) {
-      try {
-        const saved = this.storage.getItem(CODE_KEY_PREFIX + this.id);
-        if (saved !== null) initialCode = saved;
-      } catch {
-        // storage may be unavailable (privacy mode, quota, sandbox)
-      }
-    }
+    // A read-only mount always shows the document's sample: a draft left
+    // by an earlier writable visit must not shadow it.
+    const saved = options.readOnly === true
+      ? null
+      : readSavedCode(this.storage, this.storagePrefix, this.id);
+    const initialCode = saved ?? node.code;
 
-    this.el = document.createElement('div');
+    this.el = this.doc.createElement('div');
     this.el.className = 'lw-block';
     this.el.dataset.test = 'block';
     this.el.dataset.name = this.title;
 
-    const head = document.createElement('div');
+    const head = this.doc.createElement('div');
     head.className = 'lw-block-head';
 
-    const meta = document.createElement('div');
+    const meta = this.doc.createElement('div');
     meta.className = 'lw-block-meta';
 
-    const lang = document.createElement('span');
+    const lang = this.doc.createElement('span');
     lang.className = 'lw-lang';
     lang.textContent = node.lang;
     meta.appendChild(lang);
 
-    const name = document.createElement('span');
+    const name = this.doc.createElement('span');
     name.className = 'lw-block-name';
     name.textContent = this.title;
     meta.appendChild(name);
 
     if (shared !== undefined) {
-      const sess = document.createElement('span');
+      const sess = this.doc.createElement('span');
       sess.className = 'lw-block-session';
       sess.dataset.test = 'block-session';
       sess.dataset.session = shared.name;
@@ -352,43 +179,35 @@ export class BlockRuntime {
       meta.appendChild(sess);
     }
 
-    if (node.exercise !== null) {
-      const badge = document.createElement('span');
-      badge.className = 'lw-block-exercise';
-      badge.dataset.test = 'block-exercise';
-      badge.setAttribute('role', 'status');
-      badge.setAttribute('aria-live', 'polite');
-      meta.appendChild(badge);
-      this.exerciseBadge = badge;
-      // a previous visit's pass survives until this run is judged, so a
-      // reset mid-rerun restores "passed" instead of forgetting it
-      if (options.exercisePassed === true) this.exerciseResult = 'passed';
-      this.setExerciseState(
-        node.exercise.expected === null
-          ? 'unchecked'
-          : options.exercisePassed === true ? 'passed' : 'pending',
-      );
+    this.exerciseCtrl = new ExerciseController(
+      node.exercise,
+      this.id,
+      options.exercisePassed === true,
+      options.onExerciseResult,
+      this.doc,
+    );
+    if (this.exerciseCtrl.badge !== null) {
+      meta.appendChild(this.exerciseCtrl.badge);
     }
 
     head.appendChild(meta);
 
-    const actions = document.createElement('div');
+    const actions = this.doc.createElement('div');
     actions.className = 'lw-block-actions';
 
-    const runBtn = document.createElement('button');
+    const apple = isApplePlatform();
+    const runBtn = this.doc.createElement('button');
     runBtn.type = 'button';
     runBtn.className = 'lw-btn lw-btn-primary';
     runBtn.dataset.test = 'block-run';
     runBtn.textContent = '▶ Run';
-    runBtn.title = `Run the block (${isApplePlatform() ? '⌘' : 'Ctrl+'}Enter)`;
-    runBtn.setAttribute(
-      'aria-keyshortcuts',
-      isApplePlatform() ? 'Meta+Enter' : 'Control+Enter',
-    );
+    runBtn.title = `Run the block (${apple ? '⌘' : 'Ctrl+'}Enter)`;
+    runBtn.setAttribute('aria-keyshortcuts', apple ? 'Meta+Enter' : 'Control+Enter');
     runBtn.addEventListener('click', () => void this.run());
     actions.appendChild(runBtn);
 
-    const stepBtn = document.createElement('button');
+    const canStep = kernel.features?.stepping !== false;
+    const stepBtn = this.doc.createElement('button');
     stepBtn.type = 'button';
     stepBtn.className = 'lw-btn lw-btn-secondary';
     stepBtn.dataset.test = 'block-step';
@@ -396,10 +215,9 @@ export class BlockRuntime {
     stepBtn.title = 'Step one instruction (Shift+Enter)';
     stepBtn.setAttribute('aria-keyshortcuts', 'Shift+Enter');
     stepBtn.addEventListener('click', () => void this.step());
-    // kernels may opt out of stepping (features.stepping === false)
-    if (kernel.features?.stepping !== false) actions.appendChild(stepBtn);
+    if (canStep) actions.appendChild(stepBtn);
 
-    const resetBtn = document.createElement('button');
+    const resetBtn = this.doc.createElement('button');
     resetBtn.type = 'button';
     resetBtn.className = 'lw-btn lw-btn-ghost';
     resetBtn.dataset.test = 'block-reset';
@@ -409,19 +227,24 @@ export class BlockRuntime {
     resetBtn.addEventListener('click', () => this.reset());
     actions.appendChild(resetBtn);
 
-    const revertBtn = document.createElement('button');
-    revertBtn.type = 'button';
-    revertBtn.className = 'lw-btn lw-btn-ghost';
-    revertBtn.dataset.test = 'block-revert';
-    revertBtn.dataset.dirty = String(initialCode !== this.sample);
-    revertBtn.textContent = '↺';
-    revertBtn.title = 'Revert to sample code (keeps session)';
-    revertBtn.setAttribute('aria-label', 'Revert code');
-    revertBtn.addEventListener('click', () => this.revertCode());
-    actions.appendChild(revertBtn);
-    this.revertBtn = revertBtn;
+    if (options.readOnly === true) {
+      // nothing to revert to in a read-only mount
+      this.revertBtn = null;
+    } else {
+      const revertBtn = this.doc.createElement('button');
+      revertBtn.type = 'button';
+      revertBtn.className = 'lw-btn lw-btn-ghost';
+      revertBtn.dataset.test = 'block-revert';
+      revertBtn.dataset.dirty = String(initialCode !== this.sample);
+      revertBtn.textContent = '↺';
+      revertBtn.title = 'Revert to sample code (keeps session)';
+      revertBtn.setAttribute('aria-label', 'Revert code');
+      revertBtn.addEventListener('click', () => this.revertCode());
+      actions.appendChild(revertBtn);
+      this.revertBtn = revertBtn;
+    }
 
-    const copyBtn = document.createElement('button');
+    const copyBtn = this.doc.createElement('button');
     copyBtn.type = 'button';
     copyBtn.className = 'lw-btn lw-btn-ghost';
     copyBtn.dataset.test = 'block-copy';
@@ -431,77 +254,46 @@ export class BlockRuntime {
     copyBtn.addEventListener('click', () => void this.copyCode());
     actions.appendChild(copyBtn);
 
-    this.statusEl = document.createElement('span');
+    this.statusEl = this.doc.createElement('span');
     this.statusEl.className = 'lw-status';
     this.statusEl.dataset.test = 'block-status';
+    this.statusEl.setAttribute('aria-live', 'polite');
     this.statusEl.textContent = 'idle';
 
     head.append(actions, this.statusEl);
     this.el.appendChild(head);
 
-    const editorHost = document.createElement('div');
+    const editorHost = this.doc.createElement('div');
     editorHost.dataset.test = 'editor';
     const canBreak = kernel.features?.breakpoints === true;
     if (canBreak) editorHost.dataset.bp = 'true';
     this.el.appendChild(editorHost);
 
-    // Mod-Enter always runs. Shift-Enter maps to Step only when the kernel
-    // exposes stepping; otherwise it must keep the editor's default action.
-    const learnerKeys = [
-      {
-        key: 'Mod-Enter',
-        run: (): boolean => {
-          if (!this.busy && !this.disposed) void this.run();
-          return true;
-        },
-      },
-    ];
-    if (kernel.features?.stepping !== false) {
-      learnerKeys.push({
-        key: 'Shift-Enter',
-        run: (): boolean => {
-          if (!this.busy && !this.disposed) void this.step();
-          return true;
-        },
-      });
-    }
+    const language = options.editorLanguage ?? null;
 
-    const extensions: Extension[] = [
-      // clicking a line number toggles a breakpoint on that line
-      canBreak
-        ? lineNumbers({
-            domEventHandlers: {
-              mousedown: (view, line): boolean => {
-                const n = view.state.doc.lineAt(line.from).number;
-                view.dispatch({ effects: toggleBreakpoint.of(n) });
-                return true;
-              },
-            },
-          })
-        : lineNumbers(),
-      // learner shortcuts take precedence over the default keymap
-      keymap.of(learnerKeys),
-      keymap.of(defaultKeymap),
-      editorLanguage(kernel.editorSyntax) ?? [],
-      ayuLight,
-      marksField,
-      markDecos,
-      labelGutterNumbers,
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) this.persistCode();
-      }),
-    ];
-    if (canBreak) extensions.push(breakpointsField, breakpointGutter);
-
-    this.view = new EditorView({
+    this.view = createBlockEditor({
       parent: editorHost,
-      state: EditorState.create({ doc: initialCode, extensions }),
+      initialCode,
+      canBreak,
+      canStep,
+      language,
+      syntax: kernel.editorSyntax,
+      theme: options.editorTheme,
+      extensions: options.editorExtensions,
+      readOnly: options.readOnly,
+      onRun: () => {
+        if (!this.busy && !this.disposed) void this.run();
+      },
+      onStep: () => {
+        if (!this.busy && !this.disposed) void this.step();
+      },
+      onDocChanged: () => this.persistCode(),
     });
-    labelLineNumberEls(this.view);
 
-    this.errorEl = document.createElement('div');
+    this.errorEl = this.doc.createElement('div');
     this.errorEl.className = 'lw-error';
     this.errorEl.dataset.test = 'block-error';
+    this.errorEl.setAttribute('role', 'alert');
     this.errorEl.hidden = true;
     this.el.appendChild(this.errorEl);
 
@@ -553,37 +345,52 @@ export class BlockRuntime {
     }
     this.setRunning(true);
     this.setError(null);
-    this.beginExercise();
+    this.exerciseCtrl.begin();
     let exerciseChecked = false;
     let epoch = this.executionEpoch;
     try {
+      const src = this.source;
       // A mid-flight session (paused at a breakpoint, or mid-stepping)
       // continues only when it still holds this block's program: a
       // sibling's run may have replaced it in the shared session.
       const resume = this.midFlight
-        && this.loadedDoc === this.source
-        && (this.shared === undefined || this.shared.loadedSource === this.source);
+        && this.loadedDoc === src
+        && (this.shared === undefined
+          || (this.shared.loadedSource === src
+            && (this.shared.loadedBlock === undefined || this.shared.loadedBlock === this)));
       if (!resume) {
         this.status('working…');
         // A supported named session continues its live state on every Run
         // (org-babel semantics: re-running accumulates definitions/data).
         const load = this.shared?.supported === true
             && this.session.resume !== undefined
-          ? await this.session.resume(this.source)
-          : await this.session.load(this.source);
+          ? await this.session.resume(src)
+          : await this.session.load(src);
+        if (this.disposed) return;
         if (!load.ok) {
           this.loadedDoc = null;
           this.midFlight = false;
           // a failed load leaves the session holding no program — even a
           // sibling's source, which the failed load just displaced
-          if (this.shared !== undefined) this.shared.loadedSource = null;
+          if (this.shared !== undefined) {
+            this.shared.loadedSource = null;
+            this.shared.loadedBlock = null;
+          }
           this.finish(load);
-          this.recordExercise(false, '');
+          this.exerciseCtrl.record(false, '');
           exerciseChecked = true;
           return;
         }
-        this.loadedDoc = this.source;
-        if (this.shared !== undefined) this.shared.loadedSource = this.source;
+        this.loadedDoc = src;
+        if (this.shared !== undefined) {
+          const previous = this.shared.loadedBlock;
+          this.shared.loadedSource = src;
+          this.shared.loadedBlock = this;
+          // the sibling that owned the session no longer shows a live line
+          if (previous !== undefined && previous !== null && previous !== this) {
+            previous.clearCurrentMark();
+          }
+        }
       }
       this.status('running…');
       // Captured after the load: a reset during a load keeps the old
@@ -595,8 +402,8 @@ export class BlockRuntime {
       this.setRunning(false);
       this.midFlight = result.finished !== true && result.error === undefined;
       this.reportResult(result, 'finished');
-      this.syncAfterExecution();
-      this.checkExercise(result);
+      this.syncAfterExecution(result);
+      this.exerciseCtrl.check(result, this.consoleText());
       exerciseChecked = true;
     } catch (err) {
       // a reset during the await already owns the block's state
@@ -604,7 +411,7 @@ export class BlockRuntime {
       // a kernel throw must not brick the block (busy flag, outline)
       this.setRunning(false);
       this.statusError(`error · ${(err instanceof Error ? err.message : String(err))}`);
-      if (!exerciseChecked) this.recordExercise(false, this.consoleText());
+      if (!exerciseChecked) this.exerciseCtrl.record(false, this.consoleText());
     } finally {
       this.busy = false;
       if (!this.disposed) this.events.onActivity(this);
@@ -626,36 +433,51 @@ export class BlockRuntime {
     this.setError(null);
     let epoch = this.executionEpoch;
     try {
+      const src = this.source;
       // A shared group's program identity lives in the session itself:
-      // stepping block A after block B ran must first resume A's source.
+      // stepping block A after block B ran must first resume A's source,
+      // even when A and B carry identical source text.
       const needsLoad = this.shared === undefined
-        ? this.loadedDoc !== this.source
-        : this.shared.loadedSource !== this.source;
+        ? this.loadedDoc !== src
+        : this.shared.loadedSource !== src
+          || (this.shared.loadedBlock !== undefined && this.shared.loadedBlock !== this);
       if (needsLoad) {
         this.status('working…');
         // Same choice as run(): a supported named session continues its live
         // state instead of reloading (which would wipe the group's state).
         const load = this.shared?.supported === true
             && this.session.resume !== undefined
-          ? await this.session.resume(this.source)
-          : await this.session.load(this.source);
+          ? await this.session.resume(src)
+          : await this.session.load(src);
+        if (this.disposed) return;
         if (!load.ok) {
           this.loadedDoc = null;
           this.midFlight = false;
           // a failed load leaves the session holding no program — even a
           // sibling's source, which the failed load just displaced
-          if (this.shared !== undefined) this.shared.loadedSource = null;
+          if (this.shared !== undefined) {
+            this.shared.loadedSource = null;
+            this.shared.loadedBlock = null;
+          }
           // The reload began a new execution and failed: judge a checked
           // exercise so a stale "passed" badge cannot survive it.
-          this.beginExercise();
-          this.recordExercise(false, '');
+          this.exerciseCtrl.begin();
+          this.exerciseCtrl.record(false, '');
           this.finish(load);
           return;
         }
-        this.loadedDoc = this.source;
-        if (this.shared !== undefined) this.shared.loadedSource = this.source;
+        this.loadedDoc = src;
+        if (this.shared !== undefined) {
+          const previous = this.shared.loadedBlock;
+          this.shared.loadedSource = src;
+          this.shared.loadedBlock = this;
+          // the sibling that owned the session no longer shows a live line
+          if (previous !== undefined && previous !== null && previous !== this) {
+            previous.clearCurrentMark();
+          }
+        }
         // A step that reloads a fresh program begins a new execution.
-        this.beginExercise();
+        this.exerciseCtrl.begin();
       }
       this.status('stepping…');
       // Same epoch rule as run(): a reset during the load is preserved
@@ -670,7 +492,7 @@ export class BlockRuntime {
         // A step can be the terminal execution (paused program stepping to
         // completion); judge the exercise on it exactly like Run.
         if (result.finished === true || result.error !== undefined) {
-          this.checkExercise(result);
+          this.exerciseCtrl.check(result, this.consoleText());
         }
       } else {
         // Some kernels hand back the terminal result with ran === false
@@ -678,7 +500,7 @@ export class BlockRuntime {
         if (result !== undefined
           && (result.finished === true || result.error !== undefined)) {
           this.midFlight = false;
-          this.checkExercise(result);
+          this.exerciseCtrl.check(result, this.consoleText());
         }
         this.status('halted · nothing left to execute');
       }
@@ -690,7 +512,7 @@ export class BlockRuntime {
       this.statusError(`error · ${(err instanceof Error ? err.message : String(err))}`);
       // A thrown step never reaches a result: do not leave the badge
       // stuck on "running".
-      this.recordExercise(false, '');
+      this.exerciseCtrl.record(false, this.consoleText());
     } finally {
       this.busy = false;
       if (!this.disposed) this.events.onActivity(this);
@@ -703,7 +525,10 @@ export class BlockRuntime {
     // A supported named session is one machine: reset it once and tell
     // every member block that their program and output are gone.
     this.session.reset();
-    if (this.shared !== undefined) this.shared.loadedSource = null;
+    if (this.shared !== undefined) {
+      this.shared.loadedSource = null;
+      this.shared.loadedBlock = null;
+    }
     if (this.shared !== undefined && this.shared.supported) {
       for (const block of this.shared.blocks) {
         block.applySharedReset();
@@ -723,7 +548,6 @@ export class BlockRuntime {
     this.executionEpoch++;
     this.loadedDoc = null;
     this.midFlight = false;
-    this.exerciseJudged = false;
     this.setRunning(false);
     this.setError(null);
     this.setMarks({ current: null });
@@ -732,61 +556,35 @@ export class BlockRuntime {
     this.status(shared !== undefined && shared.supported
       ? 'reset · shared session'
       : 'reset · ready');
-    if (this.exerciseBadge?.dataset.state === 'running') {
-      this.setExerciseState(this.exerciseResult ?? 'pending');
-    }
+    this.exerciseCtrl.reset();
   }
 
   /** Restore the sample text without touching the session or its output. */
   revertCode(): void {
-    if (this.disposed) return;
-    this.view.dispatch({
-      changes: { from: 0, to: this.view.state.doc.length, insert: this.sample },
-    });
+    // a read-only mount has no revert control and must leave storage alone
+    if (this.disposed || this.revertBtn === null) return;
+    if (this.source !== this.sample) {
+      this.view.dispatch({
+        changes: { from: 0, to: this.view.state.doc.length, insert: this.sample },
+      });
+    }
     this.revertBtn.dataset.dirty = 'false';
-    this.clearSavedCode();
+    clearSavedCode(this.storage, this.storagePrefix, this.id);
   }
 
-  /** Mirror the editor text into storage, or drop the draft when the text
-   *  matches the sample. Never throws. */
   private persistCode(): void {
-    this.revertBtn.dataset.dirty = String(this.source !== this.sample);
-    if (this.id === undefined || this.storage === null) return;
-    const key = CODE_KEY_PREFIX + this.id;
-    try {
-      if (this.source === this.sample) this.storage.removeItem(key);
-      else this.storage.setItem(key, this.source);
-    } catch {
-      // storage may be unavailable (privacy mode, quota, sandbox)
+    if (this.revertBtn !== null) {
+      this.revertBtn.dataset.dirty = String(this.source !== this.sample);
     }
-  }
-
-  private clearSavedCode(): void {
-    if (this.id === undefined || this.storage === null) return;
-    try {
-      this.storage.removeItem(CODE_KEY_PREFIX + this.id);
-    } catch {
-      // storage may be unavailable (privacy mode, quota, sandbox)
-    }
+    writeSavedCode(this.storage, this.storagePrefix, this.id, this.source, this.sample);
   }
 
   private async copyCode(): Promise<void> {
-    const text = this.source;
-    let copied = false;
-    try {
-      const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
-      if (clipboard !== undefined && typeof clipboard.writeText === 'function') {
-        await clipboard.writeText(text);
-        copied = true;
-      }
-    } catch {
-      copied = false;
-    }
-    if (!copied) copied = this.fallbackCopy(text);
+    const copied = await copyToClipboard(this.source, this.doc);
     if (this.disposed) return;
     if (!copied) {
       if (this.copyTimer !== undefined) {
-        window.clearTimeout(this.copyTimer);
+        this.win.clearTimeout(this.copyTimer);
         this.copyTimer = undefined;
         this.copyRestore = null;
       }
@@ -794,25 +592,6 @@ export class BlockRuntime {
       return;
     }
     this.showCopied();
-  }
-
-  /** Hidden-textarea fallback for browsers without the async clipboard. */
-  private fallbackCopy(text: string): boolean {
-    const area = document.createElement('textarea');
-    area.value = text;
-    area.setAttribute('readonly', '');
-    area.style.position = 'fixed';
-    area.style.top = '-1000px';
-    area.style.opacity = '0';
-    try {
-      document.body.appendChild(area);
-      area.select();
-      return typeof document.execCommand === 'function' && document.execCommand('copy');
-    } catch {
-      return false;
-    } finally {
-      area.remove();
-    }
   }
 
   private showCopied(): void {
@@ -824,8 +603,8 @@ export class BlockRuntime {
       };
     }
     this.status('copied');
-    if (this.copyTimer !== undefined) window.clearTimeout(this.copyTimer);
-    this.copyTimer = window.setTimeout(() => {
+    if (this.copyTimer !== undefined) this.win.clearTimeout(this.copyTimer);
+    this.copyTimer = this.win.setTimeout(() => {
       this.copyTimer = undefined;
       if (this.disposed || this.copyRestore === null) return;
       const { text, error } = this.copyRestore;
@@ -838,108 +617,26 @@ export class BlockRuntime {
     }, 1200);
   }
 
-  private beginExercise(): void {
-    if (this.exercise !== null && this.exercise.expected !== null) {
-      this.exerciseJudged = false;
-      this.setExerciseState('running');
-    }
-  }
-
-  /** Check the exercise once a run or step reached a terminal result
-   *  (finished or errored). A breakpoint pause is still mid-flight and is
-   *  not judged yet. */
-  private checkExercise(result: RunResult): void {
-    const exercise = this.exercise;
-    if (exercise === null || exercise.expected === null) return;
-    const errored = result.error !== undefined && result.error !== '';
-    if (!errored) {
-      if (result.pausedAt !== undefined) return;
-      if (result.finished !== true) return;
-    }
-    const actual = this.consoleText();
-    const passed = !errored
-      && normalizeOutput(actual) === normalizeOutput(exercise.expected);
-    this.recordExercise(passed, actual);
-  }
-
-  /** Publish one outcome and paint the badge. Unchecked drills never call
-   *  here, so they can never be reported as pass/fail. An outcome needs a
-   *  stable id; without one the badge still updates but no host callback
-   *  fires (an empty-id outcome would collide across blocks). */
-  private recordExercise(passed: boolean, actual: string): void {
-    const exercise = this.exercise;
-    if (exercise === null || exercise.expected === null) return;
-    // One outcome per execution: extra terminal steps after the verdict
-    // must not fire the host callback again.
-    if (this.exerciseJudged) return;
-    this.exerciseJudged = true;
-    this.exerciseResult = passed ? 'passed' : 'failed';
-    this.setExerciseState(this.exerciseResult);
-    if (this.id === undefined) return;
-    const outcome: ExerciseOutcome = {
-      id: this.id,
-      title: exercise.title,
-      passed,
-      actual,
-    };
-    try {
-      this.onExerciseResult?.(outcome);
-    } catch {
-      // a host callback must not break the block
-    }
-  }
-
-  private setExerciseState(state: ExerciseState): void {
-    if (this.exerciseBadge === null) return;
-    this.exerciseBadge.dataset.state = state;
-    this.exerciseBadge.textContent = `Exercise · ${state}`;
-  }
-
   private consoleText(): string {
-    const panel = this.session.state().find(
-      (p: Panel): p is Extract<Panel, { kind: 'console' }> => p.kind === 'console');
-    return panel?.text ?? '';
+    return extractConsoleText(this.session.state());
   }
 
-  /** Active breakpoint lines (sorted), or undefined when the kernel has
-   * no breakpoint support. */
   private breakpointLines(): number[] | undefined {
-    if (this.kernel.features?.breakpoints !== true) return undefined;
-    return this.view.state.field(breakpointsField, false);
-  }
-
-  /** Results-slot output: the console text plus any trusted kernel
-   * markup (e.g. rendered SVG), alongside each other. */
-  private renderResults(el: HTMLElement): void {
-    const panels = this.session.state();
-    const nodes: Node[] = [];
-    const con = panels.find(
-      (p: Panel): p is Extract<Panel, { kind: 'console' }> => p.kind === 'console');
-    if (con !== undefined && con.text !== '') {
-      const pre = document.createElement('pre');
-      pre.textContent = con.text;
-      nodes.push(pre);
-    }
-    for (const p of panels) {
-      if (p.kind !== 'html') continue;
-      const box = document.createElement('div');
-      box.className = 'lw-html';
-      box.innerHTML = p.html;
-      nodes.push(box);
-    }
-    el.replaceChildren(...nodes);
+    return getBreakpointLines(this.view, this.kernel.features?.breakpoints === true);
   }
 
   private syncAfterExecution(result?: RunResult): void {
-    if (this.resultsEl !== null) this.renderResults(this.resultsEl);
-    const listing = this.session.state().find(
+    const panels = this.session.state();
+    if (this.resultsEl !== null) renderBlockResults(this.resultsEl, panels, this.doc);
+    const listing = panels.find(
       (p: Panel): p is Extract<Panel, { kind: 'listing' }> => p.kind === 'listing');
     const row = listing?.rows.find((r) => r.current);
     // a breakpoint pause pins the editor decoration to the paused line
     this.setMarks({ current: result?.pausedAt ?? row?.line ?? null });
   }
 
-  /** Shared tail for a failed load: red status, line-mapped error, attach. */
+  /** Shared tail for a failed load: red status, line-mapped error, clear results.
+   *  The surrounding `finally` block clears `busy` and notifies `onActivity`. */
   private finish(load: { line?: number; message: string }): void {
     this.setRunning(false);
     this.statusError(
@@ -951,8 +648,6 @@ export class BlockRuntime {
     this.setMarks({ current: null });
     // a program that does not load has no result to show
     if (this.resultsEl !== null) this.resultsEl.replaceChildren();
-    this.busy = false;
-    this.events.onActivity(this);
   }
 
   private reportResult(result: RunResult, mode: 'finished' | 'step'): void {
@@ -1006,20 +701,28 @@ export class BlockRuntime {
   }
 
   private setMarks(marks: Partial<LineMarks>): void {
-    this.view.dispatch({ effects: setMarks.of(marks) });
+    dispatchLineMarks(this.view, marks);
+  }
+
+  /** Drop the paused-line decoration when a sibling takes over the shared
+   *  session: the line is no longer where either block is executing. */
+  private clearCurrentMark(): void {
+    if (this.disposed) return;
+    this.setMarks({ current: null });
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     if (this.copyTimer !== undefined) {
-      window.clearTimeout(this.copyTimer);
+      this.win.clearTimeout(this.copyTimer);
       this.copyTimer = undefined;
     }
     const shared = this.shared;
     if (shared !== undefined) {
       const member = shared.blocks.indexOf(this);
       if (member !== -1) shared.blocks.splice(member, 1);
+      if (shared.loadedBlock === this) shared.loadedBlock = null;
     }
     // A host-supplied named session belongs to the page, not this block.
     if (this.ownsSession) this.session.dispose();

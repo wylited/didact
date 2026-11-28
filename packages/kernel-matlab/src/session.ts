@@ -53,14 +53,41 @@ export class MatlabSession implements Session {
       return { ok: false, message: e instanceof Error ? e.message : String(e) };
     }
     this.reset();
+    return { ok: true, summary: this.summary(this.program, 'loaded') };
+  }
+
+  /** Continue the live session with another block's source, keeping the
+   *  base workspace and user-defined functions. */
+  async resume(src: string): Promise<LoadResult> {
+    if (this.interp === null) return this.load(src);
+    let program: Program;
+    try {
+      program = parse(src);
+    } catch (e) {
+      if (e instanceof ParseError || e instanceof LexError) {
+        return { ok: false, line: e.line, message: e.message };
+      }
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+    this.program = program;
+    this.interp = new Interpreter(program, this.interp.shared);
+    this.gen = null;
+    this.pending = null;
+    this.prevWs = new Map();
+    this.runError = null;
+    this.pausedLine = null;
+    return { ok: true, summary: this.summary(program, 'resumed') };
+  }
+
+  private summary(program: Program, verb: string): string {
     const parts: string[] = [];
-    if (this.program.functions.length > 0) {
-      const f = this.program.functions.length;
+    if (program.functions.length > 0) {
+      const f = program.functions.length;
       parts.push(`${f} function${f === 1 ? '' : 's'}`);
     }
-    const n = this.program.body.length;
+    const n = program.body.length;
     parts.push(`${n} statement${n === 1 ? '' : 's'}`);
-    return { ok: true, summary: `loaded · ${parts.join(', ')}` };
+    return `${verb} · ${parts.join(', ')}`;
   }
 
   reset(): void {

@@ -1,4 +1,4 @@
-export { typstKernel } from './kernel';
+export { typstKernel, createTypstKernel } from './kernel';
 export { TypstSession } from './session';
 export { setVendorBase, loadEngine, FONT_FILES } from './vendor';
 export type { TypstDiagnostic, TypstEngine, TypstSvgPage } from './vendor';

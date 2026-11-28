@@ -4,9 +4,11 @@
 // (sign extension, M extension, ecall I/O), and the Session contract
 // (panels, breakpoints/pausedAt, step-from-pause, reset, changed flags).
 
+import { readFileSync } from 'node:fs';
 import { assemble, TEXT_BASE, type Assembled } from '../src/asm';
 import { Cpu } from '../src/cpu';
 import { riscvKernel } from '../src/kernel';
+import type { Panel, RunResult } from '../src/types';
 
 type FieldsPanel = Extract<Panel, { kind: 'fields' }>;
 type ListingPanel = Extract<Panel, { kind: 'listing' }>;
@@ -411,7 +413,7 @@ console.log('session · lesson round-trip');
 {
   const blocks: string[] = [];
   const expected: string[] = [];
-  const org = await Bun.file(`${import.meta.dir}/../lesson/lesson.org`).text();
+  const org = readFileSync(new URL('../lesson/lesson.org', import.meta.url), 'utf8');
   const lines = org.split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (lines[i]!.startsWith('#+BEGIN_SRC riscv')) {

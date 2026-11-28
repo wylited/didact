@@ -11,12 +11,13 @@
 // fetch is wrapped with a byte cache so cold builds do not refetch packages.
 //
 // Package archive cache:
-//   Layout — apps/site/.typst-cache/<url path with unsafe chars as `_`>,
+//   Layout — <cacheDir>/<url path with unsafe chars as `_`>,
 //            e.g. https://packages.typst.org/preview/fletcher-0.4.0.tar.gz
 //            becomes .typst-cache/preview_fletcher-0.4.0.tar.gz.
-//   Env    — TYPST_PACKAGE_BASE_URL overrides the package mirror base
-//            (default https://packages.typst.org); TYPST_NO_PACKAGE_CACHE=1
-//            disables cache reads and writes while keeping the wrapper.
+//   Config — call `configureTypstEngine({ cacheDir, packageBaseUrl, cacheDisabled })`
+//            before compiling (defaults: `<cwd>/.typst-cache`,
+//            `TYPST_PACKAGE_BASE_URL` or `https://packages.typst.org`,
+//            `TYPST_NO_PACKAGE_CACHE === '1'`).
 // Cache failures are logged once and never fail the build.
 //
 // Two output shapes:
@@ -26,32 +27,28 @@
 //               overflow the article column (same rule as the kernel).
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import { createTypstCompiler } from 'typst-wasm';
 import type {
   Diagnostic as TypstDiagnostic,
   TypstCompiler,
 } from 'typst-wasm';
 
+/** Runtime configuration for the build-time Typst compiler and package cache. */
+export interface TypstEngineConfig {
+  /**
+   * Directory for cached `@preview/*` package archives (default: `<cwd>/.typst-cache`).
+   * Empty or whitespace-only values are ignored.
+   */
+  cacheDir?: string;
+  /** Package mirror base URL (default: `TYPST_PACKAGE_BASE_URL` or `https://packages.typst.org`). */
+  packageBaseUrl?: string;
+  /** Skip disk cache reads and writes (default: `TYPST_NO_PACKAGE_CACHE === '1'`). */
+  cacheDisabled?: boolean;
+}
+
 /** Virtual entry path; compiles are serialized so it is safe to reuse. */
 const MAIN = 'didact-build-main.typ';
-
-/** Typst package mirror; must match `packageBaseUrl` below. */
-const PACKAGE_BASE_URL = (
-  process.env.TYPST_PACKAGE_BASE_URL?.trim() || 'https://packages.typst.org'
-).replace(/\/+$/, '');
-
-/** Prefix every package archive response URL starts with. */
-const PACKAGE_URL_PREFIX = `${PACKAGE_BASE_URL}/preview/`;
-
-/** Repo-local byte cache for downloaded package archives. */
-const PACKAGE_CACHE_DIR = fileURLToPath(
-  new URL('../.typst-cache/', import.meta.url),
-);
-
-/** Set to `1` to skip cache reads and writes (network is still wrapped). */
-const PACKAGE_CACHE_DISABLED = process.env.TYPST_NO_PACKAGE_CACHE === '1';
 
 /** Global fetch, captured before any local shadowing. */
 const networkFetch = globalThis.fetch;
@@ -75,6 +72,20 @@ const FONT_FILES = [
 /** Pages wider than this (px at 96 dpi) become responsive instead. */
 const MAX_INLINE_PX = 680;
 
+/** Configurable package mirror; defaults to env or upstream packages.typst.org. */
+let packageBaseUrl = (
+  process.env.TYPST_PACKAGE_BASE_URL?.trim() || 'https://packages.typst.org'
+).replace(/\/+$/, '');
+
+/** Prefix every package archive response URL starts with. */
+let packageUrlPrefix = `${packageBaseUrl}/preview/`;
+
+/** Writable byte cache directory for downloaded package archives. */
+let packageCacheDir = resolve(process.cwd(), '.typst-cache');
+
+/** Set to true to skip cache reads and writes (network is still wrapped). */
+let packageCacheDisabled = process.env.TYPST_NO_PACKAGE_CACHE === '1';
+
 let compilerPromise: Promise<TypstCompiler> | null = null;
 let queue: Promise<void> = Promise.resolve();
 /** Typst's MathML layout CSS; identical for every HTML compile. */
@@ -87,17 +98,46 @@ let cacheFailureLogged = false;
 /** Lazily created cache directory; reset on failure so a later build retries. */
 let cacheDirPromise: Promise<void> | null = null;
 
+/**
+ * Configure the Typst compiler's package cache and mirror settings.
+ * An empty or whitespace-only `cacheDir` is ignored, keeping the current
+ * (default) directory and any in-flight cache dir promise.
+ */
+export function configureTypstEngine(config: TypstEngineConfig): void {
+  const cacheDir = config.cacheDir?.trim();
+  if (cacheDir !== undefined && cacheDir !== '') {
+    const nextDir = resolve(cacheDir);
+    if (nextDir !== packageCacheDir) {
+      packageCacheDir = nextDir;
+      cacheDirPromise = null;
+      cacheFailureLogged = false;
+    }
+  }
+  if (config.packageBaseUrl !== undefined) {
+    const nextBase = config.packageBaseUrl.trim().replace(/\/+$/, '');
+    if (nextBase !== '' && nextBase !== packageBaseUrl) {
+      packageBaseUrl = nextBase;
+      packageUrlPrefix = `${packageBaseUrl}/preview/`;
+      // Rebuild compiler on next compile so it picks up the new mirror URL.
+      compilerPromise = null;
+    }
+  }
+  if (config.cacheDisabled !== undefined) {
+    packageCacheDisabled = config.cacheDisabled;
+  }
+}
+
 /** Resolve a package archive URL to its cache file, derived from the path. */
 function packageCacheFile(url: string): string {
   const pathname = new URL(url).pathname;
   const name = pathname
     .replace(/^\/+/, '')
     .replace(/[^A-Za-z0-9._-]+/g, '_');
-  return join(PACKAGE_CACHE_DIR, name === '' ? 'package.tar.gz' : name);
+  return join(packageCacheDir, name === '' ? 'package.tar.gz' : name);
 }
 
 function ensureCacheDir(): Promise<void> {
-  cacheDirPromise ??= mkdir(PACKAGE_CACHE_DIR, { recursive: true })
+  cacheDirPromise ??= mkdir(packageCacheDir, { recursive: true })
     .then(() => undefined)
     .catch((error: unknown) => {
       cacheDirPromise = null;
@@ -198,7 +238,7 @@ async function loadPackageArchive(
   url: string,
   init: RequestInit | undefined,
 ): Promise<Uint8Array | Response> {
-  const file = PACKAGE_CACHE_DISABLED ? null : packageCacheFile(url);
+  const file = packageCacheDisabled ? null : packageCacheFile(url);
   if (file !== null) {
     const cached = await readCachedPackage(file);
     if (cached !== null) return cached;
@@ -226,7 +266,7 @@ const cachedPackageFetch: typeof fetch = (input, init) => {
       : input instanceof URL
         ? input.href
         : input;
-  if (!url.startsWith(PACKAGE_URL_PREFIX) || !url.endsWith('.tar.gz')) {
+  if (!url.startsWith(packageUrlPrefix) || !url.endsWith('.tar.gz')) {
     return networkFetch(input, init);
   }
   const existing = packageRequests.get(url);
@@ -264,9 +304,9 @@ function getCompiler(): Promise<TypstCompiler> {
     const compiler = await createTypstCompiler({
       coreModules,
       backend: 'jspi',
-      // Mirrorable package resolution backed by the repo-local byte cache.
+      // Mirrorable package resolution backed by the configurable byte cache.
       fetch: cachedPackageFetch,
-      packageBaseUrl: PACKAGE_BASE_URL,
+      packageBaseUrl,
     });
     const fonts = await Promise.all(
       FONT_FILES.map(async (name) =>
@@ -287,7 +327,9 @@ function getCompiler(): Promise<TypstCompiler> {
 }
 
 /** Serialize one compile behind every other compile. */
-function serialized<T>(task: (compiler: TypstCompiler) => Promise<T>): Promise<T> {
+function serialized<T>(
+  task: (compiler: TypstCompiler) => Promise<T>,
+): Promise<T> {
   const result = queue.then(async () => task(await getCompiler()));
   queue = result.then(
     () => undefined,
@@ -302,6 +344,7 @@ export function compileMath(
   display: boolean,
 ): Promise<{ mathml: string; svg: string }> {
   return serialized(async (compiler) => {
+    let preludeLines = 0;
     try {
       const htmlSource = display ? `$ ${src} $` : `$${src}$`;
       const html = await compileHtml(compiler, htmlSource);
@@ -313,16 +356,20 @@ export function compileMath(
       if (mathCss === null && css !== '') mathCss = css;
 
       // Same inline/display wrapper as the HTML compile: Typst uses the
-      // spaces inside the dollars to pick display style.
+      // spaces inside the dollars to pick display style. The SVG compile
+      // prepends one `#set page` line, so diagnostics shift by 1 line.
+      preludeLines = 1;
       const svgSource =
         `#set page(width: auto, height: auto, margin: 0pt, fill: none)\n` +
         (display ? `$ ${src} $` : `$${src}$`);
       const svg = responsiveSvg(
-        stripWhiteBackground(await compileSvg(compiler, svgSource)),
+        stripWhiteBackground(
+          await compileSvg(compiler, svgSource, preludeLines),
+        ),
       );
       return { mathml, svg };
     } catch (error) {
-      throw typstFailure(error);
+      throw typstFailure(error, preludeLines);
     }
   });
 }
@@ -346,7 +393,7 @@ export function compileDiagram(src: string): Promise<string> {
 
 /**
  * Typst's MathML layout CSS, taken verbatim from HTML compiles. If no formula
- * was compiled yet (a page set with no math), compile a trivial one.
+ * was compiled yet, compile a trivial one to obtain the stylesheet.
  */
 export function mathLayoutCss(): Promise<string> {
   return serialized(async (compiler) => {
@@ -432,18 +479,36 @@ function stripWhiteBackground(svg: string): string {
   return svg.slice(0, path.index) + svg.slice(path.index + path[0].length);
 }
 
-/** Same width rule as packages/kernel-typst/src/session.ts. */
-function responsiveSvg(svg: string): string {
+/**
+ * Make wide SVGs responsive (same width rule as packages/kernel-typst/src/session.ts).
+ * Replaces attributes strictly inside the opening `<svg ...>` tag and merges
+ * into an existing `style` attribute when present.
+ */
+export function responsiveSvg(svg: string): string {
   const open = /^<svg\b[^>]*>/.exec(svg);
   if (open === null) return svg;
-  const width = /\swidth="([\d.]+)pt"/.exec(open[0]);
+  const tag = open[0];
+  const width = /\swidth="([\d.]+)pt"/.exec(tag);
   if (width === null) return svg;
   const px = (parseFloat(width[1]!) * 4) / 3;
   if (px <= MAX_INLINE_PX) return svg;
-  return svg
+
+  let updated = tag
     .replace(/\swidth="[\d.]+pt"/, ' width="100%"')
-    .replace(/\sheight="[\d.]+pt"/, '')
-    .replace('<svg', '<svg style="height:auto"');
+    .replace(/\sheight="[\d.]+pt"/, '');
+
+  if (/\sstyle="([^"]*)"/.test(updated)) {
+    updated = updated.replace(/\sstyle="([^"]*)"/, (_m, existing: string) => {
+      const trimmed = existing.trim();
+      if (trimmed === '') return ' style="height:auto"';
+      const sep = trimmed.endsWith(';') ? '' : ';';
+      return ` style="${trimmed}${sep}height:auto"`;
+    });
+  } else {
+    updated = updated.replace(/^<svg\b/, '<svg style="height:auto"');
+  }
+
+  return updated + svg.slice(tag.length);
 }
 
 /** A readable error carrying the diagnostic's file, line and hints. */

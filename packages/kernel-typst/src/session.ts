@@ -46,7 +46,7 @@ export class TypstSession implements Session {
     } catch (e) {
       this.engineError = e instanceof Error ? e.message : String(e);
       this.loaded = false;
-      return { ok: false, line: 0, message: `engine unavailable: ${this.engineError}` };
+      return { ok: false, message: `engine unavailable: ${this.engineError}` };
     }
     this.engineError = null;
     try {
@@ -55,7 +55,10 @@ export class TypstSession implements Session {
       this.outcome = outcome;
       if (!outcome.ok) {
         const d = firstError(outcome.errors, this.path);
-        return { ok: false, line: lineOf(d), message: messageOf(d) };
+        const line = lineOf(d);
+        return line > 0
+          ? { ok: false, line, message: messageOf(d) }
+          : { ok: false, message: messageOf(d) };
       }
       return {
         ok: true,
@@ -64,7 +67,7 @@ export class TypstSession implements Session {
     } catch (e) {
       this.loaded = false;
       this.engineError = e instanceof Error ? e.message : String(e);
-      return { ok: false, line: 0, message: `engine failure: ${this.engineError}` };
+      return { ok: false, message: `engine failure: ${this.engineError}` };
     }
   }
 

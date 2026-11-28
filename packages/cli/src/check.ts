@@ -1,14 +1,15 @@
-// check.ts — `didact check`: lesson linting and RESULTS verification.
+// check.ts — `didact check`: lesson linting and RESULTS/CHECK verification.
 //
-// Generalizes scripts/lint_lessons.py and scripts/verify_lessons.py from a
-// page tree: syntax diagnostics come from core's parseOrgChecked, and
-// `--run` executes each block in a fresh interpreter via a BlockRunner.
+// Syntax diagnostics come from core's parseOrgChecked; `--run` executes each
+// block in a fresh interpreter via a BlockRunner and compares stdout against
+// canned `#+RESULTS` and `#+CHECK` expectations.
 
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { normalizeOrgKeyword, ORG_DIRECTIVE, parseOrgChecked } from '@didact/core';
+import { parseBabelHeaders } from '@didact/core/babel';
+import { normalizeOrgKeyword, ORG_DIRECTIVE, parseOrgChecked } from '@didact/core/org';
 
 export interface CheckDiagnostic {
   file: string;
@@ -65,13 +66,12 @@ interface ScannedBlock {
   exercise: { title: string; expected: string | null } | null;
 }
 
-// Directive keywords, languages, and markers are parsed with core's
-// ORG_DIRECTIVE/normalizeOrgKeyword (imported above) so the checker cannot
-// drift from the renderer's grammar. Only the src-end and output-line forms
-// are local; both match core's.
+// Directive keywords, languages, markers, and babel headers are parsed with
+// core's ORG_DIRECTIVE/normalizeOrgKeyword/parseBabelHeaders (imported above)
+// so the checker cannot drift from the renderer's grammar. Only the src-end
+// and output-line forms are local; both match core's.
 const RE_END_SRC = /^\s*#\+END_SRC\s*$/i;
 const RE_OUTPUT_LINE = /^\s*:\s?(.*)$/;
-const RE_SESSION = /(?:^|\s):session\s+(\S+)/i;
 const TIMEOUT_MS = 30_000;
 const STDERR_EXCERPT = 2_000;
 
@@ -271,8 +271,7 @@ function scanBlocks(src: string): ScannedBlock[] {
       const tokens = body.split(/\s+/).filter(Boolean);
       const lang = (tokens.shift() ?? 'text').toLowerCase();
       const header = tokens.join(' ');
-      const sessionMatch = RE_SESSION.exec(header);
-      const session = sessionMatch === null ? null : sessionMatch[1]!;
+      const session = parseBabelHeaders(header).session ?? null;
       const name = pending.name;
       const exercise =
         pending.exercise === null && pending.check === null
@@ -318,11 +317,24 @@ function scanBlocks(src: string): ScannedBlock[] {
 }
 
 export async function checkPages(opts: CheckOptions): Promise<CheckReport> {
-  const wanted = opts.pages === undefined ? null : new Set(opts.pages);
-  const files = readdirSync(opts.pagesDir)
-    .filter((name) => name.endsWith('.org'))
-    .filter((name) => wanted === null || wanted.has(name.slice(0, -'.org'.length)))
+  const allFiles = readdirSync(opts.pagesDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.org'))
+    .map((entry) => entry.name)
     .sort();
+
+  let files: string[];
+  if (opts.pages === undefined) {
+    files = allFiles;
+  } else {
+    const available = new Set(allFiles.map((name) => name.slice(0, -'.org'.length)));
+    const wanted = new Set(opts.pages);
+    const missing = [...wanted].filter((stem) => !available.has(stem));
+    if (missing.length > 0) {
+      const label = missing.length === 1 ? 'page not found' : 'pages not found';
+      throw new Error(`${label}: ${missing.join(', ')}`);
+    }
+    files = allFiles.filter((name) => wanted.has(name.slice(0, -'.org'.length)));
+  }
 
   if (files.length === 0) throw new Error('no pages matched');
 

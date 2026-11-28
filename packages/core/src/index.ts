@@ -9,7 +9,8 @@ export type { Kernel, Session, Panel, Field, ListingRow, LoadResult, RunResult }
 export { ORG_DIRECTIVE, normalizeOrgKeyword, parseOrg, parseOrgChecked } from './org';
 export type { OrgDoc, OrgDiagnostic, OrgNode } from './org';
 export { renderDocument, renderInline } from './render';
-export type { RenderedDoc, RenderedBlock } from './render';
+export type { RenderedDoc, RenderedBlock, RenderOptions, LinkResolver } from './render';
+export { loadEditorLanguage } from './languages';
 export { BlockRuntime } from './block';
 export type { BlockEvents, SharedSession } from './block';
 export type {
@@ -24,8 +25,16 @@ export { PanelHost } from './panel';
 export type { AttachedBlock } from './panel';
 export { installTooltips } from './tooltip';
 export type { Disposer } from './tooltip';
+export { resolvePages } from './pages';
 export { mountSite } from './site';
-export type { MountOptions, SiteHandle, PageSpec } from './site';
+export type {
+  MountOptions,
+  SiteHandle,
+  PageSpec,
+  NavSide,
+  NavView,
+  RoutingMode,
+} from './site';
 export {
   collectTypstSources,
   diagramKey,

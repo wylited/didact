@@ -2,11 +2,6 @@ node_modules/
 dist/
 .DS_Store
 *.local
-# engine assets: npm deps pinned by pnpm-lock.yaml; apps/site/public/vendor*
-# is regenerated from node_modules by scripts/sync-vendors.mjs
-apps/site/public/vendor/
-apps/site/public/vendor-c/
-apps/site/public/vendor-python/
-apps/site/public/vendor-typst/
 # build-time Typst package archives (best-effort disk cache)
-apps/site/.typst-cache/
+.typst-cache/
+apps/site/node_modules/.vite/didact-typst/

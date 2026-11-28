@@ -1,9 +1,9 @@
 # Vendored third-party assets
 
 The engine is the `@yowasp/clang@22.0.0-git20542-10` npm dependency
-(pinned in `package.json` and `pnpm-lock.yaml`). `scripts/sync-vendors.mjs`
-copies the payload from `node_modules/` into the app's public root under
-`vendor-c/` (`src/vendor.ts` imports `<vendor-base>/clang/bundle.js`, and
+(pinned in `package.json` and `pnpm-lock.yaml`). `didactVendors()`
+serves the payload from `node_modules/` in dev and emits it into the build
+output under `vendor-c/` (`src/vendor.ts` imports `<vendor-base>/clang/bundle.js`, and
 the bundle resolves every sibling asset relative to its own URL — no CDN is
 contacted at runtime). Loading is lazy: nothing is fetched until the first
 C block runs.

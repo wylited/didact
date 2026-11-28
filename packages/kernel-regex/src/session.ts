@@ -60,7 +60,12 @@ export class RegexSession implements Session {
 
   async load(src: string): Promise<LoadResult> {
     const block = parseBlock(src);
-    if (!block.ok) return { ok: false, line: block.line, message: block.message };
+    if (!block.ok) {
+      this.engine = null;
+      this.nfa = null;
+      this.prevCaptures = new Map();
+      return { ok: false, line: block.line, message: block.message };
+    }
     try {
       const pattern = parsePattern(block.pattern, block.patternLine);
       const nfa = compilePattern(pattern, block.patternLine);
@@ -72,6 +77,9 @@ export class RegexSession implements Session {
         summary: `loaded · ${block.patternText} · ${plural(nfa.states.length, 'state')} · ${plural(nfa.groups, 'group')} · ${plural(block.inputs.length, 'input')}`,
       };
     } catch (e) {
+      this.engine = null;
+      this.nfa = null;
+      this.prevCaptures = new Map();
       if (e instanceof RegexError) return { ok: false, line: e.line, message: e.message };
       return { ok: false, message: e instanceof Error ? e.message : String(e) };
     }

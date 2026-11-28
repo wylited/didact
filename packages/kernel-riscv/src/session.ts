@@ -29,6 +29,11 @@ export class RiscvSession implements Session {
   async load(src: string): Promise<LoadResult> {
     const result = assemble(src);
     if (!result.ok) {
+      this.cpu = null;
+      this.comments = new Map();
+      this.prevRegs = null;
+      this.prevPc = 0;
+      this.pausedLine = null;
       return { ok: false, line: result.error.line, message: result.error.message };
     }
     this.cpu = new Cpu(result.program);

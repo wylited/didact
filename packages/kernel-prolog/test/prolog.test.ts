@@ -329,17 +329,56 @@ describe('breakpoints', () => {
     expect(r).toMatchObject({ finished: true, exit: 'yes' });
     expect(consoleOf(s.state())).toBe('Yes.\nV = 2\n');
   });
+
+  it('continues past a paused breakpoint when run() is called again with the same breakpoint', async () => {
+    const s = await loaded(`p(X) :- q(X), X > 1.\n\nq(2).\nq(3).\n?- p(V).`);
+    const paused = await s.run([1]);
+    expect(paused.pausedAt).toBe(1);
+    expect(paused.finished).toBe(false);
+    const done = await s.run([1]);
+    expect(done).toMatchObject({ finished: true, exit: 'yes' });
+    expect(done.pausedAt).toBeUndefined();
+    expect(consoleOf(s.state())).toBe('Yes.\nV = 2\n');
+    s.dispose();
+  });
 });
 
 describe('session lifecycle', () => {
-  it('reset() returns to the just-consulted state', async () => {
+  it('reset() returns to the just-consulted state and zeroes step count', async () => {
     const s = await loaded(`${MEMBER}?- member(X, [a, b]).`);
-    await s.run();
+    const first = await s.run();
+    expect(first.steps).toBeGreaterThan(0);
     s.reset();
     expect(consoleOf(s.state())).toBe('');
-    const r = await s.run();
-    expect(r).toMatchObject({ exit: 'yes' });
+    const second = await s.run();
+    expect(second).toMatchObject({ exit: 'yes', steps: first.steps });
     expect(consoleOf(s.state())).toBe('Yes.\nX = a\n');
+    s.dispose();
+  });
+
+  it('state() does not throw on a clause-only block with no queries', async () => {
+    const s = await loaded('parent(tom, bob).\nparent(bob, ann).');
+    expect(() => s.state()).not.toThrow();
+    expect(s.state()).toEqual([{ kind: 'console', id: 'output', title: 'Output', text: '' }]);
+    expect(await s.run()).toEqual({ finished: true, steps: 0, exit: 'yes' });
+    s.dispose();
+  });
+
+  it(':session resume() appends clauses to the KB and reset() clears earlier blocks', async () => {
+    const s = await loaded('parent(tom, bob).\nparent(bob, ann).');
+    expect((await s.run()).exit).toBe('yes');
+
+    const r = await s.resume!('grandparent(X, Z) :- parent(X, Y), parent(Y, Z).\n?- grandparent(tom, Who).');
+    expect(r).toEqual({ ok: true, summary: 'resumed · 1 clause · 1 query' });
+    const run2 = await s.run();
+    expect(run2).toMatchObject({ finished: true, exit: 'yes' });
+    expect(consoleOf(s.state())).toBe('Yes.\nWho = ann\n');
+
+    s.reset();
+    const afterReset = await s.run();
+    expect(afterReset.finished).toBe(false);
+    expect(afterReset.error).toContain('undefined predicate parent/2');
+    s.dispose();
   });
 
   it('load reports the consult summary', async () => {

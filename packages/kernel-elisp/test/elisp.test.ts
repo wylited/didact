@@ -900,4 +900,26 @@ describe('source line mapping and breakpoint semantics', () => {
     const control = panels[0] as Extract<Panel, { kind: 'listing' }>;
     expect(control.rows.find((r) => r.current)?.line).toBe(2);
   });
+
+  it(':session resume() preserves runtime state, special vars, and buffers, and reset() clears them', async () => {
+    const s = new ElispSession();
+    await s.load(`;; -*- lexical-binding: t; -*-
+(defvar dyn-x 10)
+(defun get-dyn () dyn-x)
+(insert "hello")`);
+    expect((await s.run()).finished).toBe(true);
+
+    const r = await s.resume(`(insert " world")
+(list (let ((dyn-x 99)) (get-dyn)) (buffer-string))`);
+    expect(r).toEqual({ ok: true, summary: 'resumed · 2 forms' });
+    const run2 = await s.run();
+    expect(run2.finished).toBe(true);
+    expect(run2.exit).toBe('=> (99 "hello world")');
+
+    s.reset();
+    const afterReset = await s.run();
+    expect(afterReset.finished).toBe(false);
+    expect(afterReset.error).toContain('void-function get-dyn');
+    s.dispose();
+  });
 });

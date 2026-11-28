@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseOrg, parseOrgChecked } from '../src/org';
+import { normalizeOrgKeyword, parseOrg, parseOrgChecked } from '../src/org';
 
 describe('parseOrg: directives', () => {
   it('parses #+TITLE and #+SUBTITLE into title/subtitle nodes', () => {
@@ -987,5 +987,32 @@ describe('parseOrgChecked: diagnostics', () => {
   it('does not alter the doc when diagnostics are present', () => {
     const src = '#+NAME: orphan\n1. numbered\n> quote\n[x](y)\n: stray\n';
     expect(parseOrgChecked(src).doc).toEqual(parseOrg(src));
+  });
+
+  it('normalizeOrgKeyword handles leading, trailing, and repeated underscores without throwing', () => {
+    expect(normalizeOrgKeyword('_FOO')).toBe('Foo');
+    expect(normalizeOrgKeyword('A__B')).toBe('AB');
+    expect(normalizeOrgKeyword('___')).toBe('');
+    expect(normalizeOrgKeyword('BEGIN_SRC')).toBe('BeginSrc');
+    // Parsing a document containing such directives never throws.
+    expect(() => parseOrgChecked('#+TITLE: T\n#+_FOO: x\n#+A__B: y\n')).not.toThrow();
+  });
+
+  it('treats bare #+NAME: as null rather than an empty string', () => {
+    const src = '#+TITLE: T\n#+NAME:\n#+BEGIN_SRC asm\nret\n#+END_SRC\n';
+    const checked = parseOrgChecked(src);
+    expect(checked.diagnostics).toEqual([]);
+    expect(checked.doc).toEqual([
+      { kind: 'title', text: 'T' },
+      {
+        kind: 'src',
+        lang: 'asm',
+        name: null,
+        caption: null,
+        headers: '',
+        code: 'ret',
+        exercise: null,
+      },
+    ]);
   });
 });

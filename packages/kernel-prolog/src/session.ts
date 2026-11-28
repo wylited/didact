@@ -35,6 +35,9 @@ function renderError(m: Machine): string {
 
 export class PrologSession implements Session {
   private program: Program | null = null;
+  /** The most recently loaded/resumed block on its own (so reset() drops
+   *  clauses accumulated from earlier `:session` blocks). */
+  private blockProgram: Program | null = null;
   private machine: Machine | null = null;
   private queryIdx = 0;
   private steps = 0;
@@ -45,18 +48,35 @@ export class PrologSession implements Session {
   /** The last run() backtracked every query to exhaustion: the machine is
    *  gone, but its final trace is still the Search panel's story. */
   private lastRunExhausted = false;
+  /** Line we last paused on, so a resumed run executes that clause attempt first. */
+  private pausedLine: number | null = null;
   private readonly console: string[] = [];
 
+  private clearState(): void {
+    this.program = null;
+    this.blockProgram = null;
+    this.machine = null;
+    this.lastRunExhausted = false;
+    this.queryIdx = 0;
+    this.steps = 0;
+    this.finalExit = null;
+    this.console.length = 0;
+    this.prevBindings = new Map();
+    this.pausedLine = null;
+  }
+
   async load(src: string): Promise<LoadResult> {
-    let parsed;
+    let parsed: Program;
     try {
       parsed = parseProgram(src);
     } catch (e) {
+      this.clearState();
       const line = e instanceof Error && 'line' in e ? (e as { line?: number }).line : undefined;
       const message = e instanceof Error ? e.message : String(e);
       return { ok: false, line, message };
     }
     this.program = parsed;
+    this.blockProgram = parsed;
     this.machine = null;
     this.lastRunExhausted = false;
     this.queryIdx = 0;
@@ -64,9 +84,41 @@ export class PrologSession implements Session {
     this.console.length = 0;
     this.finalExit = null;
     this.prevBindings = new Map();
+    this.pausedLine = null;
     return {
       ok: true,
       summary: `consulted · ${parsed.clauses.length} clause${parsed.clauses.length === 1 ? '' : 's'} · ${parsed.queries.length} quer${parsed.queries.length === 1 ? 'y' : 'ies'}`,
+    };
+  }
+
+  /** Continue this session's knowledge base by appending new clauses and
+   *  running the new block's queries against the combined KB. */
+  async resume(src: string): Promise<LoadResult> {
+    if (this.program === null) return this.load(src);
+    let parsed: Program;
+    try {
+      parsed = parseProgram(src);
+    } catch (e) {
+      const line = e instanceof Error && 'line' in e ? (e as { line?: number }).line : undefined;
+      const message = e instanceof Error ? e.message : String(e);
+      return { ok: false, line, message };
+    }
+    this.blockProgram = parsed;
+    this.program = {
+      clauses: [...this.program.clauses, ...parsed.clauses],
+      queries: parsed.queries,
+    };
+    this.machine = null;
+    this.lastRunExhausted = false;
+    this.queryIdx = 0;
+    this.steps = 0;
+    this.console.length = 0;
+    this.finalExit = null;
+    this.prevBindings = new Map();
+    this.pausedLine = null;
+    return {
+      ok: true,
+      summary: `resumed · ${parsed.clauses.length} clause${parsed.clauses.length === 1 ? '' : 's'} · ${parsed.queries.length} quer${parsed.queries.length === 1 ? 'y' : 'ies'}`,
     };
   }
 
@@ -113,14 +165,21 @@ export class PrologSession implements Session {
    *  pause/error/parked-solution, or null when it exhausted ('No.'). */
   private drive(m: Machine, bps: Set<number> | null): RunResult | null {
     while (m.status === 'running') {
-      // Stop *before* a clause on a breakpointed line fires.
+      // Stop *before* a clause on a breakpointed line fires; resuming from a
+      // pause on that same line executes the paused attempt first.
       const line = m.nextClauseLine();
-      if (bps !== null && line !== null && bps.has(line)) {
+      if (line !== null && this.pausedLine === line) {
+        this.pausedLine = null;
+      } else if (bps !== null && line !== null && bps.has(line)) {
+        this.pausedLine = line;
         return { finished: false, steps: this.steps, pausedAt: line };
+      } else {
+        this.pausedLine = null;
       }
       m.step();
       this.steps++;
     }
+    this.pausedLine = null;
     this.console.push(...m.out);
     m.out.length = 0;
     if (m.status === 'error') return { finished: false, steps: this.steps, error: renderError(m) };
@@ -134,6 +193,7 @@ export class PrologSession implements Session {
 
   async step(): Promise<{ ran: boolean; result?: RunResult }> {
     if (this.program === null) return { ran: false, result: { finished: false, steps: 0, error: 'nothing is loaded' } };
+    this.pausedLine = null;
     if (this.machine === null && this.queryIdx >= this.program.queries.length) {
       return { ran: false, result: { finished: true, steps: this.steps, exit: 'yes' } };
     }
@@ -169,18 +229,25 @@ export class PrologSession implements Session {
   }
 
   reset(): void {
+    this.program = this.blockProgram;
     this.machine = null;
     this.lastRunExhausted = false;
     this.queryIdx = 0;
+    this.steps = 0;
     this.finalExit = null;
     this.console.length = 0;
     this.prevBindings = new Map();
+    this.pausedLine = null;
   }
 
   state(): Panel[] {
-    // Loaded but not started: the Search panel says so instead of vanishing.
-    const m = this.machine ?? (this.program !== null && !this.lastRunExhausted
-      ? new Machine(clauseTable(this.program.clauses), this.program.queries[this.queryIdx]!)
+    // Loaded but not started: the Search panel says so instead of vanishing
+    // (guarded for clause-only blocks that carry no queries).
+    const nextQuery = this.program !== null && !this.lastRunExhausted
+      ? this.program.queries[this.queryIdx]
+      : undefined;
+    const m = this.machine ?? (nextQuery !== undefined
+      ? new Machine(clauseTable(this.program!.clauses), nextQuery)
       : null);
     if (m === null) {
       const output: Panel = { kind: 'console', id: 'output', title: 'Output', text: this.console.join('') };
@@ -195,8 +262,7 @@ export class PrologSession implements Session {
   }
 
   dispose(): void {
-    this.machine = null;
-    this.program = null;
+    this.clearState();
   }
 
   /** The resolvent, leftmost goal current, with the clause cursor. */

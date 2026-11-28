@@ -609,7 +609,7 @@ end`);
       'line 2: run budget exceeded (1,000,000 evaluation units) — the program never finished',
     );
     expect(r.steps).toBe(1_000_001);
-  });
+  }, 15_000);
 
   it('bounds a huge range request cleanly', async () => {
     const { r } = await run(`x = 1:1000000000;`);
@@ -735,5 +735,29 @@ describe('load summaries', () => {
 end
 z = f(1);`);
     expect(load).toEqual({ ok: true, summary: 'loaded · 1 function, 1 statement' });
+  });
+});
+
+describe(':session resume', () => {
+  it('preserves base workspace and user functions across blocks, and reset() clears shared state', async () => {
+    const s = await session(`function y = scale(x)
+  y = x * 3;
+end
+A = [1 2; 3 4];`);
+    expect((await s.run()).finished).toBe(true);
+
+    const r = await s.resume!(`B = scale(A);
+disp(B)`);
+    expect(r).toEqual({ ok: true, summary: 'resumed · 2 statements' });
+    const run2 = await s.run();
+    expect(run2.error).toBeUndefined();
+    expect(run2.finished).toBe(true);
+    expect(out(s.state()).trimEnd()).toBe(' 3   6\n 9  12');
+
+    s.reset();
+    const afterReset = await s.run();
+    expect(afterReset.finished).toBe(false);
+    expect(afterReset.error).toContain('line 1:');
+    s.dispose();
   });
 });

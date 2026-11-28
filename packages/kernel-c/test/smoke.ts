@@ -11,6 +11,7 @@
 // The lesson is read with readFileSync: an async Bun.file handle alive before
 // the engine's streamed wasm fetch makes bun exit silently mid-load (bun 1.4).
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { cKernel } from '../src/kernel';
 import type { Panel } from '../src/types';
@@ -51,7 +52,7 @@ async function main(): Promise<void> {
   assert(cKernel.features?.stepping !== true, 'kernel is not steppable');
 
   // The lesson's first block is the hello program a student sees.
-  const org = readFileSync(`${import.meta.dir}/../lesson/lesson.org`, 'utf8');
+  const org = readFileSync(fileURLToPath(new URL('../lesson/lesson.org', import.meta.url)), 'utf8');
   const lines = org.split('\n');
   const begin = lines.findIndex((l) => l.startsWith('#+BEGIN_SRC c'));
   assert(begin >= 0, 'lesson has a c block');

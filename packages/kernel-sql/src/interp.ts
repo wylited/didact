@@ -774,7 +774,7 @@ function analyzeSelect(stmt: Extract<Stmt, { t: 'select' }>, db: Database): Sele
 // ─── the engine ────────────────────────────────────────────────────────────
 
 export class Engine {
-  readonly db = new Database();
+  readonly db: Database;
   ops = 0;
   pc = 0;
   stages: Stage[] = [];
@@ -790,7 +790,9 @@ export class Engine {
    *  completes, so the Plan panel keeps its line mapping). */
   planLine = 0;
 
-  constructor(readonly stmts: Stmt[]) {}
+  constructor(readonly stmts: Stmt[], db?: Database) {
+    this.db = db ?? new Database();
+  }
 
   /** Begin the statement at pc (throws SqlError on analysis failures). */
   beginStatement(): void {

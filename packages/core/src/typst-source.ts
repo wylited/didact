@@ -2,9 +2,9 @@
 // the browser renderer: which org text is math, which org src blocks are
 // static diagrams, and how both are keyed.
 //
-// Website content is pre-rendered (apps/site/typst/prerender.ts or the Vite
-// plugin) into `TypstArtifacts`; rendering is a pure lookup, so this module
-// has no engine, no DOM and no Node dependencies. The executable `typst`
+// Website content is pre-rendered (packages/vite/src/typst/prerender.ts or
+// the Vite plugin) into `TypstArtifacts`; rendering is a pure lookup, so this
+// module has no engine, no DOM and no Node dependencies. The executable `typst`
 // KERNEL is a separate layer and never imports this file.
 //
 // Grammar (org-babel compatible):
@@ -36,6 +36,19 @@ export interface TypstArtifacts {
   diagrams: Record<string, string>;
   /** Typst's MathML layout CSS, emitted once per document by the engine. */
   mathCss: string;
+  /**
+   * Lazy per-page artifacts, keyed by page file name (`'c.org'`).
+   *
+   * When present, the site loads a page's own `math`/`diagrams` before it
+   * swaps that page in, so a page never carries another page's SVGs in the
+   * entry chunk. The top-level `math`/`diagrams` are then only a fallback
+   * (they may be empty, e.g. when the Vite plugin's `perPage` mode is on);
+   * mount-time indices such as heading slugs fall back to the source text.
+   */
+  pages?: Record<
+    string,
+    () => Promise<Pick<TypstArtifacts, 'math' | 'diagrams'>>
+  >;
 }
 
 /** What the renderer needs: pre-rendered artifacts plus the math mode. */
@@ -252,19 +265,21 @@ function addTypstMath(
   text: string,
   add: (src: string, display: boolean) => void,
 ): void {
-  RE_MARKUP.lastIndex = 0;
+  // Local stateful RegExp per call so recursion never clobbers lastIndex.
+  const re = new RegExp(RE_MARKUP.source, 'g');
   let last = 0;
   let m: RegExpExecArray | null;
-  while ((m = RE_MARKUP.exec(text)) !== null) {
+  while ((m = re.exec(text)) !== null) {
     const start = m.index;
     const end = start + m[0].length;
     if (m[3] === undefined) {
       addMathRuns(text.slice(last, start), add);
       // Only the label is inline content; a bare target is not. With no
-      // description org renders the target itself as the label (minus the
-      // `file:` scheme), and `renderInline` scans that label like any text.
-      addTypstMath(m[2] ?? m[1]!.replace(/^file:/i, ''), add);
-      RE_MARKUP.lastIndex = end;
+      // (or empty) description org renders the target itself as the label
+      // (minus the `file:` scheme), and `renderInline` scans that label.
+      const desc = m[2];
+      const label = desc !== undefined && desc !== '' ? desc : m[1]!.replace(/^file:/i, '');
+      addTypstMath(label, add);
       last = end;
       continue;
     }
@@ -274,13 +289,12 @@ function addTypstMath(
       // render.ts splits the run at the link before emphasis is considered,
       // so this candidate is not emphasis at all. Restart one character in
       // and let the link (and any valid emphasis inside) be found.
-      RE_MARKUP.lastIndex = start + 1;
+      re.lastIndex = start + 1;
       continue;
     }
     addMathRuns(text.slice(last, start), add);
     if (marker === '*' || marker === '/') addTypstMath(span.slice(1, -1), add);
     // `=` and `~` are literal: a `$` inside them is never math.
-    RE_MARKUP.lastIndex = end;
     last = end;
   }
   addMathRuns(text.slice(last), add);

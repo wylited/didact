@@ -26,14 +26,37 @@ export class SqlSession implements Session {
     } catch (e) {
       this.stmts = null;
       this.engine = null;
+      this.prevRow = new Map();
+      if (e instanceof SqlSyntaxError) return { ok: false, line: e.line, message: e.message };
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+    if (stmts.length === 0) {
+      this.stmts = null;
+      this.engine = null;
+      this.prevRow = new Map();
+      return { ok: false, line: 1, message: 'no statements to run' };
+    }
+    this.stmts = stmts;
+    this.engine = new Engine(stmts);
+    this.prevRow = new Map();
+    return { ok: true, summary: `loaded · ${stmts.length} statements` };
+  }
+
+  /** Continue this session's database with another block's SQL statements. */
+  async resume(src: string): Promise<LoadResult> {
+    if (this.engine === null) return this.load(src);
+    let stmts: Stmt[];
+    try {
+      stmts = parseProgram(src);
+    } catch (e) {
       if (e instanceof SqlSyntaxError) return { ok: false, line: e.line, message: e.message };
       return { ok: false, message: e instanceof Error ? e.message : String(e) };
     }
     if (stmts.length === 0) return { ok: false, line: 1, message: 'no statements to run' };
     this.stmts = stmts;
-    this.engine = new Engine(stmts);
+    this.engine = new Engine(stmts, this.engine.db);
     this.prevRow = new Map();
-    return { ok: true, summary: `loaded · ${stmts.length} statements` };
+    return { ok: true, summary: `resumed · ${stmts.length} statements` };
   }
 
   async run(breakpoints?: number[]): Promise<RunResult> {

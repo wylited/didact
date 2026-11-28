@@ -2,8 +2,9 @@
 
 The engine and fonts ship as npm dependencies (pinned in `package.json`
 and `pnpm-lock.yaml`): `typst-wasm@1.0.0` (engine) and
-`@typst-wasm/fonts@1.0.0` (faces). `scripts/sync-vendors.mjs` copies the
-payload from `node_modules/` into the app's `public/vendor-typst/` (see
+`@typst-wasm/fonts@1.0.0` (faces). `didactVendors()` serves the
+payload from `node_modules/` in dev and emits it under `vendor-typst/` in the
+build output (see
 `src/vendor.ts`; the loader pins every URL to the page base so `vite dev`,
 `vite build` and `vite preview` with `base: './'` all resolve identically —
 or call `setVendorBase()` before creating a session); `vendor/` here keeps

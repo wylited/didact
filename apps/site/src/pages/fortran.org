@@ -1,0 +1,284 @@
+#+TITLE: Fortran, Column-Major & Array-First
+#+SUBTITLE: Free-form Fortran 90/95/2003 with column-major array panels, DO-loop bounds, modules, derived types, and formatted I/O
+
+Every block on this page runs on a pure-TypeScript free-form Fortran 90/95/2003 teaching interpreter where every array lives in one flat *column-major* buffer (just like [[file:matlab.org][MATLAB]]), with explicit lower bounds, whole-array arithmetic, and real numeric kinds. Click *Step* or set gutter breakpoints to inspect *Workspace* (main-program variables with declared types and shapes), *Modules* (shared module data, shown whenever a module declares variables), *Arrays* (the most recently written array listed element by element in column-major order with flat 0-based offsets), *Loops* (the active =DO= variable, evaluated bounds, and pass count), *Call stack*, and *console*.
+
+* Column-major arrays, =reshape=, and =DO= loops
+
+Fortran stores multidimensional arrays *column by column*, and every dimension can declare its own lower bound (defaulting to =1=). For a rank-2 array with lower bounds $"lo"_1, "lo"_2$ and first-dimension length $"extent"_1$, element $(i, j)$ sits at 0-based flat offset:
+
+$$ "addr"(i, j) = (i - "lo"_1) + (j - "lo"_2) dot.c "extent"_1 $$
+
+#+CAPTION: Logical 2x3 array a(1:2, 1:3) mapped to flat column-major memory
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 12pt)
+#set text(size: 9pt)
+#import "@preview/cetz:0.5.2": canvas, draw
+
+#canvas(length: 1pt, {
+  import draw: *
+
+  let accent = rgb("#1A9988")
+  let tint = rgb("#F2F8F6")
+  let ink = rgb("#171717")
+  let edge = luma(140)
+  let sub = luma(105)
+  let mono = "DejaVu Sans Mono"
+
+  let gut = 36
+  let mg = 4
+  let mw = 52
+  let cw = 2 * mw + mg
+  let mh = 34
+  let ch = 28
+
+  let flat-lbl = ("a(1,1)", "a(2,1)", "a(1,2)", "a(2,2)", "a(1,3)", "a(2,3)")
+  let flat-val = ("1", "2", "3", "4", "5", "6")
+  for i in range(6) {
+    let x = gut + i * (mw + mg)
+    let hl = i < 2
+    rect((x, 0), (x + mw, mh),
+      fill: if hl { tint } else { white },
+      stroke: (if hl { 0.9pt } else { 0.7pt }) + (if hl { accent } else { edge }),
+      radius: 0)
+    content((x + mw / 2, 23), text(font: mono, size: 7.5pt, fill: sub)[#flat-lbl.at(i)])
+    content((x + mw / 2, 10), text(font: mono, size: 11pt, weight: "bold", fill: ink)[#flat-val.at(i)])
+    content((x + mw / 2, -10), text(font: mono, size: 8pt, fill: sub)[#i])
+  }
+  content((gut - 7, -10), anchor: "east", text(size: 8pt, fill: sub)[offset])
+
+  for c in range(3) {
+    content((gut + c * (cw + mg) + cw / 2, 44), text(size: 8pt, fill: sub)[column #(c + 1)])
+  }
+
+  let rows = (
+    ("a(1,1) = 1", "a(1,2) = 3", "a(1,3) = 5"),
+    ("a(2,1) = 2", "a(2,2) = 4", "a(2,3) = 6"),
+  )
+  for r in range(2) {
+    for c in range(3) {
+      let x = gut + c * (cw + mg)
+      let y = 55 + (1 - r) * 32
+      let hl = c == 0
+      rect((x, y), (x + cw, y + ch),
+        fill: if hl { tint } else { white },
+        stroke: (if hl { 0.9pt } else { 0.7pt }) + (if hl { accent } else { edge }),
+        radius: 0)
+      content((x + cw / 2, y + ch / 2), text(font: mono, size: 9pt, weight: "bold", fill: ink)[#rows.at(r).at(c)])
+    }
+    content((gut - 7, 55 + (1 - r) * 32 + ch / 2), anchor: "east", text(size: 8pt, fill: sub)[row #(r + 1)])
+  }
+
+  content((gut + (3 * cw + 2 * mg) / 2, 127), text(weight: "bold", fill: ink)[Logical 2x3 array a(1:2, 1:3)])
+  content((gut + (3 * cw + 2 * mg) / 2, -24), text(size: 8pt, fill: sub)[Flat column-major memory #sym.dash.en first subscript varies fastest])
+})
+#+END_SRC
+
+Because =reshape= fills column by column, ~[(i, i=1,6)]~ lands in memory as =a(1,1)= through =a(2,3)= with the first subscript advancing fastest. List-directed =print *, a= walks that same flat order.
+
+#+NAME: col-major-loop
+#+BEGIN_SRC fortran
+program p
+  implicit none
+  integer :: i, a(2,3)
+  do i = 1, 3
+    print *, i
+  end do
+  a = reshape([(i, i=1,6)], [2,3])
+  print *, a
+end program p
+#+END_SRC
+
+#+RESULTS:
+: 1
+: 2
+: 3
+: 1 2 3 4 5 6
+
+*Try editing:* set a gutter breakpoint on line 5 (=print *, i=), click *Run*, and then *Step* through *Loops* to watch the pass counter advance (=1 of 3=, =2 of 3=, =3 of 3=) before *Arrays* populates =a(1,1)= through =a(2,3)=. Then append ~a(3,1) = 9~ before =end program p= and re-run — bounds checking halts on that exact line because subscript =3= is outside =1:2=.
+
+* Array sections, ~dim=~ reductions, and =matmul=
+
+Array sections slice without copying an entire loop into source code: fixing one subscript drops that rank, while =:= keeps the full extent. Reduction intrinsics like =sum= accept a ~dim=~ argument naming *which axis to collapse*: on a 3x4 array, ~sum(a, dim=1)~ collapses rows to return the four column sums.
+
+#+NAME: sections-matmul
+#+BEGIN_SRC fortran
+program p
+  implicit none
+  integer :: a(3,4), i
+  a = reshape([(i, i=1,12)], [3,4])
+  print *, a(2,:)
+  print *, sum(a, dim=1)
+  print *, matmul(reshape([1.,2.,3.,4.], [2,2]), reshape([1.,0.,0.,1.], [2,2]))
+  print *, dot_product([1,2,3], [1,2,3])
+end program p
+#+END_SRC
+
+#+RESULTS:
+: 2 5 8 11
+: 6 15 24 33
+: 1.0 2.0 3.0 4.0
+: 14
+
+*Try editing:* change ~dim=1~ to ~dim=2~ and re-run — collapsing across columns produces the three row sums (=22 26 30=).
+
+* Modules, =intent=, derived types, and formatted I/O
+
+Modules own persistent data that outlives any single call and appears in the *Modules* panel. Procedure arguments share the caller's variable by reference, with =intent(in)= enforced read-only and =intent(inout)= writing updates directly back to the caller. Derived types group named components accessed with =%=, while explicit format descriptors (=F8.4=, =I5=, =ES12.4=) control exact column widths.
+
+#+CAPTION: Module state persists across calls while intent(inout) binds directly to the caller's variable
+#+BEGIN_SRC typst :results svg
+#set page(width: auto, height: auto, margin: 12pt)
+#set text(size: 9pt)
+#import "@preview/fletcher:0.5.8": diagram, node, edge
+
+#let mono(s) = text(font: "DejaVu Sans Mono", size: 8pt, fill: rgb("#171717"), s)
+
+#context {
+  let accent = rgb("#1A9988")
+  let tint = rgb("#F2F8F6")
+  let ink = rgb("#171717")
+  let cards = (
+    (text(weight: "bold", fill: ink)[module m], mono[counter = 0 -> 1], true),
+    (text(weight: "bold", fill: ink)[subroutine bump(n)], mono[intent(inout) :: n], false),
+    (text(weight: "bold", fill: ink)[program p], mono[n = 41 -> 42 (use m)], true),
+  )
+  let pad-x = 12pt
+  let pad-h = 6pt
+  let pad-c = 6pt
+  let w = calc.max(
+    ..cards.map(c => calc.max(measure(c.at(0)).width, measure(c.at(1)).width)),
+  ) + 2 * pad-x + 6pt
+  let h0 = measure(cards.at(0).at(0)).height + 2 * pad-h
+  let h1 = measure(cards.at(0).at(1)).height + 2 * pad-c
+  let hh = h0 + h1 + 0.5pt
+  let y-arrow = (h1 - hh) / 2
+  let gap = 54pt
+  let step = w + gap
+  let card(i) = {
+    let (r0, r1, hl) = cards.at(i)
+    let body = grid(columns: (w - 1.4pt,),
+      block(width: 100%, inset: (x: pad-x, y: pad-h), align(center, r0)),
+      line(length: w - 1.4pt, stroke: 0.5pt + luma(140)),
+      block(width: 100%, inset: (x: pad-x, y: pad-c), align(center, r1)),
+    )
+    node((i * step, 0pt), body, shape: rect, width: w, inset: 0pt,
+      stroke: 0.8pt + if hl { accent } else { luma(130) },
+      fill: if hl { tint } else { white })
+  }
+  diagram(
+    spacing: (1pt, 1pt),
+    card(0), card(1), card(2),
+    edge((0pt, y-arrow), (step, y-arrow), "<->",
+      label: text(size: 7.5pt, fill: luma(95))[saved],
+      label-side: left,
+      stroke: 0.8pt + luma(120)),
+    edge((step, y-arrow), (2 * step, y-arrow), "<->",
+      label: text(size: 7.5pt, fill: accent)[by ref],
+      label-side: left,
+      stroke: 0.9pt + accent),
+  )
+}
+#+END_SRC
+
+#+NAME: modules-and-io
+#+BEGIN_SRC fortran
+module m
+  implicit none
+  integer :: counter = 0
+contains
+  subroutine bump(n)
+    integer, intent(inout) :: n
+    counter = counter + 1
+    n = n + 1
+  end subroutine bump
+end module m
+program p
+  use m, only: counter, bump
+  implicit none
+  type :: particle
+    real :: x = 0.0
+    real :: v = 1.0
+  end type particle
+  type(particle) :: q
+  integer :: n
+  n = 41
+  call bump(n)
+  q = particle(2.0, 3.0)
+  q%x = q%x + q%v
+  print *, n, counter, q%x
+  write(*, '(F8.4)') 1.0 / 3.0
+  write(*, '(I5)') n
+  write(*, '(ES12.4)') 1234.0
+end program p
+#+END_SRC
+
+#+RESULTS:
+: 42 1 5.0
+:   0.3333
+:    42
+:   1.2340E+03
+
+*Try editing:* change =intent(inout)= to =intent(in)= on line 6 and re-run — the interpreter refuses to modify =n= inside =bump=. Or add a second =call bump(n)= to watch =m%counter= climb to =2= in *Modules*.
+
+* Shared sessions across blocks (=:session lab=)
+
+Adding =:session lab= keeps one main-program workspace, module state, and procedure table alive across blocks on the same page. Run the first block to initialize =n= and =grid=, then run the second block to resume in that same scope.
+
+#+NAME: session-init
+#+BEGIN_SRC fortran :session lab
+program p
+  implicit none
+  integer :: n
+  real :: grid(2,2)
+  n = 41
+  grid = reshape([1.0, 2.0, 3.0, 4.0], [2,2])
+  print *, n, sum(grid)
+end program p
+#+END_SRC
+
+#+RESULTS:
+: 41 10.0
+
+#+NAME: session-step
+#+BEGIN_SRC fortran :session lab
+n = n + 1
+grid = grid * 2.0
+print *, n, sum(grid)
+#+END_SRC
+
+#+RESULTS:
+: 42 20.0
+
+*Try editing:* click *Run* on =session-step= a second time to watch =n= advance to =43= and =grid= double again in *Arrays*. Click *Reset* to wipe the shared =lab= session cleanly.
+
+* Exercise: sum only the second row of =a=
+
+Print the sum of row 2 of ~a = reshape([(i, i=1,6)], [2,3])~. Because =reshape= fills =a= column by column, row 2 holds =2=, =4=, and =6=, so its sum is $2 + 4 + 6 = 12$.
+
+#+NAME: ex-row-sum
+#+EXERCISE: Print the sum of row 2 of a (12)
+#+CHECK: 12
+#+BEGIN_SRC fortran
+program p
+  implicit none
+  integer :: a(2,3), i
+  a = reshape([(i, i=1,6)], [2,3])
+  print *, sum(a(1,:))
+end program p
+#+END_SRC
+
+#+BEGIN_HINT
+Slice the entire second row with =a(2,:)= and pass it to =sum(...)=.
+#+END_HINT
+
+#+BEGIN_SOLUTION
+#+BEGIN_SRC fortran
+program p
+  implicit none
+  integer :: a(2,3), i
+  a = reshape([(i, i=1,6)], [2,3])
+  print *, sum(a(2,:))
+end program p
+#+END_SRC
+#+END_SOLUTION

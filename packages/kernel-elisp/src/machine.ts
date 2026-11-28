@@ -63,14 +63,19 @@ export interface LoadedSource {
   lexicalBinding: boolean;
 }
 
+export interface SharedState {
+  special: Set<string>;
+  touched: Set<string>;
+}
+
 export class ElispMachine {
   readonly runtime: Runtime;
   /** Innermost dynamic frame last. */
   readonly dynamic: DynFrame[] = [];
   /** Names marked special by defvar/defconst (this session only). */
-  readonly special = new Set<string>();
+  readonly special: Set<string>;
   /** Symbols the program defined/assigned (drives the Symbols panel). */
-  readonly touched = new Set<string>();
+  readonly touched: Set<string>;
   /** Names changed by the step that just ran (cleared by `step`). */
   readonly changed = new Set<string>();
 
@@ -85,9 +90,13 @@ export class ElispMachine {
   private depth = 0;
   private gen: Generator<Step, void, unknown>;
 
-  constructor(readonly source: LoadedSource, runtime: Runtime) {
+  constructor(readonly source: LoadedSource, runtime: Runtime, shared?: SharedState) {
     this.runtime = runtime;
+    this.special = shared?.special ?? new Set();
+    this.touched = shared?.touched ?? new Set();
     runtime.dynamicFrames = this.dynamic;
+    runtime.output = '';
+    runtime.clearChanged();
     for (const [name, fn] of makeBuiltins(runtime)) {
       if (!runtime.globalFunctions.has(name)) runtime.globalFunctions.set(name, fn);
     }
@@ -99,7 +108,9 @@ export class ElispMachine {
         }));
       }
     }
-    runtime.globalValues.set('lexical-binding', source.lexicalBinding ? t : nil);
+    if (shared === undefined || source.lexicalBinding) {
+      runtime.globalValues.set('lexical-binding', source.lexicalBinding ? t : nil);
+    }
     this.gen = this.runProgram(source.forms);
     this.pull();
   }

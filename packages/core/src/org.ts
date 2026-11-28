@@ -52,7 +52,11 @@ const RE_MD_LINK = /\[[^\]\n]*\]\([^)\n]*\)/;
 const RE_OUTPUT_LINE = /^\s*:/;
 
 export function normalizeOrgKeyword(raw: string): string {
-  return raw.split('_').map((p) => p[0]!.toUpperCase() + p.slice(1).toLowerCase()).join('');
+  return raw
+    .split('_')
+    .filter((p) => p.length > 0)
+    .map((p) => p[0]!.toUpperCase() + p.slice(1).toLowerCase())
+    .join('');
 }
 
 /** Parse a document, discarding diagnostics (byte-identical rendering). */
@@ -154,7 +158,7 @@ function parseLines(lines: string[], pending: PendingPromises): OrgDoc {
           i++;
           continue;
         case 'Name':
-          pending.name = body.split(/\s+/)[0] ?? null;
+          pending.name = body === '' ? null : (body.split(/\s+/)[0] ?? null);
           i++;
           continue;
         // `#+CAPTION:` names the next src block's figure; org's convention is
@@ -436,7 +440,7 @@ function collectDiagnostics(src: string): OrgDiagnostic[] {
           }
           case 'Name':
             flushPendingName();
-            pendingName = { name: body.split(/\s+/)[0] ?? '', line: lineNo };
+            if (body !== '') pendingName = { name: body.split(/\s+/)[0]!, line: lineNo };
             break;
           case 'BeginSrc': {
             // Promises are fulfilled by this block (whatever their kind).

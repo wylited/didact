@@ -7,6 +7,6 @@ export const mipsKernel: Kernel = {
   id: 'mips',
   label: 'MIPS32 · interpreter',
   editorSyntax: 'asm-mips',
-  features: { breakpoints: true },
+  features: { breakpoints: true, stepping: true },
   createSession: () => new MipsSession(),
 };

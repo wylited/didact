@@ -512,6 +512,26 @@ describe('the session contract', () => {
     expect(s.state().find((p): p is Extract<Panel, { kind: 'console' }> => p.kind === 'console')!.text).toBe('1\n2\n3\n');
   });
 
+  it('continues past a paused breakpoint when run() is called again with the same breakpoint', async () => {
+    const s = wasmKernel.createSession();
+    const src = `(module
+  (import "didact" "print" (func $print (param i32)))
+  (func (export "main")
+    (call $print (i32.const 1))
+    (call $print (i32.const 2))
+    (call $print (i32.const 3))))`;
+    await s.load(src);
+    const paused = await s.run([5]);
+    expect(paused.pausedAt).toBe(5);
+    expect(paused.finished).toBe(false);
+    expect(s.state().find((p): p is Extract<Panel, { kind: 'console' }> => p.kind === 'console')!.text).toBe('1\n');
+    const done = await s.run([5]);
+    expect(done.finished).toBe(true);
+    expect(done.pausedAt).toBeUndefined();
+    expect(s.state().find((p): p is Extract<Panel, { kind: 'console' }> => p.kind === 'console')!.text).toBe('1\n2\n3\n');
+    s.dispose();
+  });
+
   it('panels expose locals with changed flags and a live call stack', async () => {
     const s = wasmKernel.createSession();
     await s.load(`(module

@@ -3,12 +3,15 @@
 The engine ships as npm dependencies (exact versions pinned in
 `package.json` and `pnpm-lock.yaml`): `@alexaltea/unicorn-js@2.1.4`,
 `@alexaltea/keystone-js@0.9.2`, `@alexaltea/capstone-js@5.0.9`.
-`scripts/sync-vendors.mjs` copies the payload from `node_modules/` into the
-app's `public/vendor/` at build time (the loader in `src/vendor.ts` pins
-every URL to the page base so `vite dev`, `vite build` and `vite preview`
-with `base: './'` all resolve identically); `vendor/` here keeps only the
-license texts. The manifest below records each file's upstream source —
-each was byte-identical to its npm release when pinned.
+`@didact/vite` (`didactVendors()` / `didactVite()`)
+serves the payload straight from `node_modules/` in dev and emits it into the
+build output under `vendor/` (the loader in `src/vendor.ts` pins every URL to
+the page base so
+`vite dev`, `vite build`, and `vite preview` with `base: './'` all resolve
+identically; override with `createAsm64Kernel({ vendorBase })` when hosting
+assets elsewhere). `vendor/` here keeps only the license texts. The manifest
+below records each file's upstream source — each was byte-identical to its npm
+release when pinned.
 
 ## Manifest
 
@@ -41,11 +44,15 @@ Alexandro Sanchez Bach (<https://github.com/AlexAltea>).
   pre-fetched `wasmBinary`, so resolution never depends on
   `document.currentScript` or the page's base path.
 
-## GPL note
+## GPL-2.0 opt-in guidance
 
-Unicorn and Keystone are GPL-2.0. Distributing these files (including
-serving them from a public site) triggers the GPL's source-availability
-obligations for those components; the license texts are copied alongside as
-`LICENSE-unicorn-js.txt` / `LICENSE-keystone-js.txt`. This is an accepted
-prototype tradeoff recorded in `docs/decision.md`; the permissively licensed
-sibling prototypes are the alternative.
+Unicorn and Keystone are licensed under **GPL-2.0**. Distributing these files
+(including serving them from a public website) triggers the GPL's source-code
+and license-notice obligations for those components; the upstream license texts
+are copied alongside as `LICENSE-unicorn-js.txt` and `LICENSE-keystone-js.txt`.
+
+Didact core (`@didact/core`), `@didact/vite`, `@didact/cli`, and all 12
+pure-TypeScript kernels are **MIT-licensed**; `@didact/kernel-asm64` is
+strictly opt-in. Sites that require permissive-only distribution should omit
+`@didact/kernel-asm64` — use `@didact/kernel-riscv` or `@didact/kernel-mips`
+for MIT-licensed assembly lessons with zero WASM dependencies.

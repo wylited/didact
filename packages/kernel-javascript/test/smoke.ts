@@ -5,6 +5,7 @@
 // changed flags, budget), and a round-trip of every lesson block against
 // its #+RESULTS.
 
+import { readFileSync } from 'node:fs';
 import { jsKernel } from '../src/kernel';
 import type { Panel, RunResult, Session } from '../src/types';
 
@@ -165,7 +166,7 @@ console.log('session · lesson round-trip');
 {
   const blocks: string[] = [];
   const expected: string[] = [];
-  const org = await Bun.file(`${import.meta.dir}/../lesson/lesson.org`).text();
+  const org = readFileSync(new URL('../lesson/lesson.org', import.meta.url), 'utf8');
   const lines = org.split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (lines[i]!.startsWith('#+BEGIN_SRC javascript')) {

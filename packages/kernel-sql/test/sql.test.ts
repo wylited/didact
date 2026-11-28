@@ -631,4 +631,22 @@ SELECT nope FROM t;`);
     s.dispose();
     expect(s.state()).toEqual([]);
   });
+
+  it(':session resume() persists tables across blocks while resetting output, and reset() clears shared tables', async () => {
+    const s = await load(`${USERS}`);
+    expect((await s.run()).finished).toBe(true);
+
+    const r = await s.resume!(`INSERT INTO users VALUES (5, 'eve', 'HK', 29);
+SELECT name FROM users WHERE id = 5;`);
+    expect(r).toEqual({ ok: true, summary: 'resumed · 2 statements' });
+    const run2 = await s.run();
+    expect(run2.finished).toBe(true);
+    expect(consoleOf(s.state())).toBe('INSERT 0 1\n\n name \n------\n eve  \n');
+
+    s.reset();
+    const afterReset = await s.run();
+    expect(afterReset.finished).toBe(false);
+    expect(afterReset.error).toBe("line 1: unknown table 'users'");
+    s.dispose();
+  });
 });

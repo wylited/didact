@@ -38,10 +38,12 @@ export interface RenderedDoc {
 export type LinkResolver = (target: string) => string | null;
 
 /** Everything the renderer needs from its host. Kept as one object because
- *  the parameters are orthogonal and both are usually absent. */
+ *  the parameters are orthogonal and usually absent. */
 export interface RenderOptions {
   resolveLink?: LinkResolver;
   typst?: TypstRenderOptions;
+  /** Document used to create DOM nodes (defaults to `into.ownerDocument ?? document`). */
+  doc?: Document;
 }
 
 // Inline markup: *bold* /italic/ =code= ~verbatim~. Org emphasis border
@@ -63,18 +65,19 @@ const missingMathKeys = new Set<string>();
 function appendText(
   text: string,
   into: HTMLElement,
+  doc: Document,
   typst?: TypstRenderOptions,
 ): void {
   if (typst === undefined) {
-    into.appendChild(document.createTextNode(text));
+    into.appendChild(doc.createTextNode(text));
     return;
   }
   for (const part of splitTypstMath(text)) {
     if (part.kind === 'text') {
-      into.appendChild(document.createTextNode(part.text));
+      into.appendChild(doc.createTextNode(part.text));
       continue;
     }
-    const wrapper = document.createElement('span');
+    const wrapper = doc.createElement('span');
     wrapper.className = part.display ? 'lw-math lw-math-block' : 'lw-math';
     wrapper.dataset.test = 'math';
     const art = typst.artifacts.math[mathKey(part.src, part.display)];
@@ -114,21 +117,22 @@ function renderLink(
   target: string,
   label: string,
   into: HTMLElement,
+  doc: Document,
   resolveLink: LinkResolver | undefined,
   typst: TypstRenderOptions | undefined,
 ): void {
   const external = RE_EXTERNAL.test(target);
   const href = external ? target : resolveLink?.(target) ?? null;
   if (href === null) {
-    const broken = document.createElement('span');
+    const broken = doc.createElement('span');
     broken.className = 'lw-link lw-link-broken';
     broken.dataset.test = 'link-broken';
     broken.title = `Unresolved link: ${target}`;
-    renderInline(label, broken, { resolveLink, typst });
+    renderInline(label, broken, { resolveLink, typst, doc });
     into.appendChild(broken);
     return;
   }
-  const a = document.createElement('a');
+  const a = doc.createElement('a');
   a.className = 'lw-link';
   a.href = href;
   if (/^https?:\/\//i.test(target)) {
@@ -136,7 +140,7 @@ function renderLink(
     a.rel = 'noopener noreferrer';
     a.classList.add('lw-link-external');
   }
-  renderInline(label, a, { resolveLink, typst }); // =code=, *bold* inside the label
+  renderInline(label, a, { resolveLink, typst, doc }); // =code=, *bold* inside the label
   into.appendChild(a);
 }
 
@@ -145,6 +149,7 @@ function renderLink(
 function renderEmphasis(
   text: string,
   into: HTMLElement,
+  doc: Document,
   resolveLink: LinkResolver | undefined,
   typst: TypstRenderOptions | undefined,
 ): void {
@@ -152,16 +157,16 @@ function renderEmphasis(
     if (part === '') continue;
     const m = /^(\*|\/|=|~)([\s\S]+)\1$/.exec(part);
     if (m === null) {
-      appendText(part, into, typst);
+      appendText(part, into, doc, typst);
       continue;
     }
-    const el = document.createElement(
+    const el = doc.createElement(
       m[1] === '*' ? 'strong' : m[1] === '/' ? 'em' : 'code');
     el.classList.add('lw-inline');
     // Emphasis nests (/see =la= here/); code and verbatim are literal, so a
     // `$` inside =…= must never become math.
     if (m[1] === '*' || m[1] === '/') {
-      renderInline(m[2]!, el, { resolveLink, typst });
+      renderInline(m[2]!, el, { resolveLink, typst, doc });
     } else {
       el.textContent = m[2]!;
     }
@@ -176,34 +181,36 @@ export function renderInline(
   options: RenderOptions = {},
 ): void {
   const { resolveLink, typst } = options;
+  const doc = options.doc ?? into.ownerDocument ?? document;
   let rest = text;
   let m: RegExpExecArray | null;
   while ((m = RE_LINK.exec(rest)) !== null) {
-    renderEmphasis(rest.slice(0, m.index), into, resolveLink, typst);
+    renderEmphasis(rest.slice(0, m.index), into, doc, resolveLink, typst);
     const target = m[1]!;
-    // org's default description hides the file: scheme
-    renderLink(
-      target,
-      m[2] ?? target.replace(/^file:/i, ''),
-      into,
-      resolveLink,
-      typst,
-    );
+    const desc = m[2];
+    // org's default description hides the file: scheme; an empty `[[target][]]`
+    // falls back to the target instead of rendering an empty anchor.
+    const label = desc !== undefined && desc !== ''
+      ? desc
+      : target.replace(/^file:/i, '');
+    renderLink(target, label, into, doc, resolveLink, typst);
     rest = rest.slice(m.index + m[0].length);
   }
-  renderEmphasis(rest, into, resolveLink, typst);
+  renderEmphasis(rest, into, doc, resolveLink, typst);
 }
 
 export function renderDocument(
-  doc: OrgDoc,
+  orgDoc: OrgDoc,
   isExecutable: (lang: string) => boolean,
   options: RenderOptions = {},
 ): RenderedDoc {
   const { typst } = options;
-  const root = document.createElement('article');
+  const dom = options.doc ?? document;
+  const inlineOptions: RenderOptions = { ...options, doc: dom };
+  const root = dom.createElement('article');
   root.className = 'lw-doc';
   const inline = (text: string, into: HTMLElement): void =>
-    renderInline(text, into, options);
+    renderInline(text, into, inlineOptions);
   const blocks: RenderedBlock[] = [];
   let execIndex = 0;
   let lastBlock: RenderedBlock | null = null;
@@ -213,168 +220,168 @@ export function renderDocument(
   // block across fold boundaries.
   const renderNodes = (nodes: OrgDoc, parent: HTMLElement): void => {
     for (const node of nodes) {
-    switch (node.kind) {
-      case 'title': {
-        const h = document.createElement('h1');
-        h.className = 'lw-title';
-        inline(node.text, h);
-        parent.appendChild(h);
-        break;
-      }
-      case 'subtitle': {
-        const p = document.createElement('p');
-        p.className = 'lw-subtitle';
-        inline(node.text, p);
-        parent.appendChild(p);
-        break;
-      }
-      case 'para': {
-        const p = document.createElement('p');
-        p.className = 'lw-para';
-        inline(node.text, p);
-        parent.appendChild(p);
-        break;
-      }
-      case 'heading': {
-        const h = document.createElement(
-          node.level <= 1 ? 'h2' : node.level === 2 ? 'h3' : 'h4');
-        h.className = 'lw-heading';
-        inline(node.text, h);
-        parent.appendChild(h);
-        break;
-      }
-      case 'list': {
-        const ul = document.createElement('ul');
-        ul.className = 'lw-list';
-        for (const item of node.items) {
-          const li = document.createElement('li');
-          inline(item, li);
-          ul.appendChild(li);
-        }
-        parent.appendChild(ul);
-        break;
-      }
-      case 'table': {
-        const table = document.createElement('table');
-        table.className = 'lw-table';
-        if (node.head.length > 0) {
-          const thead = document.createElement('thead');
-          const tr = document.createElement('tr');
-          for (const cell of node.head) {
-            const th = document.createElement('th');
-            inline(cell, th);
-            tr.appendChild(th);
-          }
-          thead.appendChild(tr);
-          table.appendChild(thead);
-        }
-        const tbody = document.createElement('tbody');
-        for (const row of node.rows) {
-          const tr = document.createElement('tr');
-          for (const cell of row) {
-            const td = document.createElement('td');
-            inline(cell, td);
-            tr.appendChild(td);
-          }
-          tbody.appendChild(tr);
-        }
-        table.appendChild(tbody);
-        parent.appendChild(table);
-        break;
-      }
-      case 'src': {
-        if (typst !== undefined && isTypstDiagram(node)) {
-          // Static diagram: build-time SVG, never an editor or a kernel.
-          const figure = document.createElement('figure');
-          figure.className = 'lw-figure lw-diagram';
-          const svg = typst.artifacts.diagrams[diagramKey(node.code)];
-          if (svg === undefined) {
-            // A missing artifact is a build bug; keep reader-facing text
-            // neutral and put the diagnostic where authors will see it.
-            const key = diagramKey(node.code);
-            const first = key.split('\n', 1)[0]!;
-            console.error(
-              `typst diagram not pre-rendered (run pnpm build): ` +
-                `${first.length > 80 ? `${first.slice(0, 77)}...` : first}` +
-                (key.length > first.length ? ' (block continues)' : ''),
-            );
-            const miss = document.createElement('pre');
-            miss.className = 'lw-diagram-missing';
-            miss.textContent = 'Figure unavailable.';
-            figure.appendChild(miss);
-          } else {
-            figure.innerHTML = svg; // build-time engine output (trusted)
-          }
-          if (node.caption !== null) {
-            const caption = document.createElement('figcaption');
-            caption.className = 'lw-caption';
-            inline(node.caption, caption);
-            figure.appendChild(caption);
-          }
-          parent.appendChild(figure);
-          lastBlock = null;
+      switch (node.kind) {
+        case 'title': {
+          const h = dom.createElement('h1');
+          h.className = 'lw-title';
+          inline(node.text, h);
+          parent.appendChild(h);
           break;
         }
-        const figure = document.createElement('figure');
-        figure.className = 'lw-src';
-        if (isExecutable(node.lang)) {
-          execIndex += 1;
-          const mount = document.createElement('div');
-          mount.className = 'lw-block-slot';
-          figure.appendChild(mount);
-          parent.appendChild(figure);
-          lastBlock = { index: execIndex, node, mount, resultsEl: null };
-          blocks.push(lastBlock);
-        } else {
-          const head = document.createElement('figcaption');
-          head.className = 'lw-ro-head';
-          head.textContent = node.lang;
-          figure.appendChild(head);
-          const pre = document.createElement('pre');
-          pre.className = 'lw-ro-code';
-          pre.textContent = node.code;
-          figure.appendChild(pre);
-          parent.appendChild(figure);
-          lastBlock = null;
+        case 'subtitle': {
+          const p = dom.createElement('p');
+          p.className = 'lw-subtitle';
+          inline(node.text, p);
+          parent.appendChild(p);
+          break;
         }
-        break;
-      }
-      case 'fold': {
-        // Native <details> gives keyboard access and a closed default; the
-        // body is marked like any other document subtree.
-        const details = document.createElement('details');
-        details.className = `lw-fold lw-${node.variant}`;
-        details.dataset.test = `fold-${node.variant}`;
-        const summary = document.createElement('summary');
-        summary.textContent = node.variant === 'hint' ? 'Show hint' : 'Show solution';
-        const body = document.createElement('div');
-        body.className = 'lw-fold-body';
-        details.appendChild(summary);
-        details.appendChild(body);
-        renderNodes(node.doc, body);
-        parent.appendChild(details);
-        break;
-      }
-      case 'results': {
-        const slot = document.createElement('div');
-        slot.className = 'lw-results';
-        slot.dataset.test = 'results';
-        if (node.canned !== '') {
-          const pre = document.createElement('pre');
-          pre.textContent = node.canned;
-          slot.appendChild(pre);
+        case 'para': {
+          const p = dom.createElement('p');
+          p.className = 'lw-para';
+          inline(node.text, p);
+          parent.appendChild(p);
+          break;
         }
-        parent.appendChild(slot);
-        const target = node.name !== null
-          ? blocks.find((b) => b.node.name === node.name) ?? null
-          : lastBlock;
-        if (target !== null) target.resultsEl = slot;
-        break;
+        case 'heading': {
+          const h = dom.createElement(
+            node.level <= 1 ? 'h2' : node.level === 2 ? 'h3' : 'h4');
+          h.className = 'lw-heading';
+          inline(node.text, h);
+          parent.appendChild(h);
+          break;
+        }
+        case 'list': {
+          const ul = dom.createElement('ul');
+          ul.className = 'lw-list';
+          for (const item of node.items) {
+            const li = dom.createElement('li');
+            inline(item, li);
+            ul.appendChild(li);
+          }
+          parent.appendChild(ul);
+          break;
+        }
+        case 'table': {
+          const table = dom.createElement('table');
+          table.className = 'lw-table';
+          if (node.head.length > 0) {
+            const thead = dom.createElement('thead');
+            const tr = dom.createElement('tr');
+            for (const cell of node.head) {
+              const th = dom.createElement('th');
+              inline(cell, th);
+              tr.appendChild(th);
+            }
+            thead.appendChild(tr);
+            table.appendChild(thead);
+          }
+          const tbody = dom.createElement('tbody');
+          for (const row of node.rows) {
+            const tr = dom.createElement('tr');
+            for (const cell of row) {
+              const td = dom.createElement('td');
+              inline(cell, td);
+              tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+          }
+          table.appendChild(tbody);
+          parent.appendChild(table);
+          break;
+        }
+        case 'src': {
+          if (typst !== undefined && isTypstDiagram(node)) {
+            // Static diagram: build-time SVG, never an editor or a kernel.
+            const figure = dom.createElement('figure');
+            figure.className = 'lw-figure lw-diagram';
+            const svg = typst.artifacts.diagrams[diagramKey(node.code)];
+            if (svg === undefined) {
+              // A missing artifact is a build bug; keep reader-facing text
+              // neutral and put the diagnostic where authors will see it.
+              const key = diagramKey(node.code);
+              const first = key.split('\n', 1)[0]!;
+              console.error(
+                `typst diagram not pre-rendered (run pnpm build): ` +
+                  `${first.length > 80 ? `${first.slice(0, 77)}...` : first}` +
+                  (key.length > first.length ? ' (block continues)' : ''),
+              );
+              const miss = dom.createElement('pre');
+              miss.className = 'lw-diagram-missing';
+              miss.textContent = 'Figure unavailable.';
+              figure.appendChild(miss);
+            } else {
+              figure.innerHTML = svg; // build-time engine output (trusted)
+            }
+            if (node.caption !== null) {
+              const caption = dom.createElement('figcaption');
+              caption.className = 'lw-caption';
+              inline(node.caption, caption);
+              figure.appendChild(caption);
+            }
+            parent.appendChild(figure);
+            lastBlock = null;
+            break;
+          }
+          const figure = dom.createElement('figure');
+          figure.className = 'lw-src';
+          if (isExecutable(node.lang)) {
+            execIndex += 1;
+            const mount = dom.createElement('div');
+            mount.className = 'lw-block-slot';
+            figure.appendChild(mount);
+            parent.appendChild(figure);
+            lastBlock = { index: execIndex, node, mount, resultsEl: null };
+            blocks.push(lastBlock);
+          } else {
+            const head = dom.createElement('figcaption');
+            head.className = 'lw-ro-head';
+            head.textContent = node.lang;
+            figure.appendChild(head);
+            const pre = dom.createElement('pre');
+            pre.className = 'lw-ro-code';
+            pre.textContent = node.code;
+            figure.appendChild(pre);
+            parent.appendChild(figure);
+            lastBlock = null;
+          }
+          break;
+        }
+        case 'fold': {
+          // Native <details> gives keyboard access and a closed default; the
+          // body is marked like any other document subtree.
+          const details = dom.createElement('details');
+          details.className = `lw-fold lw-${node.variant}`;
+          details.dataset.test = `fold-${node.variant}`;
+          const summary = dom.createElement('summary');
+          summary.textContent = node.variant === 'hint' ? 'Show hint' : 'Show solution';
+          const body = dom.createElement('div');
+          body.className = 'lw-fold-body';
+          details.appendChild(summary);
+          details.appendChild(body);
+          renderNodes(node.doc, body);
+          parent.appendChild(details);
+          break;
+        }
+        case 'results': {
+          const slot = dom.createElement('div');
+          slot.className = 'lw-results';
+          slot.dataset.test = 'results';
+          if (node.canned !== '') {
+            const pre = dom.createElement('pre');
+            pre.textContent = node.canned;
+            slot.appendChild(pre);
+          }
+          parent.appendChild(slot);
+          const target = node.name !== null
+            ? blocks.find((b) => b.node.name === node.name) ?? null
+            : lastBlock;
+          if (target !== null) target.resultsEl = slot;
+          break;
+        }
       }
-    }
     }
   };
 
-  renderNodes(doc, root);
+  renderNodes(orgDoc, root);
   return { root, blocks };
 }

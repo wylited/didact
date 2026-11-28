@@ -2,6 +2,8 @@
 // Kept separate from block.ts so the parser, renderer, runtime, and site can
 // agree on exercise metadata without circular imports.
 
+import type { Extension } from '@codemirror/state';
+
 /** An exercise attached to the next source block by org directives:
  *  `#+EXERCISE: <title>` and optional `#+CHECK: <expected output>`.
  *  `expected === null` marks the drill unchecked: the runtime reports
@@ -43,9 +45,20 @@ export interface BlockRuntimeOptions {
   id?: string;
   /** Storage backend; defaults to `globalThis.localStorage` when present. */
   storage?: StorageLike | null;
+  /** Storage key prefix for saved drafts (default `'didact:'`). */
+  storagePrefix?: string;
   /** True when this exercise already passed in a previous visit. */
   exercisePassed?: boolean;
   /** Called after each checked exercise reaches a terminal execution.
    *  Requires `id`: id-less blocks update their badge but emit nothing. */
   onExerciseResult?: (outcome: ExerciseOutcome) => void;
+  /** Custom CodeMirror theme extension (defaults to Ayu Light). */
+  editorTheme?: Extension;
+  /** Additional CodeMirror extensions appended to the editor state. */
+  editorExtensions?: readonly Extension[];
+  /** Explicit CodeMirror language extension overriding `kernel.editorSyntax`
+   *  (`null` disables syntax highlighting). */
+  editorLanguage?: Extension | null;
+  /** Lock the editor against user edits while keeping execution controls. */
+  readOnly?: boolean;
 }

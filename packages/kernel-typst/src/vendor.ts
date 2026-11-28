@@ -1,5 +1,6 @@
-// Loader for the typst-wasm engine (npm deps; sync-vendors copies the
-// payload into the app's public/vendor-typst/ for serving).
+// Loader for the typst-wasm engine (npm deps; @didact/vite didactVendors()
+// serves the payload from node_modules at vendor-typst/ in dev and emits it
+// into dist/ on build).
 //
 // Engine choice: `typst-wasm` 1.0.0 (MIT) — JS bindings around the real
 // Typst 0.15.0 compiler compiled to WebAssembly. It compiles a document to
@@ -64,8 +65,9 @@ export const FONT_FILES = [
 ] as const;
 
 function defaultBase(): string {
-  // Browser: assets live at <page-base>/vendor-typst/ (sync-vendors copies
-  // them from node_modules into the app's public root). Headless
+  // Browser: assets live at <page-base>/vendor-typst/ (@didact/vite
+  // didactVendors() serves them from node_modules in dev and emits them into
+  // dist/ on build). Headless
   // (bun/vitest) never uses this — see assetUrl().
   return typeof document !== 'undefined'
     ? new URL('vendor-typst/', document.baseURI).href
@@ -73,69 +75,126 @@ function defaultBase(): string {
 }
 
 let vendorDir = defaultBase();
+let enginePromise: Promise<TypstEngine> | null = null;
 
 /** Point the loader at a different same-origin directory for the assets. */
 export function setVendorBase(url: string): void {
   vendorDir = url.endsWith('/') ? url : url + '/';
+  enginePromise = null; // re-resolve on the next load
 }
 
-/** One asset's URL: served copy in the browser, npm copy headless. */
-function assetUrl(name: string): string {
-  if (typeof document !== 'undefined') return vendorDir + name;
-  // Headless (bun/vitest): engine and fonts are separate npm packages.
-  const dir = name.endsWith('.wasm')
+/** Headless npm resolution: prefer import.meta.resolve (works when hoisted). */
+function resolveHeadlessAsset(name: string): string {
+  const isWasm = name.endsWith('.wasm');
+  // Built from parts so Vite cannot rewrite headless npm paths into dead browser assets.
+  const spec = isWasm
+    ? ['typst-wasm', 'engine', name].join('/')
+    : ['@typst-wasm', 'fonts', name].join('/');
+  if (typeof import.meta.resolve === 'function') {
+    try {
+      return import.meta.resolve(spec);
+    } catch {
+      // fall back to sibling node_modules layout below
+    }
+  }
+  const dir = isWasm
     ? '../node_modules/typst-wasm/dist/engine/'
     : '../node_modules/@typst-wasm/fonts/dist/files/';
   return new URL(dir + name, import.meta.url).href;
 }
 
-async function readBytes(name: string): Promise<Uint8Array<ArrayBuffer>> {
-  const url = assetUrl(name);
-  const res = await fetch(url);
+/** One asset's URL: served copy in the browser, npm copy headless (unless overridden). */
+function assetUrl(name: string, base: string): string {
+  if (typeof document !== 'undefined' || base !== '') return base + name;
+  return resolveHeadlessAsset(name);
+}
+
+/** Read a local file:// URL via node:fs/promises (Node 24 fetch rejects file://). */
+async function readFileUrl(url: string): Promise<Uint8Array<ArrayBuffer>> {
+  const fsSpec = ['node', 'fs/promises'].join(':');
+  const urlSpec = ['node', 'url'].join(':');
+  const [{ readFile }, { fileURLToPath }] = (await Promise.all([
+    import(/* @vite-ignore */ fsSpec),
+    import(/* @vite-ignore */ urlSpec),
+  ])) as [typeof import('node:fs/promises'), typeof import('node:url')];
+  const buf = await readFile(fileURLToPath(url));
+  const out = new Uint8Array(buf.byteLength);
+  out.set(buf);
+  return out;
+}
+
+async function readBytes(name: string, base: string): Promise<Uint8Array<ArrayBuffer>> {
+  const url = assetUrl(name, base);
+  if (typeof document === 'undefined' && url.startsWith('file:')) {
+    try {
+      return await readFileUrl(url);
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `cannot load ${name} from ${url}: ${detail} — verify typst-wasm/@typst-wasm/fonts or call setVendorBase()`,
+      );
+    }
+  }
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `cannot load ${name} from ${url}: ${detail} — serve the vendored typst assets there or call setVendorBase()`,
+    );
+  }
   if (!res.ok) {
-    throw new Error(`cannot load ${name} from ${url}: HTTP ${res.status}`);
+    throw new Error(
+      `cannot load ${name} from ${url}: HTTP ${res.status} — serve the vendored typst assets there or call setVendorBase()`,
+    );
   }
   return new Uint8Array(await res.arrayBuffer());
 }
 
-let enginePromise: Promise<TypstEngine> | null = null;
-
 /** Load (once) the vendored typst compiler engine and its fonts. */
 export function loadEngine(): Promise<TypstEngine> {
-  enginePromise ??= (async () => {
-    // JSPI is standardized but not yet in the TS DOM lib.
-    const wa = WebAssembly as typeof WebAssembly & {
-      Suspending?: unknown;
-      promising?: unknown;
-    };
-    if (typeof wa.Suspending !== 'function' || typeof wa.promising !== 'function') {
-      throw new Error(
-        'this browser has no WebAssembly JSPI (WebAssembly.promising); ' +
-          'the Typst engine needs Chrome/Edge 137+, Firefox 153+ or Safari 27+',
+  if (!enginePromise) {
+    const base = vendorDir;
+    const pending = (async () => {
+      // JSPI is standardized but not yet in the TS DOM lib.
+      const wa = WebAssembly as typeof WebAssembly & {
+        Suspending?: unknown;
+        promising?: unknown;
+      };
+      if (typeof wa.Suspending !== 'function' || typeof wa.promising !== 'function') {
+        throw new Error(
+          'this browser has no WebAssembly JSPI (WebAssembly.promising); ' +
+            'the Typst engine needs Chrome/Edge 137+, Firefox 153+ or Safari 27+',
+        );
+      }
+      // Compile asynchronously and in parallel. `new WebAssembly.Module`
+      // is synchronous and stock Chromium refuses sync compilation of
+      // buffers larger than 8 MB on the main thread (engine.core.wasm is
+      // ~22.8 MB); `WebAssembly.compile` has no size limit and hands the
+      // engine the same `WebAssembly.Module` it would have built.
+      const coreModules = {} as Record<(typeof ENGINE_FILES)[number], WebAssembly.Module>;
+      await Promise.all(
+        ENGINE_FILES.map(async (name) => {
+          coreModules[name] = await WebAssembly.compile(await readBytes(name, base));
+        }),
       );
-    }
-    // Compile asynchronously and in parallel. `new WebAssembly.Module`
-    // is synchronous and stock Chromium refuses sync compilation of
-    // buffers larger than 8 MB on the main thread (engine.core.wasm is
-    // ~22.8 MB); `WebAssembly.compile` has no size limit and hands the
-    // engine the same `WebAssembly.Module` it would have built.
-    const coreModules = {} as Record<(typeof ENGINE_FILES)[number], WebAssembly.Module>;
-    await Promise.all(
-      ENGINE_FILES.map(async (name) => {
-        coreModules[name] = await WebAssembly.compile(await readBytes(name));
-      }),
-    );
-    const compiler = await createTypstCompiler({
-      coreModules,
-      backend: 'jspi',
-      packageCache: false,
-      // Strictly offline: any typst package/URL import fails as a fetch
-      // error instead of reaching the network.
-      fetch: () => Promise.reject(new Error('offline kernel: no network fetches')),
+      const compiler = await createTypstCompiler({
+        coreModules,
+        backend: 'jspi',
+        packageCache: false,
+        // Strictly offline: any typst package/URL import fails as a fetch
+        // error instead of reaching the network.
+        fetch: () => Promise.reject(new Error('offline kernel: no network fetches')),
+      });
+      const fonts = await Promise.all(FONT_FILES.map((name) => readBytes(name, base)));
+      await compiler.addFonts(...fonts);
+      return compiler;
+    })();
+    enginePromise = pending;
+    pending.catch(() => {
+      if (enginePromise === pending) enginePromise = null; // allow a retry after a transient failure
     });
-    const fonts = await Promise.all(FONT_FILES.map(readBytes));
-    await compiler.addFonts(...fonts);
-    return compiler;
-  })();
+  }
   return enginePromise;
 }

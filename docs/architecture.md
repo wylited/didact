@@ -1,12 +1,14 @@
-# Architecture (v0.2) — kernel-extensible literate system
+# Architecture — kernel-extensible literate system
 
 pnpm monorepo, TypeScript strict everywhere, no UI framework, Vite only at
 the app layer. Packages export **source TS** (`main: src/index.ts`); the app
 typechecks and bundles them — no per-package build step, no dist artifacts.
 
 ```
-packages/core              @didact/core             org parser, block runtime, panel host, theme
-packages/kernel-asm64      @didact/kernel-asm64      x86-64 via Unicorn/Keystone/Capstone wasm
+packages/core              @didact/core             org parser, block runtime, panel host, theme, resolvePages
+packages/cli               @didact/cli              Node 24 native `didact check` CLI (lint + RESULTS/CHECK verification)
+packages/vite              @didact/vite             reusable Vite plugins (`didactVite`, `didactTypst`, `didactVendors`) + Typst build pipeline
+packages/kernel-asm64      @didact/kernel-asm64      x86-64 via Unicorn/Keystone/Capstone wasm (GPL-2.0 opt-in)
 packages/kernel-riscv      @didact/kernel-riscv      RV32IM interpreter (pure TypeScript)
 packages/kernel-mips       @didact/kernel-mips       MIPS32 interpreter (pure TypeScript)
 packages/kernel-c          @didact/kernel-c          C via vendored clang wasm (wasm32-wasip1)
@@ -23,14 +25,16 @@ packages/kernel-lisp       @didact/kernel-lisp       Scheme-flavored Lisp interp
 packages/kernel-elisp      @didact/kernel-elisp      Emacs Lisp: Lisp-2 cells, dynamic/lexical binding, buffers, hooks, keymaps (pure TypeScript)
 packages/kernel-prolog     @didact/kernel-prolog     SLD-resolution Prolog, choice-point panels (pure TypeScript)
 packages/kernel-typst      @didact/kernel-typst      Typst via vendored compiler wasm + fonts
-apps/site                  @didact/site             the website (src/pages/*.org, kernel registration, typst/ build pipeline)
+apps/site                  @didact/site             the showcase website (17 src/pages/*.org lessons, kernel registration, @didact/vite)
 ```
 
-Wiring: app aliases `@didact/core` and each `@didact/kernel-*` →
-`../../packages/*/src` (tsconfig `paths` + vite `resolve.alias`); one
-`tsc --noEmit` in `apps/site` covers all packages (include
-`../../packages/*/src`), and a second `tsc -p tsconfig.typst.json`
-typechecks the Node-side `apps/site/typst` pipeline.
+Wiring: packages resolve via pnpm workspace dependencies (`workspace:*`) and
+their `package.json` `exports` pointing directly at `src/*.ts` (no
+`tsconfig.json` `paths` or Vite `resolve.alias`). One `tsc --noEmit` in
+`apps/site` covers all DOM packages (`include: ["src", "../../packages/*/src"]`,
+excluding `../../packages/vite/src`), and a second
+`tsc -p tsconfig.typst.json` typechecks the Node-side Typst build pipeline in
+`packages/vite/src/typst/`.
 
 ## Kernel contract (owned by core)
 
@@ -61,16 +65,23 @@ never a host-supplied named session.
 
 ## Core responsibilities (`@didact/core`)
 
-
-- `parseOrg(src): OrgDoc` — grammar per `docs/design.md`.
-- `mountSite({ root, fonts?, kernels, pages, navSide?, navView?, brand?, typst? })` →
-  renders the navigation rail + active page document, block runtimes,
-  panel host. Handle exposes `blocks`, `panel`, `activeIndex`, `navSide`,
-  `navView`, `show(index)`, `setNavSide(side)`, `setNavView(view)`,
-  `dispose()`.
-- Block runtime: CodeMirror 6 editor (Ayu Light), per-block controls +
-  status + error box + results slot; running highlight (panel attachment is
-  the site-root `lw-panel-attached` layout state); current
+- `parseOrg(src): OrgDoc` / `parseOrgChecked(src)` — grammar per `docs/design.md`.
+- `resolvePages(sources, order): PageSpec[]` — turns globbed `.org` files + an
+  explicit page order into ordered `PageSpec` entries (with `file: '<stem>.org'`).
+- Subpath exports: `@didact/core/org`, `@didact/core/typst`, `@didact/core/babel`,
+  `@didact/core/kernel`, and `@didact/core/theme.css`.
+- `mountSite(opts)` → renders the collapsible navigation rail + active page
+  document, block runtimes, panel host. Accepts `root`, `kernels`, `pages`,
+  `fonts?`, `navSide?`, `navView?`, `brand?`, `brandHref?`, `typst?`,
+  `storagePrefix?`, `storage?`, `routing?` (`'hash' | 'memory'`),
+  `initialPage?`, `documentTitle?`, `onNavigate?`, `onExerciseResult?`,
+  `showOrgWarnings?`, `editorTheme?`, `editorExtensions?`, `editorLanguages?`.
+  `SiteHandle` exposes `blocks`, `panel`, `activeIndex`, `activeSlug`,
+  `navSide`, `navView`, `navHidden`, `show(index)`, `navigate(page, section?)`,
+  `setNavSide(side)`, `setNavView(view)`, `setNavHidden(hidden)`, `dispose()`.
+- Block runtime: CodeMirror 6 editor (Ayu Light default, Cmd/Ctrl+Z undo/redo),
+  per-block controls + status + error box + results slot; running highlight
+  (panel attachment is the site-root `lw-panel-attached` layout state); current
   line decoration on step and breakpoint pause; gutter breakpoints when
   `features.breakpoints` (Step button hidden when `features.stepping ===
   false`); `data-test` hooks.
@@ -78,9 +89,10 @@ never a host-supplied named session.
   five Panel kinds, `html` via trusted `innerHTML`), attach/detach
   (detach unmounts the panel and collapses the layout), global tooltip
   engine for `[data-tip]` — comment-only tooltips on listing rows.
-- Styles: the textbook-light theme (CSS custom properties, no radius,
-  Atkinson Hyperlegible via @fontsource import, mono stack for code/panel,
-  nav bar + detached single-column state).
+- Styles: the textbook-light theme scoped under `.lw-site` / `.lw-block` /
+  `.lw-tip` (CSS custom properties, zero radius, Atkinson Hyperlegible via
+  `@fontsource` import, mono stack for code/panel, collapsible nav rail +
+  detached single-column state; see `docs/theming.md`).
 
 ## Block identity, persistence, and completion
 
@@ -98,19 +110,23 @@ a new identity; old drafts/results are left behind rather than silently
 reused.
 
 **Saved code.** On editor changes the block writes
-`didact:code:<id>` = current source, and removes the key when the source
-matches the sample again; Revert code restores the sample and clears the
-key. On mount a saved draft beats the org sample. Reads and writes are
-wrapped: absent, denied, quota-full, or throwing storage never breaks a
-block; the text is just not persisted.
+`<storagePrefix>code:<id>` (default `didact:code:<id>`) = current source, and
+removes the key when the source matches the sample again; Revert code restores
+the sample and clears the key. On mount a saved draft beats the org sample.
+Reads and writes go through the configured `storage` backend (default
+`localStorage`, `null` disables persistence) and are error-guarded: absent,
+denied, quota-full, or throwing storage never breaks a block; the text is just
+not persisted.
 
-**Progress.** `didact:progress:<page-key>` holds
+**Progress.** `<storagePrefix>progress:<page-key>` (default
+`didact:progress:<page-key>`) holds
 `{ "passed": [<block id>…], "manual": boolean }`. It is read once per page
 (per mount) and cached. Malformed JSON, a foreign shape, or denied storage
 starts from a clean slate; a failed write is ignored, so the outcome still
 applies to the live session. Only passing exercise outcomes are written —
 a failure is session-local, never stored. `manual` is used only on pages
-with no checked exercises.
+with no checked exercises. Navigator side (`<storagePrefix>nav-side`) and
+collapse state (`<storagePrefix>nav-hidden`) persist through the same store.
 
 **Completion.** A page's checked exercises are its executable blocks with
 `#+CHECK:` expected output, deduplicated by block id. `passed` counts those
@@ -176,9 +192,9 @@ isolated, so one reset can never invalidate another block's output.
 ## kernel-asm64 responsibilities
 
 - unicorn/keystone/capstone wasm come from npm deps (`@alexaltea/*`,
-  licenses in THIRD-PARTY.md + `vendor/` texts), copied to
-  `apps/site/public/vendor/` for serving by `scripts/sync-vendors.mjs`
-  (run automatically by `pnpm dev`/`pnpm build`); `loadEngines()` injects
+  licenses in THIRD-PARTY.md + `vendor/` texts), served from `node_modules`
+  at `<base>/vendor/` in dev and emitted into `dist/vendor/` on build by
+  `@didact/vite` (`didactVendors()` / `didactVite()`); `loadEngines()` injects
   classic-script tags and passes a pre-fetched `wasmBinary` for
   Keystone/Capstone (Unicorn's wasm is embedded in its JS), so runtime
   network use stays same-origin static-asset fetches only.
@@ -187,16 +203,19 @@ isolated, so one reset can never invalidate another block's output.
 - Panel data: registers fields, EFLAGS fields, disassembly listing
   (row `tip` = the source line's trailing `;` comment), .data hexdump,
   console.
-- Exports `asm64Kernel: Kernel` (id `'asm'`, editorSyntax `'asm-intel'`).
+- Exports `asm64Kernel: Kernel` (id `'asm'`, editorSyntax `'asm-intel'`) and
+  `createAsm64Kernel({ vendorBase })` (all 5 WASM kernels follow this
+  singleton + factory pattern: `createAsm64Kernel`, `createCKernel`,
+  `createCppKernel`, `createPythonKernel`, `createTypstKernel`).
 
-## Typst content layer (build time)
+## Typst content layer (build time, `@didact/vite`)
 
 Website content never compiles in the browser. Two layers share the `typst`
 language name but no session, engine, or code path:
 
 | layer | code | runs |
 |---|---|---|
-| content pipeline | `apps/site/typst/*.ts` (Node only) | once at build/dev, emits `virtual:didact-typst` |
+| content pipeline | `packages/vite/src/typst/*.ts` (Node only) | once at build/dev via `didactTypst()` / `didactVite()`, emits `virtual:didact-typst` |
 | typst kernel | `packages/kernel-typst` | per block, on Run, in the page |
 
 Header rule (`isTypstDiagram` in `packages/core/src/typst-source.ts`): a
@@ -209,13 +228,34 @@ diagram; a plain `typst` block stays a kernel block.
   `mathKey` = `I:`/`D:` + normalized source; diagrams by `diagramKey` =
   normalized block source. Normalization is `trim` only in `normalizeTypst`
   (inner whitespace is significant); the pipeline and renderer must use the
-  same function.
-- Pipeline: `apps/site/typst/prerender.ts` parses pages with the core org
-  parser, `collectTypstSources` dedupes, `apps/site/typst/engine.ts` compiles
-  sequentially through one `typst-wasm` JSPI instance (module-level promise +
-  promise chain): MathML plus an SVG fallback per formula, one SVG per
-  diagram. Results are memoized at module scope; the Vite plugin watches
-  `src/pages` and full-reloads page changes.
+  same function. `TypstArtifacts` also has an optional `pages` map of lazy
+  loaders keyed by page file name (`'c.org'`); when present, a page's own
+  `math`/`diagrams` are loaded on demand and the top-level maps are only the
+  fallback.
+- Pipeline: `packages/vite/src/typst/prerender.ts` parses pages with the core
+  org parser, `collectTypstSources` dedupes, `packages/vite/src/typst/engine.ts`
+  compiles sequentially through one `typst-wasm` JSPI instance (module-level
+  promise + promise chain): MathML plus an SVG fallback per formula, one SVG
+  per diagram. Results are memoized at module scope; the Vite plugin watches
+  `pagesDir` (`src/pages`) and full-reloads page changes.
+- Split chunks: `didactTypst({ perPage: true })` (used by `apps/site`) emits
+  `virtual:didact-typst` with empty `math`/`diagrams`, the shared `mathCss`,
+  and a `pages` map of `() => import('virtual:didact-typst/page/<stem>')`
+  loaders. Each `virtual:didact-typst/page/<stem>` module exports only that
+  page's `{ math, diagrams, mathCss }`; an unknown stem fails the build with
+  the offending module id. The app entry therefore never contains page SVGs
+  and a navigation fetches exactly one page's chunk. `perPage: false` (the
+  default) stays byte-identical to the eager single-module output.
+- Lazy routing: `mountSite` keeps the current page visible while a page's
+  loader runs, marks the document pane busy (`aria-busy`, root class
+  `lw-loading`), and applies the route — render, canonical hash write,
+  `onNavigate` — only after the artifacts are cached. A newer navigation
+  cancels the older route; `SiteHandle.ready` resolves after the initial
+  route (including its artifact load) and `idle` after the current pending
+  route. Mount-time indices (heading slugs, search, link labels) use the
+  eager artifacts, so in split mode a heading formula's slug falls back to
+  its org source text. Eager artifacts remain the fallback whenever a page
+  has no loader.
 - Packages: every `@preview/name:version` import resolves from
   packages.typst.org during the build — no allowlist, versions pinned in the
   org source. The content browser path receives only the resulting strings:
@@ -223,14 +263,14 @@ diagram; a plain `typst` block stays a kernel block.
 - Failure: an unknown package or invalid Typst aborts the build with the
   page, the block's first non-prelude code line, then `file:line` and hints;
   every failing block is listed in one error. A blank diagram is rejected by
-  `apps/site/typst/check.ts`; a missing artifact renders the literal source
-  (`$src$`, or `$$src$$` for display math) or `Figure unavailable.` in
-  `pre.lw-diagram-missing` (diagram), never
-  a hole.
-- Review surface: the diagram section of `apps/site/src/pages/typst.org` has
-  one figure per supported pattern (23 at present). The structural gate's unit tests live in
-  `apps/site/typst/check.test.ts`; `pnpm typst:check` compiles the pages and
-  runs the same gate.
+  `packages/vite/src/typst/check.ts`; a missing artifact renders the literal
+  source (`$src$`, or `$$src$$` for display math) or `Figure unavailable.` in
+  `pre.lw-diagram-missing` (diagram), never a hole.
+- Verification: static diagrams live inline across all lesson pages where each
+  concept is taught (with `apps/site/src/pages/typst.org` demonstrating
+  `fletcher`, `lilaq`, and `cetz` alongside prose math and interactive Typst
+  blocks). The structural gate's unit tests live in `packages/vite/test/`;
+  `pnpm typst:check` compiles every page and runs the same gate.
 - JSPI is required by the build engine only; content pages work in browsers
   without JSPI (the interactive kernel still needs it).
 
@@ -239,15 +279,16 @@ Authoring rules, package policy, HTML-export trade-off, and verification:
 
 ## apps/site responsibilities
 
-- Thin composition: glob `src/pages/*.org` raw, order them by the
-  `PAGE_ORDER` array in `src/main.ts` (stems of the page files; the nav
-  title comes from each file's `#+TITLE:` line), register
-  `[asm64Kernel, riscvKernel, mipsKernel, cKernel, cppKernel, wasmKernel,
-  pythonKernel, sqlKernel, matlabKernel, jsKernel, regexKernel,
-  lispKernel, elispKernel, prologKernel, luaKernel, typstKernel]`, mount
-  with `pages`.
+- Thin composition: glob `src/pages/*.org` raw, resolve them with
+  `resolvePages(sources, PAGE_ORDER)` (the nav title comes from each file's
+  `#+TITLE:` line), register all seventeen kernels
+  `[asm64Kernel, riscvKernel, mipsKernel, cKernel, cppKernel, fortranKernel,
+  wasmKernel, pythonKernel, sqlKernel, matlabKernel, jsKernel, regexKernel,
+  lispKernel, elispKernel, prologKernel, luaKernel, typstKernel]`, and mount
+  with `mountSite()`.
 - `src/pages/*.org`: one lesson per kernel (`x86-64-assembly`, `riscv`,
-  `mips`, `c`, `cpp`, `wasm`, `python`, `sql`, `matlab`, `lua`,
+  `mips`, `c`, `cpp`, `fortran`, `wasm`, `python`, `sql`, `matlab`, `lua`,
   `javascript`, `regex`, `lisp`, `elisp`, `prolog`, `typst`), with per-block
-  controls, breakpoints, panel attach/detach, pages.
-- index.html (noscript in body), favicon optional, title plain text.
+  controls, breakpoints, panel attach/detach, and cross-page links.
+- `vite.config.ts` wires `@didact/vite` (`didactVite()`).
+- `index.html` (noscript in body), favicon optional, title plain text.

@@ -317,6 +317,39 @@ describe('panels and stepping (the under-the-hood story)', () => {
     expect(second.finished).toBe(true);
     expect(second.steps).toBe(first.steps);
   });
+
+  it('continues past a paused breakpoint when run() is called again with the same breakpoint', async () => {
+    const s = lispKernel.createSession();
+    await s.load('(define x 10)\n(define y (+ x 5))\n(display y)');
+    const paused = await s.run([2]);
+    expect(paused.finished).toBe(false);
+    expect(paused.pausedAt).toBe(2);
+    const done = await s.run([2]);
+    expect(done.finished).toBe(true);
+    expect(done.pausedAt).toBeUndefined();
+    const con = s.state().find((p): p is Extract<Panel, { kind: 'console' }> => p.kind === 'console');
+    expect(con!.text).toBe('15');
+    s.dispose();
+  });
+
+  it(':session resume() shares the heap and global env, and reset() clears shared state', async () => {
+    const s = lispKernel.createSession();
+    await s.load('(define xs (list 1 2))\n(define (head) (car xs))');
+    expect((await s.run()).finished).toBe(true);
+
+    const r = await s.resume!('(display (list (head) (length xs)))');
+    expect(r).toEqual({ ok: true, summary: 'resumed · 1 forms' });
+    const run2 = await s.run();
+    expect(run2.finished).toBe(true);
+    const con = s.state().find((p): p is Extract<Panel, { kind: 'console' }> => p.kind === 'console');
+    expect(con!.text).toBe('(1 2)');
+
+    s.reset();
+    const afterReset = await s.run();
+    expect(afterReset.finished).toBe(false);
+    expect(afterReset.error).toBe('unbound variable: head (line 1)');
+    s.dispose();
+  });
 });
 
 describe('error mapping and honesty', () => {

@@ -24,8 +24,11 @@ function displayNameOf(f: { name: string; exportName: string | null }): string {
 export class WasmSession implements Session {
   private module: Module | null = null;
   private machine: Machine | null = null;
+  /** Line we already paused at: resuming runs past this occurrence. */
+  private resumeLine: number | null = null;
 
   async load(src: string): Promise<LoadResult> {
+    this.resumeLine = null;
     try {
       this.module = compile(src);
     } catch (e) {
@@ -44,12 +47,17 @@ export class WasmSession implements Session {
     const bps = breakpoints !== undefined ? new Set(breakpoints) : null;
     while (!m.finished && m.error === null) {
       const line = m.currentLine();
-      // Pause *before* running an instruction whose source line is a break.
-      if (bps !== null && line !== null && bps.has(line)) {
-        return { ...this.result(m), pausedAt: line };
+      if (line !== this.resumeLine) {
+        // Pause *before* running an instruction whose source line is a break.
+        if (bps !== null && line !== null && bps.has(line)) {
+          this.resumeLine = line;
+          return { ...this.result(m), pausedAt: line };
+        }
+        this.resumeLine = null;
       }
       m.step();
     }
+    this.resumeLine = null;
     return this.result(m);
   }
 
@@ -57,11 +65,14 @@ export class WasmSession implements Session {
     const m = this.machine;
     if (m === null) return { ran: false, result: { finished: false, steps: 0, error: 'nothing is loaded' } };
     if (m.finished || m.error !== null) return { ran: false, result: this.result(m) };
+    const resume = this.resumeLine;
     m.step();
+    if (resume !== null && m.currentLine() !== resume) this.resumeLine = null;
     return { ran: true, result: this.result(m) };
   }
 
   reset(): void {
+    this.resumeLine = null;
     if (this.module !== null) this.machine = new Machine(this.module);
   }
 
@@ -82,6 +93,7 @@ export class WasmSession implements Session {
   dispose(): void {
     this.machine = null;
     this.module = null;
+    this.resumeLine = null;
   }
 
   private result(m: Machine): RunResult {

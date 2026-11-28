@@ -1,26 +1,30 @@
-// cli.ts — acceptance/verification entry for the build-time pipeline.
+// cli.ts — acceptance/verification entry for the build-time Typst pipeline.
 //
-//   node apps/site/typst/cli.ts [pagesDir] [-o|--out <dir>]
+//   node packages/vite/src/typst/cli.ts [pagesDir] [-o|--out <dir>]
 //
-// Defaults to apps/site/src/pages. Reads every `*.org` file, prints the
-// formula/diagram counts per page and the total compile time. With `--out`,
-// also writes one `<page>-<n>.svg` per diagram so an author can open the
-// artifact the page will show. Compiling a diagram and passing the quality
-// gate either succeeds silently or throws, so exit code 0 with the counts
-// printed means every diagram passed.
+// Defaults to `./src/pages` in the current working directory. Reads every
+// `*.org` file, prints the formula/diagram counts per page and the total
+// compile time. With `--out`, also writes one `<page>-<n>.svg` per diagram so
+// an author can open the artifact the page will show. Compiling a diagram and
+// passing the quality gate either succeeds silently or throws, so exit code 0
+// with the counts printed means every diagram passed.
+//
 // Relative imports keep their `.ts` extensions so Node 24 can run this file
 // directly through type stripping — no bundler involved.
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { parseOrg } from '../../../packages/core/src/org.ts';
-import { collectTypstSources, diagramKey, type TypstArtifacts } from '../../../packages/core/src/typst-source.ts';
+import { parseOrg } from '@didact/core/org';
+import {
+  collectTypstSources,
+  diagramKey,
+  type TypstArtifacts,
+} from '@didact/core/typst';
 import { prerenderOrgPages } from './prerender.ts';
 
-const DEFAULT_PAGES = fileURLToPath(new URL('../src/pages', import.meta.url));
+const DEFAULT_PAGES = resolve(process.cwd(), 'src/pages');
 
-const USAGE = `usage: node apps/site/typst/cli.ts [pagesDir] [-o|--out <dir>]
+const USAGE = `usage: node packages/vite/src/typst/cli.ts [pagesDir] [-o|--out <dir>]
 
   pagesDir        directory of *.org pages (default: ${DEFAULT_PAGES})
   -o, --out <dir> also write every diagram as <page>-<n>.svg
@@ -28,7 +32,7 @@ const USAGE = `usage: node apps/site/typst/cli.ts [pagesDir] [-o|--out <dir>]
 
 environment:
   TYPST_PACKAGE_BASE_URL  package mirror (default https://packages.typst.org)
-  TYPST_NO_PACKAGE_CACHE=1  ignore apps/site/.typst-cache for this run`;
+  TYPST_NO_PACKAGE_CACHE=1  ignore .typst-cache for this run`;
 
 function parseArgs(argv: string[]): { dir: string; out: string | null } {
   const positional: string[] = [];
@@ -106,7 +110,12 @@ async function main(): Promise<void> {
   }
 
   const sources: Record<string, string> = {};
-  const counts: { name: string; math: number; diagrams: number; keys: string[] }[] = [];
+  const counts: {
+    name: string;
+    math: number;
+    diagrams: number;
+    keys: string[];
+  }[] = [];
   for (const file of files) {
     const name = file.slice(0, -'.org'.length);
     const text = await readFile(join(dir, file), 'utf8');

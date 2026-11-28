@@ -36,9 +36,14 @@ type Frame =
 const S = (n: string) => Sym.intern(n);
 
 
+export interface SharedState {
+  heap: Heap;
+  global: Env;
+}
+
 export class Machine {
-  readonly heap = new Heap();
-  readonly global = new Env('global', null);
+  readonly heap: Heap;
+  readonly global: Env;
   readonly stack: Frame[] = [];
   focus: Focus;
   steps = 0;
@@ -48,8 +53,17 @@ export class Machine {
   lastValue: Value = VOID;
   output = '';
 
-  constructor(program: Form[], builtins: Map<string, Value>) {
-    for (const [name, v] of builtins) this.global.vars.set(name, v);
+  constructor(program: Form[], builtins: Map<string, Value>, shared?: SharedState) {
+    this.heap = shared?.heap ?? new Heap();
+    this.global = shared?.global ?? new Env('global', null);
+    if (shared !== undefined) this.heap.fresh.clear();
+    // Re-bind macroexpand-1 so it delegates to this active machine instance;
+    // keep any user bindings already defined in a resumed global environment.
+    for (const [name, v] of builtins) {
+      if (shared === undefined || name === 'macroexpand-1' || !this.global.vars.has(name)) {
+        this.global.vars.set(name, v);
+      }
+    }
     if (program.length === 0) { this.focus = { t: 'halt' }; return; }
     this.focus = { t: 'eval', form: program[0]!, env: this.global, line: lineOf(program[0]!, 1) };
     if (program.length > 1) this.stack.push({ t: 'seq', rest: program.slice(1), env: this.global, line: 1 });

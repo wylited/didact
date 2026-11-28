@@ -38,6 +38,8 @@ export class LuaSession implements Session {
   private prevValues = new Map<string, string>();
   /** A crashed run keeps reporting its error until reset() (house pattern). */
   private runError: string | null = null;
+  /** Line we last paused on, so a resumed run executes it first. */
+  private pausedLine: number | null = null;
 
   async load(src: string): Promise<LoadResult> {
     try {
@@ -45,6 +47,10 @@ export class LuaSession implements Session {
     } catch (e) {
       this.program = null;
       this.interp = null;
+      this.gen = null;
+      this.pending = null;
+      this.runError = null;
+      this.pausedLine = null;
       if (e instanceof ParseError || e instanceof LexError) {
         return { ok: false, line: e.line, message: e.message };
       }
@@ -52,6 +58,35 @@ export class LuaSession implements Session {
     }
     this.reset();
     return { ok: true, summary: `loaded · ${this.program.body.length} top-level statements` };
+  }
+
+  /** Continue this session's globals (_G) and table heap with another chunk. */
+  async resume(src: string): Promise<LoadResult> {
+    if (this.interp === null) return this.load(src);
+    let program: Program;
+    try {
+      program = parse(src);
+    } catch (e) {
+      if (e instanceof ParseError || e instanceof LexError) {
+        return { ok: false, line: e.line, message: e.message };
+      }
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+    this.program = program;
+    this.interp = new Interpreter(program, {
+      globals: this.interp.globals,
+      tables: this.interp.tables,
+    });
+    this.gen = null;
+    this.pending = null;
+    this.prevLocals = new Map();
+    this.prevGlobals = new Map();
+    this.prevTables = new Map();
+    this.prevTableIds = new Set();
+    this.prevValues = new Map();
+    this.runError = null;
+    this.pausedLine = null;
+    return { ok: true, summary: `resumed · ${program.body.length} top-level statements` };
   }
 
   reset(): void {
@@ -65,6 +100,7 @@ export class LuaSession implements Session {
     this.prevTableIds = new Set();
     this.prevValues = new Map();
     this.runError = null;
+    this.pausedLine = null;
   }
 
   // -- driver (house pattern from kernel-javascript) -----------------------
@@ -78,6 +114,8 @@ export class LuaSession implements Session {
 
   private consume(): void {
     if (this.pending === null) return;
+    this.pausedLine = null;
+    this.pending = null;
     this.pending = this.gen!.next();
   }
 
@@ -101,6 +139,16 @@ export class LuaSession implements Session {
     if (this.runError !== null) return this.result({ finished: false, error: this.runError });
     const bps = breakpoints ?? [];
     this.snapshotPrev(); // `changed` flags diff across this run segment
+    // Resuming after a pause first executes the paused statement itself
+    // (otherwise the same pending line would re-trip its breakpoint).
+    if (this.pending !== null && !this.pending.done
+      && this.pausedLine !== null && this.pausedLine === this.pending.value.line) {
+      try {
+        this.consume();
+      } catch (e) {
+        return this.fail(e);
+      }
+    }
     for (;;) {
       let next: IteratorResult<YieldInfo, void>;
       try {
@@ -113,6 +161,7 @@ export class LuaSession implements Session {
         return this.result({ exit: 'exit(0)' });
       }
       if (bps.includes(next.value.line)) {
+        this.pausedLine = next.value.line;
         return this.result({ pausedAt: next.value.line });
       }
       try {
@@ -142,11 +191,17 @@ export class LuaSession implements Session {
     try {
       this.consume();
     } catch (e) {
-        // baseline stays at the step's start for the error view
+      // baseline stays at the step's start for the error view
       return { ran: true, result: this.fail(e) };
     }
-    // baseline for the next step's `changed` flags
-    return { ran: true };
+    const nextLine = this.pending !== null && !this.pending.done ? this.pending.value.line : undefined;
+    return {
+      ran: true,
+      result: this.result({
+        ...(nextLine !== undefined ? { pausedAt: nextLine } : {}),
+        ...(this.interp.isDone() ? { exit: 'exit(0)' } : {}),
+      }),
+    };
   }
 
   /** Freeze the current display state as the next diff's baseline. */
@@ -171,9 +226,12 @@ export class LuaSession implements Session {
   }
 
   dispose(): void {
+    this.program = null;
     this.interp = null;
     this.gen = null;
     this.pending = null;
+    this.runError = null;
+    this.pausedLine = null;
   }
 
   // -- panels --------------------------------------------------------------

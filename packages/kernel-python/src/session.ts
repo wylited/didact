@@ -6,7 +6,7 @@
 //    recreates the dict, so re-running a block starts from an empty slate.
 //  - load(src) is a compile() gate: CPython's own SyntaxError, with
 //    CPython's own line number, is surfaced verbatim. Engine-boot failures
-//    surface as line-0 load failures.
+//    surface as line-less load failures.
 //  - stdout/stderr are captured via setStdout/setStderr `write` handlers —
 //    every chunk verbatim, in write order — then flushed and reset at run
 //    end, so an unflushed tail neither vanishes nor leaks into the next
@@ -31,7 +31,7 @@
 
 import type { PyodideInterface } from 'pyodide';
 import type { PyProxy } from 'pyodide/ffi';
-import { loadEngine, serializedLive } from './vendor';
+import { loadEngine, serialized } from './vendor';
 import { TOOLKIT_SOURCE } from './toolkit';
 import {
   buildPanels,
@@ -110,12 +110,12 @@ export class PythonSession implements Session {
     try {
       py = await this.engine();
     } catch (e) {
-      return { ok: false, line: 0, message: `failed to load the Python engine: ${message(e)}` };
+      return { ok: false, message: `failed to load the Python engine: ${message(e)}` };
     }
     this.py = py;
     let verdict: string | null;
     try {
-      verdict = await serializedLive(async () => {
+      verdict = await serialized(async () => {
         await this.ensureHelpers(py);
         const syntax = (await this.helper(py, 'lw_check(src)', { src })) as unknown;
         if (syntax !== null && syntax !== undefined && syntax !== '') return String(syntax);
@@ -124,7 +124,7 @@ export class PythonSession implements Session {
       });
     } catch (e) {
       if (keepState) this.clearBlockView();
-      return { ok: false, line: 0, message: `compile check failed: ${message(e)}` };
+      return { ok: false, message: `compile check failed: ${message(e)}` };
     }
     if (typeof verdict === 'string') {
       const [line, msg] = JSON.parse(verdict) as [number, string];
@@ -177,16 +177,17 @@ export class PythonSession implements Session {
 
   async run(): Promise<RunResult> {
     const py = this.py;
-    const ns = this.ns;
-    if (!py || !ns || this.src === null) {
+    if (!py || this.src === null) {
       return { finished: false, steps: 0, error: 'nothing is loaded — press Run first' };
     }
     if (this.failure !== null) {
       return { finished: false, steps: 0, error: this.failure.error };
     }
+    // Re-create a fresh namespace if reset() destroyed the previous one.
+    const ns = (this.ns ??= py.toPy({ __name__: '__main__' }));
     // steps stay 0: the block runs in one engine job, so there is no step
     // grain to count (see the module comment and features.stepping)
-    return this.episode(py, ns);
+    return this.episode(py, ns, this.src);
   }
 
   /** No stepping: see the module comment. */
@@ -198,7 +199,8 @@ export class PythonSession implements Session {
     this.epoch++;
     this.ns?.destroy();
     this.ns = null;
-    this.src = null;
+    // Preserve this.src and this.statements so `reset(); await run()` re-runs
+    // the loaded block in a fresh namespace.
     this.out = [];
     this.prevVars = null;
     this.vars = new Map();
@@ -210,7 +212,6 @@ export class PythonSession implements Session {
     this.annotations = [];
     this.progress = null;
     this.cursor = 0;
-    this.statements = [];
   }
 
   state(): Panel[] {
@@ -233,6 +234,8 @@ export class PythonSession implements Session {
 
   dispose(): void {
     this.reset();
+    this.src = null;
+    this.statements = [];
     this.py = null;
   }
 
@@ -243,70 +246,78 @@ export class PythonSession implements Session {
    * one snapshot of everything the x-ray shows. Any failure ends the job
    * with the failure story captured in the same serialized section.
    */
-  private async episode(py: PyodideInterface, ns: PyProxy): Promise<RunResult> {
+  private async episode(py: PyodideInterface, ns: PyProxy, src: string): Promise<RunResult> {
     const epoch = this.epoch;
-    const total = this.statements.length;
-    const from = this.cursor;
-    // the diff baseline: the reprs the namespace held before this run, so
-    // the vars panel can mark what the run changed (empty on a fresh block)
-    this.prevVars = new Map([...this.vars].map(([name, info]) => [name, info.repr] as const));
-    this.progress = { from: this.statements[from]?.first ?? 0, to: total, done: from, total, live: true };
-    this.installWriters(py);
-    let error: string | undefined;
-    try {
-      this.hook = String(await this.helper(py, 'lw_mode()'));
-      await this.helper(py, 'lw_start()');
-      // The block runs exactly as CPython compiled it (one exec, no per-
-      // statement recompiles), so every hit count is the interpreter's own.
-      // The hook samples its position; each sample re-reads the panels and
-      // re-renders, which is the progress heartbeat.
-      // Runs are not resumable at statement granularity: a second Run after
-      // a pause restarts the block (see the final summary for why).
-      await this.helper(py, 'lw_run(ns, True)', { ns });
-      if (this.epoch === epoch) this.cursor = total;
-    } catch (e) {
-      // the helper recorded the failure; its `text` is the lesson's own
-      // frames, so the console does not show pyodide's internals
-      error = message(e);
+    return serialized(async () => {
+      if (this.epoch !== epoch) return { finished: false, steps: 0 };
+      const total = this.statements.length;
+      const from = this.cursor;
+      // the diff baseline: the reprs the namespace held before this run, so
+      // the vars panel can mark what the run changed (empty on a fresh block)
+      this.prevVars = new Map([...this.vars].map(([name, info]) => [name, info.repr] as const));
+      this.progress = { from: this.statements[from]?.first ?? 0, to: total, done: from, total, live: true };
+      this.installWriters(py);
+      let error: string | undefined;
       try {
-        this.failure = (await this.json<FailureData | null>(py, 'lw_fail_exc()'))
-          ?? { error, traceback: [] };
-        error = this.failure.error;
-        this.out.push((this.failure.text ?? message(e)).trimEnd() + '\n');
-        this.locals = new Map(Object.entries(
-          (await this.json<Record<string, VarInfo>>(py, 'lw_locals()')) ?? {},
-        ));
-      } catch {
-        this.failure = { error, traceback: [] };
+        await this.ensureHelpers(py);
+        // Recompile this block into the shared helper state so `reset(); run()`
+        // and interleaved sessions always execute and trace this block with
+        // fresh zeroed hit counts.
+        await this.helper(py, 'lw_compile(src)', { src });
+        this.hook = String(await this.helper(py, 'lw_mode()'));
+        await this.helper(py, 'lw_start()');
+        // The block runs exactly as CPython compiled it (one exec, no per-
+        // statement recompiles), so every hit count is the interpreter's own.
+        // The hook samples its position; each sample re-reads the panels and
+        // re-renders, which is the progress heartbeat.
+        // Runs are not resumable at statement granularity: a second Run after
+        // a pause restarts the block (see the final summary for why).
+        await this.helper(py, 'lw_run(ns, True)', { ns });
+        if (this.epoch === epoch) this.cursor = total;
+      } catch (e) {
+        // the helper recorded the failure; its `text` is the lesson's own
+        // frames, so the console does not show pyodide's internals
+        error = message(e);
+        try {
+          this.failure = (await this.json<FailureData | null>(py, 'lw_fail_exc()'))
+            ?? { error, traceback: [] };
+          error = this.failure.error;
+          this.out.push((this.failure.text ?? message(e)).trimEnd() + '\n');
+          this.locals = new Map(Object.entries(
+            (await this.json<Record<string, VarInfo>>(py, 'lw_locals()')) ?? {},
+          ));
+        } catch {
+          this.failure = { error, traceback: [] };
+        }
+      } finally {
+        try {
+          await this.helper(py, 'lw_stop()');
+        } catch {
+          // removing the hook must never mask the run's own result
+        }
+        try {
+          py.runPython('import sys; sys.stdout.flush(); sys.stderr.flush()');
+        } catch {
+          // flushing must never mask the run's own result
+        }
+        py.setStdout();
+        py.setStderr();
       }
-    } finally {
-      try {
-        await this.helper(py, 'lw_stop()');
-      } catch {
-        // removing the hook must never mask the run's own result
+      if (this.epoch === epoch) {
+        await this.refresh(py, epoch);
+        const last = this.cursor === 0 ? undefined : this.statements[this.cursor - 1];
+        this.progress = {
+          from: last?.first ?? 0,
+          to: last?.last ?? 0,
+          done: this.cursor,
+          total,
+          live: false,
+        };
       }
-      try {
-        py.runPython('import sys; sys.stdout.flush(); sys.stderr.flush()');
-      } catch {
-        // flushing must never mask the run's own result
-      }
-      py.setStdout();
-      py.setStderr();
-    }
-    if (this.epoch === epoch) {
-      await this.refresh(py, epoch);
-      const last = this.cursor === 0 ? undefined : this.statements[this.cursor - 1];
-      this.progress = {
-        from: last?.first ?? 0,
-        to: last?.last ?? 0,
-        done: this.cursor,
-        total,
-        live: false,
-      };
-    }
-    if (error !== undefined) return { finished: false, steps: 0, error };
-    const finished = this.cursor >= total;
-    return finished ? { finished: true, steps: 0 } : { finished: false, steps: 0 };
+      if (error !== undefined) return { finished: false, steps: 0, error };
+      const finished = this.cursor >= total;
+      return finished ? { finished: true, steps: 0 } : { finished: false, steps: 0 };
+    });
   }
 
   private installWriters(py: PyodideInterface): void {

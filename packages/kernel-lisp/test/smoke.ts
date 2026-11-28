@@ -6,6 +6,7 @@
 // round-trip of every lesson block against its #+RESULTS.
 
 
+import { readFileSync } from 'node:fs';
 import { lispKernel, Machine, makeBuiltins, readProgram, renderWrite, withHeap } from '../src/index';
 import type { Panel } from '../src/index';
 
@@ -135,7 +136,7 @@ console.log('session · lesson round-trip');
 {
   const blocks: string[] = [];
   const expected: string[] = [];
-  const org = await Bun.file(`${import.meta.dir}/../lesson/lesson.org`).text();
+  const org = readFileSync(new URL('../lesson/lesson.org', import.meta.url), 'utf8');
   const lines = org.split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (lines[i]!.startsWith('#+BEGIN_SRC lisp')) {

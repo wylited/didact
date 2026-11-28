@@ -1,7 +1,8 @@
 // @ts-check
+import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
-export default tseslint.config(
+export default defineConfig(
   {
     ignores: [
       '**/dist/**',
@@ -10,7 +11,7 @@ export default tseslint.config(
       'apps/site/public/**',
     ],
   },
-  ...tseslint.configs.recommended,
+  tseslint.configs.recommended,
   {
     // prefer-const is a stylistic rule; this repo bans stylistic rules.
     // `_`-prefixed args are intentional "acknowledged, unused" markers

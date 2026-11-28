@@ -50,10 +50,15 @@ export interface Assignment {
 
 export class RuntimeErr extends LuaError {}
 
+export interface SharedState {
+  globals: Table;
+  tables: Table[];
+}
+
 export class Interpreter {
   readonly globals: Table;
   /** Every table ever allocated (no GC — the heap panel is cumulative). */
-  readonly tables: Table[] = [];
+  readonly tables: Table[];
   readonly frames: Frame[] = [];
   out = '';
   private metaDepth = 0;
@@ -61,12 +66,22 @@ export class Interpreter {
   private ops = 0;
   private builtins: Record<string, Builtin>;
 
-  constructor(readonly program: Program) {
-    this.globals = new Table();
-    this.globals.internal = true;
-    this.tables.push(this.globals);
+  constructor(readonly program: Program, shared?: SharedState) {
     this.builtins = makeBuiltins();
-    this.installGlobals();
+    if (shared !== undefined) {
+      this.globals = shared.globals;
+      this.tables = shared.tables;
+      // Re-bind built-in `print` so output lands in this chunk's console.
+      const curPrint = this.globals.rawGet('print');
+      if (curPrint === null || (curPrint instanceof Builtin && curPrint.name === 'print')) {
+        this.globals.rawSet('print', new Builtin('print', (args) => { this.print(args); return []; }));
+      }
+    } else {
+      this.globals = new Table();
+      this.globals.internal = true;
+      this.tables = [this.globals];
+      this.installGlobals();
+    }
   }
 
   private installGlobals(): void {

@@ -23,18 +23,15 @@
              "Liberation Mono", "DejaVu Sans Mono", monospace;
 }
 
-*, *::before, *::after {
-  border-radius: 0 !important;
+.lw-site,
+.lw-site *,
+.lw-site *::before,
+.lw-site *::after,
+.lw-block,
+.lw-block *,
+.lw-tip {
+  border-radius: 0;
   box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  background: var(--lw-paper);
-  color: var(--lw-prose);
-  font-family: var(--lw-serif);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ---- layout: navigation rail (232px, collapsible) | document | panel rail */
@@ -46,6 +43,8 @@ body {
   background: var(--lw-paper);
   color: var(--lw-prose);
   font-family: var(--lw-serif);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .lw-layout {
@@ -142,7 +141,7 @@ body {
   }
 }
 
-/* clearly clickable brand wordmark with subtle editorial underline cue */
+/* brand wordmark: layout for both link and non-link forms */
 .lw-brand {
   display: flex;
   align-items: baseline;
@@ -154,15 +153,18 @@ body {
   line-height: 1.2;
   letter-spacing: -0.01em;
   color: var(--lw-ink);
+  overflow-wrap: anywhere;
+}
+/* link affordances belong to the anchor only */
+a.lw-brand {
   text-decoration: underline;
   text-decoration-color: var(--lw-hairline-strong);
   text-decoration-thickness: 1px;
   text-underline-offset: 0.24em;
-  overflow-wrap: anywhere;
   cursor: pointer;
   transition: text-decoration-color 120ms ease;
 }
-.lw-brand::after {
+a.lw-brand::after {
   content: 'home';
   font-family: var(--lw-mono);
   font-size: 0.64rem;
@@ -173,11 +175,11 @@ body {
   text-decoration: none;
   transition: opacity 120ms ease, color 120ms ease;
 }
-.lw-brand:hover,
-.lw-brand:focus-visible { text-decoration-color: var(--lw-ink); }
-.lw-brand:hover::after,
-.lw-brand:focus-visible::after { opacity: 1; color: var(--lw-ink); }
-.lw-brand:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: -2px; }
+a.lw-brand:hover,
+a.lw-brand:focus-visible { text-decoration-color: var(--lw-ink); }
+a.lw-brand:hover::after,
+a.lw-brand:focus-visible::after { opacity: 1; color: var(--lw-ink); }
+a.lw-brand:focus-visible { outline: 1px solid var(--lw-ink); outline-offset: -2px; }
 
 .lw-nav-search {
   display: block;

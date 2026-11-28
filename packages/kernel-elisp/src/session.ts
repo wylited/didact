@@ -58,6 +58,36 @@ export class ElispSession implements Session {
     };
   }
 
+  /** Continue this session's runtime (symbols, functions, buffers, hooks,
+   *  keymaps, special declarations) with another block's forms. */
+  async resume(src: string): Promise<LoadResult> {
+    if (this.machine === null) return this.load(src);
+    let forms: Form[];
+    try {
+      forms = readProgram(src);
+    } catch (e) {
+      if (e instanceof LispError) return { ok: false, line: e.line, message: e.message };
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+    if (forms.length === 0) {
+      return { ok: false, line: 1, message: 'no forms to evaluate' };
+    }
+    this.resumeLine = null;
+    this.forms = forms;
+    this.lexicalBinding = detectLexicalBinding(src);
+    const lines = (forms as Form[] & { lines?: number[] }).lines;
+    const source: LoadedSource = { forms, lines, lexicalBinding: this.lexicalBinding };
+    const prev = this.machine;
+    this.machine = new ElispMachine(source, prev.runtime, {
+      special: prev.special,
+      touched: prev.touched,
+    });
+    return {
+      ok: true,
+      summary: `resumed · ${forms.length} form${forms.length === 1 ? '' : 's'}${this.lexicalBinding ? ' · lexical binding' : ''}`,
+    };
+  }
+
   private discard(): void {
     this.machine = null;
     this.forms = null;

@@ -291,6 +291,47 @@ describe('session contract', () => {
     expect(consoleOf(s.state())).toBe('1\n');
     s.dispose();
   });
+
+  it('continues past a paused breakpoint when run() is called again with the same breakpoint', async () => {
+    const s = luaKernel.createSession();
+    await s.load(`local a = 1\nlocal b = 2\nprint(a + b)`);
+    const p = await s.run([2]);
+    expect(p.pausedAt).toBe(2);
+    expect(p.finished).toBe(false);
+    const done = await s.run([2]);
+    expect(done.finished).toBe(true);
+    expect(done.pausedAt).toBeUndefined();
+    expect(consoleOf(s.state())).toBe('3\n');
+    s.dispose();
+  });
+
+  it('step() returns a RunResult and dispose() prevents reset() resurrection', async () => {
+    const s = luaKernel.createSession();
+    await s.load(`x = 1\ny = 2`);
+    const st = await s.step();
+    expect(st).toEqual({ ran: true, result: { finished: false, steps: 2, pausedAt: 2 } });
+    s.dispose();
+    s.reset();
+    expect((await s.run()).error).toBe('no program loaded');
+  });
+
+  it(':session resume() preserves _G and tables, and reset() clears shared state', async () => {
+    const s = luaKernel.createSession();
+    await s.load(`shared = {10, 20}\nfunction total() return shared[1] + shared[2] end`);
+    expect((await s.run()).finished).toBe(true);
+
+    const r = await s.resume!(`shared[3] = 30\nprint(total(), #shared)`);
+    expect(r).toEqual({ ok: true, summary: 'resumed · 2 top-level statements' });
+    const run2 = await s.run();
+    expect(run2.finished).toBe(true);
+    expect(consoleOf(s.state())).toBe('30\t3\n');
+
+    s.reset();
+    const afterReset = await s.run();
+    expect(afterReset.finished).toBe(false);
+    expect(afterReset.error).toMatch(/^line 1: attempt to index a nil value/);
+    s.dispose();
+  });
 });
 
 function tablesRows(panels: Panel[]): { text: string; bytes: string }[] {

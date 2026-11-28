@@ -1,5 +1,6 @@
 // Smoke: drive PythonSession against the real Pyodide build in node — the
-// same interpreter the browser lazy-loads from public/vendor-python/. The
+// same interpreter the browser lazy-loads from vendor-python/ (dev, served
+// from node_modules) or dist/vendor-python/ (build). The browser loader
 // itself (script tag + indexURL against vendor-python/) needs a DOM; here
 // the engine is injected through the session's loader seam instead.
 //

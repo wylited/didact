@@ -24,6 +24,9 @@ export class MipsSession implements Session {
   async load(src: string): Promise<LoadResult> {
     const result = assemble(src);
     if (!result.ok) {
+      this.program = null;
+      this.machine = null;
+      this.comments = new Map();
       const first = result.errors[0] ?? { line: 1, message: 'cannot assemble this block' };
       return { ok: false, line: first.line, message: first.message };
     }
@@ -110,6 +113,8 @@ export class MipsSession implements Session {
 
   dispose(): void {
     this.machine = null;
+    this.program = null;
+    this.comments = new Map();
   }
 }
 

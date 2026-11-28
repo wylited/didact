@@ -239,7 +239,7 @@ export function valueToString(v: Value): string {
 // ─── the interpreter ───────────────────────────────────────────────────────
 
 export class Interpreter {
-  readonly global = new Env(null);
+  readonly global: Env;
   /** Call stack: one entry per live function frame (+ the script frame). */
   frames: Frame[] = [];
   /** Microtasks (Promise.then callbacks) and macrotasks (setTimeout). */
@@ -250,9 +250,12 @@ export class Interpreter {
   error: RuntimeErr | null = null;
 
   private program: Program;
+  private readonly resumed: boolean;
 
-  constructor(program: Program) {
+  constructor(program: Program, sharedGlobal?: Env) {
     this.program = program;
+    this.global = sharedGlobal ?? new Env(null);
+    this.resumed = sharedGlobal !== undefined;
     this.frames.push({ name: 'global', env: this.global, line: 1 });
     installGlobals(this);
   }
@@ -262,8 +265,9 @@ export class Interpreter {
 
   /** Main generator: body → drain microtasks → one macrotask → repeat. */
   *runAll(): Generator<YieldInfo, void> {
-    // Top-level declarations hoist into the global scope before line 1 runs.
-    this.hoistDeclares(this.program.body, this.global, this.global);
+    // Top-level declarations hoist into the global scope before line 1 runs;
+    // a resumed `:session` block may re-declare top-level bindings.
+    this.hoistDeclares(this.program.body, this.global, this.global, this.resumed);
     yield* this.execStmts(this.program.body, this.global, this.global);
     // Tasks are shifted only *after* their marker yield is consumed, so a
     // paused driver still shows the pending task at the head of its queue.
@@ -429,13 +433,18 @@ export class Interpreter {
    * block's let/const bind here but stay uninitialized (the TDZ) until
    * their declarator executes.
    */
-  hoistDeclares(stmts: Statement[], blockEnv: Env, fnEnv: Env): void {
+  hoistDeclares(stmts: Statement[], blockEnv: Env, fnEnv: Env, allowRedeclare = false): void {
     for (const s of stmts) {
       switch (s.type) {
         case 'VarDecl':
           if (s.kind === 'var') {
-            if (!fnEnv.vars.has(s.name)) fnEnv.vars.set(s.name, { value: undefined, kind: 'var', initialized: true });
-          } else if (!blockEnv.vars.has(s.name)) {
+            const existing = fnEnv.vars.get(s.name);
+            if (existing === undefined) {
+              fnEnv.vars.set(s.name, { value: undefined, kind: 'var', initialized: true });
+            } else if (allowRedeclare && existing.kind !== 'var') {
+              fnEnv.vars.set(s.name, { value: existing.value, kind: 'var', initialized: true });
+            }
+          } else if (!blockEnv.vars.has(s.name) || allowRedeclare) {
             blockEnv.vars.set(s.name, { value: undefined, kind: s.kind, initialized: false });
           }
           break;

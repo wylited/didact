@@ -1,4 +1,4 @@
-# didact — Design Contract (v0.2 refactor)
+# didact — Design Contract
 
 One product, kernel-extensible, textbook-styled. Binding for all packages.
 
@@ -23,10 +23,12 @@ adding kernels a matter of implementing one package against
 ## Behavior
 
 1. **No global toolbar.** Every executable block owns its controls, inline in
-   its header: `▶ Run`, `⤵ Step`, `⟲ Reset machine`, `↺ Revert code`,
-   `⧉ Copy Code`, and a monospace status text. Kernels may opt out of
+   its header: `▶ Run`, `⤵ Step`, `⟲` (Reset session), `↺` (Revert code),
+   `⧉` (Copy code), and a monospace status text. Kernels may opt out of
    stepping (`features.stepping === false` hides the Step button
-   entirely).
+   entirely). Every block editor supports Cmd/Ctrl+Enter (Run), Shift+Enter
+   (Step when supported), and Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z (or Ctrl+Y)
+   undo/redo.
 2. **Run** = assemble + execute to completion (kernel budget bounded); if the
    session is paused or mid-step and the editor text is unchanged, Run
    continues from that point instead of restarting. The block being executed
@@ -52,12 +54,12 @@ adding kernels a matter of implementing one package against
    block and mapped through document edits. Reset clears pause state but
    keeps breakpoints. Kernels without the feature get no gutter click
    behavior.
-5. **Reset machine vs Revert code.** Reset machine resets that block's
+5. **Reset session vs Revert code.** `⟲` (Reset session) resets that block's
    session to its initial state, clears the current-line mark and the
    results-slot output, and forces the next Run to re-assemble from the
    current editor text; code, saved draft, and breakpoints are kept; status
-   shows `reset · ready`. Revert code restores the org sample and drops the
-   saved draft, leaving the session and its output running.
+   shows `reset · ready`. `↺` (Revert code) restores the org sample and drops
+   the saved draft, leaving the session and its output running.
 6. **Under-the-hood panel** is the third zone: a rail between the document
    and the navigation rail (the page's right edge while the navigator stays
    left) that is zero-width (and hairline-invisible) until a panel attaches, then
@@ -87,24 +89,25 @@ adding kernels a matter of implementing one package against
    by a run/step, a Reset, or a failed load (rule 6), so nothing is painted at
    mount.
 10. **Pages.** One mount renders one org document at a time in a layout with
-    a single navigation rail at either edge (left by default) beside the
-    document column, plus the panel zone (rule 6) when attached. The rail
-    shows one list — this page's Contents, the Pages list (rule 11), or live
-    search results — never more than one. Page titles appear as links in the
-    Pages list (active underlined and near-black, others gray).
-    Routing is hash-based and uniform: a page's fragment is
-    `#/<page-slug>`, a section's is `#/<page-slug>/<section-slug>`
-    (slugs kebab-cased: lowercased, non-alphanumeric runs collapsed
-    to single '-'). Every nav and contents link is a real fragment
-    href; on mount the site reads `location.hash` and shows that page
-    (unknown or missing page slug → the first page, and the URL is
-    normalized to name the page actually shown), and `hashchange`
-    (nav click, contents click, back/forward) either switches the
-    rendered document — disposing the old page's blocks and detaching
-    the panel — or scrolls within the current page. A section hash
-    scrolls to its heading — smooth within a page, instant after a
-    page swap; a page-level hash (or an unknown section) means the
-    top of the page.
+    a single collapsible navigation rail at either edge (left by default)
+    beside the document column, plus the panel zone (rule 6) when attached.
+    The rail shows one list — this page's Contents, the Pages list (rule 11),
+    or live search results — never more than one. Page titles appear as links
+    in the Pages list (active underlined and near-black, others gray).
+    Routing defaults to hash-based (`routing: 'hash'`), with an in-memory
+    mode (`routing: 'memory'`) for embedded hosts that must not touch
+    `location.hash`: a page's fragment is `#/<page-slug>`, a section's is
+    `#/<page-slug>/<section-slug>` (slugs kebab-cased: lowercased,
+    non-alphanumeric runs collapsed to single '-'). Every nav and contents
+    link is a real fragment href; on mount in hash mode the site reads
+    `location.hash` and shows that page (unknown or missing page slug →
+    `initialPage` or the first page, and the URL is normalized to name the
+    page actually shown), and `hashchange` (nav click, contents click,
+    back/forward) either switches the rendered document — disposing the old
+    page's blocks and detaching the panel — or scrolls within the current
+    page. A section hash scrolls to its heading — smooth within a page,
+    instant after a page swap; a page-level hash (or an unknown section)
+    means the top of the page.
 11. **Rail contents.** The h2/h3 headings (org depth 1/2) of the
     rendered page build the navigation rail's Contents view: one
     small gray link per heading (h3 indented), each a real deep link
@@ -122,30 +125,36 @@ adding kernels a matter of implementing one package against
 
 ## Visual language — "textbook, light"
 
-- **Light mode only.** Prose: near-black `#1a1a1a` on white `#ffffff`.
-  No accent color: emphasis via weight, italic, and hairline rules.
-- **No rounded corners anywhere** (`border-radius: 0` globally).
+- **Light mode only.** Primary ink `#171717` (`--lw-ink`) and editorial body
+  prose `#2b2b2b` (`--lw-prose`) on white `#ffffff` (`--lw-paper`). No accent
+  color: emphasis via weight, italic, and hairline rules.
+- **No rounded corners inside Didact** (`border-radius: 0` scoped to
+  `.lw-site`, `.lw-block`, and `.lw-tip`, never applied globally to the host
+  document).
 - Fonts: prose **Atkinson Hyperlegible** (self-hosted via
   `@fontsource/atkinson-hyperlegible`, regular/italic/bold); code, status,
   machine panel: `ui-monospace, SF Mono, Menlo, monospace`.
-- Code editor theme: **Ayu Light** (use `thememirror`'s ayu theme; if its
-  export name differs, hand-roll the small Ayu Light tag palette — verify
-  against installed package, do not ship a guess).
-- Structure: hairline `#d0d0d0` borders, generous whitespace, small-caps
-  section labels. Changed registers marked with a left rule + tint, not
-  color-coded text. Status/error states: error text may use dark red
-  `#8b1a1a`; success states stay black-on-white (no green).
-- Layout: at rest two zones — the navigation rail (232px, seesawing
-  between the left edge and the right one on demand) and the document
-  center — plus a third zone, the panel rail, sliding from 0 to
+- Code editor theme: **Ayu Light** (`ayuLight` from `thememirror`),
+  overridable via `mountSite({ editorTheme })`.
+- Structure: hairline `#e6e6e2` (`--lw-hairline`) and interactive `#c6c6c0`
+  (`--lw-hairline-strong`) borders, `#f4f4f1` (`--lw-surface-alt`) subtle
+  fills, `#6e6e68` (`--lw-gray`) metadata, generous whitespace, small-caps
+  section labels. Changed registers marked with a left rule + warm tint
+  (`#f6f0dc`, `--lw-tint`), not color-coded text. Status/error states: error
+  text uses dark red `#991b1b` (`--lw-error`) with `#fef2f2` (`--lw-error-bg`)
+  fills; success states stay ink-on-paper/tint (no green).
+- Layout: at rest two zones — the collapsible navigation rail (232px,
+  seesawing between the left edge and the right one on demand, or collapsing
+  to `0` with a floating reveal button `⇥` / `⇤`) and the document center —
+  plus a third zone, the panel rail, sliding from 0 to
   `clamp(420px, 42vw, 720px)` when attached (28vw < 1420px, where it
   would squeeze the document); while attached at 900-1199px the panel is
   `clamp(400px, 40vw, 460px)`, and below 900px it is full-width under the
   document. The rail shows **one list at a time**:
-  a header bar carries a small-caps `Contents | Pages` switch and a
-  compact side toggle, and below it either this page's section tree or
-  the page list renders in the same rhythm — never both, never split
-  top and bottom. On a large display the reading
+  a header bar carries a small-caps `Contents | Pages` switch, a compact side
+  toggle (`←`/`→`), and a hide button (`⇤`/`⇥`); below it either this page's
+  section tree or the page list renders in the same rhythm — never both, never
+  split top and bottom. On a large display the reading
   **measure and the body type grow together** — wider text, bigger
   letters: 74ch at 16px, 82ch at 17px from 1600px, 90ch at 18px from
   2200px (a `ch` is 0.648em in Atkinson Hyperlegible, so 74ch is
@@ -171,16 +180,17 @@ adding kernels a matter of implementing one package against
   one shown list — Contents, Pages, or live search results — scrolls on
   its own when the viewport is short); zones
   stack vertically < 900px, where the rail header still shows the
-  Contents | Pages switch and the side toggle, the page list wraps
-  horizontally, and the panel (full-width, under the document) appears only
-  while attached.
+  Contents | Pages switch, the side toggle, and the hide toggle, the page list
+  wraps horizontally, and the panel (full-width, under the document) appears
+  only while attached.
   Page-level chrome is the rail's wordmark/search masthead and small-caps
   switch, the plain document title header, and the lesson footer; there
   is no global toolbar. The navigator remembers which side it
-  was put on (`localStorage['didact:nav-side']`), and `mountSite` can
-  set the initial side with `navSide` and the initial list with
-  `navView` (the example site opens on Pages; the core default is
-  Contents).
+  was put on (`<prefix>nav-side`, default `didact:nav-side`) and whether it
+  is collapsed (`<prefix>nav-hidden`, default `didact:nav-hidden`), and
+  `mountSite` can set the initial side with `navSide` and the initial list
+  with `navView` (the example site opens on Pages; the core default is
+  Contents). Full token reference: [`docs/theming.md`](theming.md).
 
 ### Rail masthead, search, and completion
 
@@ -231,14 +241,14 @@ gray with a dotted border and underline. The state word is always part of
 the text, so weight, rules, and color only reinforce it — never replace it.
 Passed outcomes persist; failed outcomes live only in the session.
 
-## Org-mode compatibility (binding, unchanged from v0.1)
+## Org-mode compatibility (binding)
 
 Org-first content: lessons are real `.org` files imported via Vite `?raw`,
 parsed client-side by the core org-subset parser (grammar in this file).
 `#+BEGIN_SRC <lang>` blocks are executable when `lang` matches a registered
-kernel id (`asm`, `riscv`, `mips`, `c`, `cpp`, `python`, `typst`, `wasm`,
-`sql`, `matlab`, `lua`, `javascript`, `regex`, `lisp`, `elisp`, `prolog`);
-other languages render read-only.
+kernel id (`asm`, `riscv`, `mips`, `c`, `cpp`, `fortran`, `python`, `typst`,
+`wasm`, `sql`, `matlab`, `lua`, `javascript`, `regex`, `lisp`, `elisp`,
+`prolog`); other languages render read-only.
 The org file must remain valid org-babel source in Emacs.
 
 ### Org-subset grammar
@@ -329,7 +339,8 @@ trusted markup sections `html-panel`; the block's restore link
 `restore-sample`. Site: `nav` (the navigation rail, left or right), `brand`,
 `search`, `search-results` (one result link per hit),
 `rail-view-contents` / `rail-view-pages` (the Contents | Pages switch
-buttons, `aria-pressed`), `rail-side` (the side toggle), `nav-list` (the
+buttons, `aria-pressed`), `rail-side` (the side toggle), `rail-hide` /
+`rail-show` (collapse and reveal buttons for the sidebar), `nav-list` (the
 pages list, present only in the Pages view), `nav-item` (one per page link;
 the active page also carries `lw-nav-active` and `aria-current="page"`),
 `org-warnings` (diagnostics banner root, one `org-warning` per item), `page`

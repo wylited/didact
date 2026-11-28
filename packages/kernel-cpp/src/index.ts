@@ -1,4 +1,4 @@
-export { cppKernel } from './kernel';
+export { cppKernel, createCppKernel } from './kernel';
 export { CppSession, CLANG_ARGS, COMPILE_BANNER } from './session';
 export { setVendorBase, loadEngine } from './vendor';
 export type { Tree, RunOptions, ClangBundle } from './vendor';

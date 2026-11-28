@@ -454,6 +454,45 @@ console.log(outer(5));`);
     expect(consoleOf(session.state())).toBe('11\n');
     session.dispose();
   });
+
+  it('continues past a paused breakpoint when run() is called again with the same breakpoint', async () => {
+    const session = jsKernel.createSession();
+    await session.load(`var x = 1;
+x = x + 10;
+console.log(x);`);
+    const p = await session.run([2]);
+    expect(p.pausedAt).toBe(2);
+    expect(p.finished).toBe(false);
+    expect(fieldsOf(session.state()).get('global.x')?.value).toBe('1');
+    const done = await session.run([2]);
+    expect(done.finished).toBe(true);
+    expect(done.pausedAt).toBeUndefined();
+    expect(done.exit).toBe('exit(0)');
+    expect(consoleOf(session.state())).toBe('11\n');
+    session.dispose();
+  });
+});
+
+describe(':session resume', () => {
+  it('preserves global bindings across blocks, allows top-level re-declaration, and reset() clears shared state', async () => {
+    const session = jsKernel.createSession();
+    await session.load(`const base = 10;
+function addBase(n) { return n + base; }`);
+    expect((await session.run()).finished).toBe(true);
+
+    const r1 = await session.resume!(`const base = 20;
+console.log(addBase(5), base);`);
+    expect(r1).toEqual({ ok: true, summary: 'resumed · 2 top-level statements' });
+    const run2 = await session.run();
+    expect(run2.finished).toBe(true);
+    expect(consoleOf(session.state())).toBe('25 20\n');
+
+    session.reset();
+    const afterReset = await session.run();
+    expect(afterReset.finished).toBe(false);
+    expect(afterReset.error).toBe('line 2: addBase is not defined');
+    session.dispose();
+  });
 });
 
 // ─── budget & errors ───────────────────────────────────────────────────────

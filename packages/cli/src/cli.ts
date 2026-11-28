@@ -1,17 +1,19 @@
-#!/usr/bin/env bun
-// cli.ts — `didact check`: lint lesson pages and optionally verify RESULTS.
+#!/usr/bin/env node
+// cli.ts — `didact check`: lint lesson pages and optionally verify RESULTS/CHECK.
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { checkPages, pythonRunner } from './check';
+import { fileURLToPath } from 'node:url';
+import { checkPages, pythonRunner } from './check.ts';
 
 const USAGE = `usage: didact check [--pages DIR] [--run] [--python CMD] [page-stem ...]
 
-Lint org lesson pages under DIR (default: apps/site/src/pages) for
-constructs the renderer drops. With --run, execute every block in a fresh
-interpreter and compare stdout with its #+RESULTS block.
+Lint org lesson pages under DIR for constructs the renderer drops.
+With --run, execute every block in a fresh interpreter and compare stdout
+against its canned #+RESULTS block and/or #+CHECK expectation.
 
-  --pages DIR   directory of *.org pages
+  --pages DIR   directory of *.org pages (default: src/pages if present,
+                otherwise apps/site/src/pages)
   --run         execute blocks (Python only; other languages are skipped)
   --python CMD  Python executable for --run (default: python3)
   page-stem     restrict the check to these pages
@@ -47,13 +49,17 @@ export function parseCliArgs(argv: string[]): CliArgs {
       args.run = true;
     } else if (arg === '--pages' || arg === '--python') {
       const value = argv[++i];
-      if (value === undefined) throw new Error(`${arg} requires a value`);
+      if (value === undefined || value === '') throw new Error(`${arg} requires a value`);
       if (arg === '--pages') args.pagesDir = value;
       else args.python = value;
     } else if (arg.startsWith('--pages=')) {
-      args.pagesDir = arg.slice('--pages='.length);
+      const value = arg.slice('--pages='.length);
+      if (value === '') throw new Error('--pages requires a value');
+      args.pagesDir = value;
     } else if (arg.startsWith('--python=')) {
-      args.python = arg.slice('--python='.length);
+      const value = arg.slice('--python='.length);
+      if (value === '') throw new Error('--python requires a value');
+      args.python = value;
     } else if (arg.startsWith('-')) {
       throw new Error(`unknown option: ${arg}`);
     } else {
@@ -61,6 +67,17 @@ export function parseCliArgs(argv: string[]): CliArgs {
     }
   }
   return args;
+}
+
+/**
+ * Resolve the default pages directory when `--pages` is omitted: prefer
+ * `src/pages` in `cwd` (consumer sites and `apps/site`), otherwise fall back
+ * to `apps/site/src/pages` (the monorepo root).
+ */
+export function defaultPagesDir(cwd: string = process.cwd()): string {
+  const local = resolve(cwd, 'src/pages');
+  if (existsSync(local)) return local;
+  return resolve(cwd, 'apps/site/src/pages');
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -77,18 +94,12 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  const pagesDir = resolve(process.cwd(), args.pagesDir ?? 'apps/site/src/pages');
+  const pagesDir =
+    args.pagesDir !== null ? resolve(process.cwd(), args.pagesDir) : defaultPagesDir();
   if (!existsSync(pagesDir)) {
     console.error(`pages directory not found: ${pagesDir}`);
     return 1;
   }
-
-  const wanted = args.stems.length === 0 ? null : new Set(args.stems);
-  const pageNames = readdirSync(pagesDir)
-    .filter((name) => name.endsWith('.org'))
-    .map((name) => name.slice(0, -'.org'.length))
-    .filter((stem) => wanted === null || wanted.has(stem))
-    .sort();
 
   const report = await checkPages({
     pagesDir,
@@ -96,6 +107,13 @@ async function main(argv: string[]): Promise<number> {
     run: args.run,
     runner: args.run ? pythonRunner(args.python ?? 'python3') : undefined,
   });
+
+  const wanted = args.stems.length === 0 ? null : new Set(args.stems);
+  const pageNames = readdirSync(pagesDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.org'))
+    .map((entry) => entry.name.slice(0, -'.org'.length))
+    .filter((stem) => wanted === null || wanted.has(stem))
+    .sort();
 
   const diagnosticsByPage = new Map<string, typeof report.diagnostics>();
   for (const diagnostic of report.diagnostics) {
@@ -122,7 +140,7 @@ async function main(argv: string[]): Promise<number> {
         (pageFailures === 0 ? 'ok' : `${pageFailures} failures`),
     );
     for (const diagnostic of diagnostics) {
-      console.log(`  line ${diagnostic.line}: ${diagnostic.message}`);
+      console.log(`  line ${diagnostic.line} [${diagnostic.severity}]: ${diagnostic.message}`);
     }
     for (const block of badBlocks) {
       const label = block.name === null ? block.lang : `${block.lang} ${block.name}`;
@@ -140,8 +158,21 @@ async function main(argv: string[]): Promise<number> {
   return failures > 0 ? 1 : 0;
 }
 
-const isEntryPoint = (import.meta as ImportMeta & { main?: boolean }).main === true;
-if (isEntryPoint) {
+/** Detect direct invocation under both Bun and Node 24 (including bin symlinks). */
+function isEntryPoint(): boolean {
+  if ((import.meta as ImportMeta & { main?: boolean }).main === true) {
+    return true;
+  }
+  const invoked = process.argv[1];
+  if (invoked === undefined) return false;
+  try {
+    return realpathSync(invoked) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint()) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (err: unknown) => {

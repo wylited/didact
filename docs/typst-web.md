@@ -5,8 +5,8 @@ nothing else: different packages, different engines, different lifetimes.
 
 | | content pipeline | executable kernel |
 |---|---|---|
-| code | `apps/site/typst/{engine,prerender,check,vite,cli}.ts` | `packages/kernel-typst` |
-| runs | Node, once at build/dev | browser, per block, on Run |
+| code | `packages/vite/src/typst/{engine,prerender,check,vite,cli}.ts` | `packages/kernel-typst` |
+| runs | Node, once at build/dev (`didactTypst()` / `didactVite()`) | browser, per block, on Run |
 | output | `virtual:didact-typst` → `TypstArtifacts` | SVG page in the block panel |
 | state | one serialized compiler for the whole build | one `Session` per block |
 | shipped engine | none | 22.8 MB wasm + five fonts, JSPI |
@@ -33,7 +33,7 @@ pipeline never imports the kernel.
 
 ## Artifact contract
 
-Produced by `prerenderOrgPages` in `apps/site/typst/prerender.ts`, typed in
+Produced by `prerenderOrgPages` in `packages/vite/src/typst/prerender.ts`, typed in
 `packages/core/src/typst-source.ts`:
 
 ```ts
@@ -90,8 +90,11 @@ feature.
 
 ## Build cache and mirrors
 
-Package archives are cached on disk at `apps/site/.typst-cache/` (git-ignored).
-One file per archive URL, named from the URL path, so
+Package archives are cached on disk at `<vite cacheDir>/didact-typst` by
+default in Vite builds (or the `cacheDir` passed to `didactTypst()` /
+`didactVite()`, e.g. `apps/site/vite.config.ts` shares `../../.typst-cache`),
+and at `<cwd>/.typst-cache` for the standalone CLI. One file per archive URL,
+named from the URL path, so
 `https://packages.typst.org/preview/fletcher-0.5.8.tar.gz` becomes
 `preview_fletcher-0.5.8.tar.gz`. A hit is served as an in-memory gzip response;
 a miss is fetched, written, and returned. Only `res.ok` responses are stored, a
@@ -107,31 +110,27 @@ share one download.
 | `TYPST_PACKAGE_BASE_URL` | mirror base for archives and `packageBaseUrl` (default `https://packages.typst.org`) |
 | `TYPST_NO_PACKAGE_CACHE=1` | skip cache reads and writes; the fetch wrapper and in-flight dedupe stay |
 
-Delete the directory and restart the build to force a refetch: artifacts are
-memoized in the process, so a running dev server does not recompile unchanged
-blocks. The cache is keyed by URL, not by
-version constraint: bumping `#import "@preview/foo:0.2.0"` to `0.3.0` fetches a
-new archive, while replaying `0.2.0` never touches the network. Formula and
-diagram memoization is separate and lives only in the process (see
-`prerender.ts`); it is not persisted.
-
-Measured on this page set (23 diagrams and 8 formulas, all in `typst.org`):
-cold **5.2 s**, warm **4.4 s**. The difference is the package downloads; the
-rest is sequential document compiles, so a larger page set scales with
-compiles, not with the cache.
+Delete the cache directory and restart the build to force a refetch: artifacts
+are memoized in the process, so a running dev server does not recompile
+unchanged blocks. The cache is keyed by URL, not by version constraint: bumping
+`#import "@preview/foo:0.2.0"` to `0.3.0` fetches a new archive, while
+replaying `0.2.0` never touches the network. Formula and diagram memoization is
+separate and lives only in the process (see `prerender.ts`); it is not
+persisted.
 
 ## Artifact delivery and size
 
-`virtual:didact-typst` is one static module, so every page's artifacts land in
-the entry chunk: measured 23 diagrams ≈ 578 KB, 8 MathML ≈ 1.4 KB, 8 SVG math
-fallbacks ≈ 44 KB (the fallbacks alone are 31× the MathML they back up), plus
-the 1.5 KB layout CSS — 669 KB raw including JSON escaping, ≈ 104 KB gzip.
-Visiting the x86 page still downloads `typst.org`'s figures.
+`virtual:didact-typst` is one static module, so every page's pre-rendered
+math and diagram strings land in the entry chunk (both MathML and an SVG
+fallback per formula, plus each compiled SVG diagram and Typst's MathML layout
+CSS). Visiting any page avoids runtime compilation completely, at the cost of
+bundling the site's static figures up front.
 
-The next step, if size matters, is one artifact module per page selected on
-navigation (Vite code-splits the dynamic import), or emitting each diagram as
-a standalone `.svg` asset. Dropping the SVG math fallback is the cheap win:
-it only serves browsers without `MathMLElement`.
+The next step, if bundle size matters for a large multi-chapter book, is one
+artifact module per page selected on navigation (Vite code-splits the dynamic
+import), or emitting each diagram as a standalone `.svg` asset. Dropping the
+SVG math fallback is the cheapest win: it only serves browsers without
+`MathMLElement`.
 
 ## Authoring rules
 
@@ -187,78 +186,40 @@ so a long body wraps to more lines instead of widening the node; cetz
 `arc(position, …)` takes a point *on* the arc, while `circle(centre, radius:)`
 takes the centre — mixing them draws the arc around the wrong point.
 
-## Figures on the Typst page
+## Figures across the lesson pages
 
-`apps/site/src/pages/typst.org` is both the reference and the regression
-surface: its diagram section holds one figure per supported pattern, grouped
-by package, and each figure is the rendered SVG plus its `#+CAPTION:`; the
-block's Typst source is not echoed on the page. There is no
-separate gallery page — a figure that teaches a mechanism belongs where the
-mechanism is explained.
+Static diagrams live directly inside the lessons where each mechanism is
+explained — there is no separate gallery page. `apps/site/src/pages/typst.org`
+introduces both layers side by side with three representative static figures
+(`@preview/fletcher` lifecycle flow, `@preview/lilaq` damped oscillation plot,
+and `@preview/cetz` unit-circle geometry), inline and display prose math, and
+three interactive live Typst blocks. Every static diagram carries a
+`#+CAPTION:` line so each figure has a `<figcaption>` and therefore an
+accessible name.
 
-Open the page after `pnpm build` (or in `pnpm dev`) and check each row. Every
-block carries a `#+CAPTION:` line, so each figure has a `<figcaption>` and
-therefore an accessible name. The build compiles all of them on every build,
-so the page is also a regression suite: a broken block fails with
-`typst diagram in typst.org:<line> (source line):` and Typst's own `file:line`
-diagnostic.
+Adding a figure is adding a `#+BEGIN_SRC typst :results svg` block to the
+section it belongs to. Keep figures deterministic (no `datetime.today()`, no
+`random`) so repeated builds agree and the memoized SVG stays valid.
 
-| # | figure | expected result |
-|---|---|---|
-| 1 | four-stage pipeline (fletcher) | four square-cornered boxes, three solid forward arrows, a labelled solid retry path with one arrowhead entering the source |
-| 2 | decision branch | diamond with `no`/`yes` exits; arrowheads stop short of the box borders |
-| 3 | shape vocabulary | pill, hexagon, parallelogram, circle; four distinct outlines |
-| 4 | C++ build pipeline | eight boxes in two rows, left-to-right then right-to-left arrows, executable highlighted |
-| 5 | damped oscillation (lilaq) | decaying sine, labelled axes |
-| 6 | two series | boxed legend, solid curve plus dashed comparison curve |
-| 7 | scatter | seven markers whose size follows the `size:` list |
-| 8 | bars + reference line | four bars; the dashed budget line sits above the first and third, below the second and fourth |
-| 9 | stem | stems from the baseline with a marker at each tip |
-| 10 | filled band | translucent band between two bounds, solid centre line |
-| 11 | box plots | two boxes with medians, whiskers, one outlier |
-| 12 | wide plot | `width="100%"` on the `<svg>`; shrinks with the column past 680 px |
-| 13 | circle geometry (cetz) | tangent at the radius endpoint (perpendicular to it), dashed radius, base ray, centre dot, angle arc |
-| 14 | right triangle | grid, closed triangle, square right-angle marker at `B`, labels outside |
-| 15 | cubic Bézier | smooth curve, dashed control polygon, control points marked |
-| 16 | filled polygon | translucent fill under the outline, grid visible through it |
-| 17 | matrix equation | display math as outlines — a diagram, not MathML |
-| 18 | commutative square | four formula nodes, four labelled arrows |
-| 19 | default margin | no `#set page` in the block; 6 pt gutter from the prepend |
-| 20 | text-only | words only, no shapes; Typst outlines text, so the gate passes it via `<use>` |
-| 21 | tall flow | vertical stack, intrinsic width, not hit by the responsive rule |
-| 22 | gradient fill | smooth teal-to-white ramp inside the shape |
-| 23 | unicode math | Greek letters, subscripts, and an arrow with no fallback boxes |
-
-Adding a figure is adding an org block to the section it belongs to. Keep new
-figures deterministic (no `datetime.today()`, no `random`) so two builds agree
-and the memoized SVG stays valid.
-
-The structural gate (`apps/site/typst/check.ts`, unit tests in
-`apps/site/typst/check.test.ts`) runs on every compiled diagram before it is
-cached. It rejects a missing `<svg>` root, a missing or malformed `viewBox`, a
-`viewBox` without positive area, zero drawables, and zero real geometry. It
-ignores the contents of `defs`/`clipPath`/`mask`/`pattern`/`symbol`/`marker`,
-invisible elements (`display:none`, `visibility:hidden`, zero opacity,
-`fill:none` without stroke), and Typst's white page background — a `path` from
-the origin or a full-canvas `rect`. A `text` element alone counts as ink, but
-Typst exports text as glyph outlines, so figure 20 passes through the `<use>`
-rule rather than the `<text>` one. It warns (never throws) only for diagrams
-narrower than 20 px; the 1400 px upper bound is unreachable because
-`compileDiagram` has already rewritten wider pages to `width="100%"`.
+The structural gate (`packages/vite/src/typst/check.ts`, unit tests in
+`packages/vite/test/`) runs on every compiled diagram before it is cached. It
+rejects a missing `<svg>` root, a missing or malformed `viewBox`, a `viewBox`
+without positive area, zero drawables, and zero real geometry. It ignores the
+contents of `defs`/`clipPath`/`mask`/`pattern`/`symbol`/`marker`, invisible
+elements (`display:none`, `visibility:hidden`, zero opacity, `fill:none`
+without stroke), and Typst's white page background — a `path` from the origin
+or a full-canvas `rect`. A `text` element alone counts as ink, and Typst's
+outlined glyphs pass through the `<use>` rule. It warns (never throws) only
+for diagrams narrower than 20 px; the 1400 px upper bound is unreachable
+because `compileDiagram` has already rewritten wider pages to `width="100%"`.
 
 ## Would HTML export be better?
 
-Per `~/research/typst/html-pdf-dual-target.md` §3–4 (ignore census and
-`html.frame`): Typst's HTML export is good for prose —
-MathML, real text, selectable and accessible, and it reflows with CSS.
-Drawings and figures drop out of HTML output unless wrapped in `html.frame`,
-which pins layout to a box.
-
-Hence this split: prose math uses the HTML compile (MathML), diagrams never
-try to be HTML and stay self-rendered SVG from a normal page compile. HTML
-export would not remove the SVG path, and would not reproduce arbitrary
-`#set page` / absolute placement; treating it as a replacement would silently
-lose diagrams.
+Typst's HTML export works well for prose math — producing real, selectable,
+accessible MathML that reflows with CSS — whereas drawings and figures drop
+out of HTML output unless pinned inside `html.frame` boxes. Keeping prose math
+on HTML/MathML export and static diagrams on normal single-page SVG export
+gives accessible math without losing vector graphics or arbitrary page layout.
 
 ## Failure modes and verification
 
@@ -273,22 +234,21 @@ lose diagrams.
 Checks:
 
 ```sh
-pnpm build                       # sync vendors, tsc --noEmit, Vite build (runs plugin + gate)
-pnpm typst:check                 # same as the CLI call below
-node apps/site/typst/cli.ts      # default pages dir; per-page counts + total ms
-node apps/site/typst/cli.ts -o /tmp/svg   # also write every diagram
-pnpm vitest run apps/site/typst  # gate unit tests
+pnpm build                                   # Vite build (runs plugin, gate, and vendor emit)
+pnpm typst:check                             # compiles all pages and runs the structural gate
+node packages/vite/src/typst/cli.ts apps/site/src/pages
+node packages/vite/src/typst/cli.ts apps/site/src/pages -o /tmp/svg   # also write every diagram
+pnpm vitest run packages/vite                # plugin + gate unit tests
 ```
 
 These commands run TypeScript directly, which needs Node 24.
 
-The CLI reads every `*.org` in the directory (default
-`apps/site/src/pages`, resolved from the script, so it works from the repo
-root), prints
-`<page>: N math, M diagrams` per file and one total line with key counts, CSS
-size, and compile time. It uses the same `prerenderOrgPages` as the plugin, so
-a clean CLI run and a clean build agree. Compiling and passing the gate are
-silent, so exit code 0 together with the counts means every diagram passed;
-a failure throws with the page, line, and reason. `--out <dir>` additionally
-writes each diagram as `<page>-<n>.svg` and prints its intrinsic size, which is
-how you inspect a figure without running the site. `--help` prints usage.
+The CLI reads every `*.org` in the given directory (default `<cwd>/src/pages`,
+with no fallback), prints `<page>: N math, M diagrams`
+per file and one total line with key counts, CSS size, and compile time. It
+uses the same `prerenderOrgPages` as the plugin, so a clean CLI run and a
+clean build agree. Compiling and passing the gate are silent, so exit code 0
+together with the counts means every diagram passed; a failure throws with
+the page, line, and reason. `--out <dir>` additionally writes each diagram as
+`<page>-<n>.svg` and prints its intrinsic size, which is how you inspect a
+figure without running the site. `--help` prints usage.

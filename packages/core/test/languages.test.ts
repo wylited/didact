@@ -1,9 +1,12 @@
+// @vitest-environment happy-dom
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { StreamParser } from '@codemirror/language';
-import { editorLanguage } from '../src/languages';
+import { EditorView } from '@codemirror/view';
+import { createBlockEditor } from '../src/block-editor';
+import { loadEditorLanguage } from '../src/languages';
 import type { Kernel } from '../src/kernel';
 import { prologSpec, regexpSpec, sqlSpec, typstSpec, watSpec } from '../src/modes';
 
@@ -100,7 +103,7 @@ function highlight(mode: Tokenizer, line: string, shared?: unknown): string[] {
   return out;
 }
 
-describe('editorLanguage: syntax → CM6 extension mapping', () => {
+describe('loadEditorLanguage: syntax → CM6 extension mapping', () => {
   it('reads the union members the contract declares', () => {
     // Guards unionMembers(): an empty parse would make later tests vacuous.
     const members = unionMembers();
@@ -112,38 +115,50 @@ describe('editorLanguage: syntax → CM6 extension mapping', () => {
     expect(members.length).toBe(17);
   });
 
-  it('resolves every union member except plain, and never null for a declared mode', () => {
-    const nulls = unionMembers().filter((s) => editorLanguage(s) === null);
+  it('resolves every union member except plain, and never null for a declared mode', async () => {
+    const nulls: Syntax[] = [];
+    for (const syntax of unionMembers()) {
+      if ((await loadEditorLanguage(syntax)) === null) nulls.push(syntax);
+    }
     expect(nulls).toEqual(['plain']);
   });
 
-  it('returns null for undefined (kernel default) and explicit plain', () => {
-    expect(editorLanguage(undefined)).toBeNull();
-    expect(editorLanguage('plain')).toBeNull();
-  });
-
-  it('returns null for unknown ids instead of crashing or reusing a dialect', () => {
-    const unknown = 'asm-pdp11' as Syntax;
-    expect(editorLanguage(unknown)).toBeNull();
+  it('returns null for undefined (kernel default), explicit plain, and unknown ids', async () => {
+    expect(await loadEditorLanguage(undefined)).toBeNull();
+    expect(await loadEditorLanguage('plain')).toBeNull();
+    expect(await loadEditorLanguage('asm-pdp11' as Syntax)).toBeNull();
     // 'asm' is a kernel *id*, never a syntax id — it must not borrow intel.
-    expect(editorLanguage('asm' as Syntax)).toBeNull();
+    expect(await loadEditorLanguage('asm' as Syntax)).toBeNull();
   });
 
-  it('gives each assembly dialect its own distinct extension instance', () => {
-    const intel = editorLanguage('asm-intel');
-    const riscv = editorLanguage('asm-riscv');
-    const mips = editorLanguage('asm-mips');
+  it('memoizes per syntax: repeated calls share one extension instance', async () => {
+    expect(await loadEditorLanguage('python')).toBe(await loadEditorLanguage('python'));
+    expect(await loadEditorLanguage('asm-intel')).toBe(await loadEditorLanguage('asm-intel'));
+    expect(await loadEditorLanguage('sql')).toBe(await loadEditorLanguage('sql'));
+  });
+
+  it('gives each assembly dialect its own distinct extension instance', async () => {
+    const intel = await loadEditorLanguage('asm-intel');
+    const riscv = await loadEditorLanguage('asm-riscv');
+    const mips = await loadEditorLanguage('asm-mips');
     expect(intel).not.toBe(riscv);
     expect(riscv).not.toBe(mips);
     expect(intel).not.toBe(mips);
   });
 
-  it('gives each written mode its own distinct extension instance', () => {
-    const modes = [
-      editorLanguage('sql'), editorLanguage('regexp'),
-      editorLanguage('wat'), editorLanguage('typst'), editorLanguage('prolog'),
-    ];
+  it('gives each written mode its own distinct extension instance', async () => {
+    const modes = await Promise.all([
+      loadEditorLanguage('sql'), loadEditorLanguage('regexp'),
+      loadEditorLanguage('wat'), loadEditorLanguage('typst'), loadEditorLanguage('prolog'),
+    ]);
+    expect(modes).not.toContain(null);
     expect(new Set(modes).size).toBe(5);
+  });
+
+  it('languages.ts imports no mode package at module top level', () => {
+    const src = readFileSync(resolve(HERE, '../src/languages.ts'), 'utf8');
+    expect(src).not.toMatch(/^import .* from '@codemirror\/(lang-|legacy-modes)/m);
+    expect(src).not.toMatch(/^import .* from '\.\/(asm|modes)'/m);
   });
 });
 
@@ -160,9 +175,9 @@ describe('every registered kernel declares a syntax that resolves', () => {
     expect([...declared.values()]).not.toContain('plain');
   });
 
-  it.each([...declared.entries()])('%s → %s', (id, syntax) => {
+  it.each([...declared.entries()])('%s → %s', async (id, syntax) => {
     expect(unionMembers(), `${id} declares a syntax outside the union`).toContain(syntax);
-    expect(editorLanguage(syntax), `${id} declares ${syntax}`).not.toBeNull();
+    expect(await loadEditorLanguage(syntax), `${id} declares ${syntax}`).not.toBeNull();
   });
 
   it('no kernel reuses a syntax meant for another language', () => {
@@ -379,5 +394,58 @@ describe('modes.ts: each tokenizer marks its language, not a neighbour', () => {
       SP, 'A:variableName', SP, '>=:operator', SP, 'B:variableName',
       '.:punctuation',
     ]);
+  });
+});
+
+describe('block editor language loading', () => {
+  /** A mount host attached to the happy-dom document. */
+  function host(): HTMLElement {
+    const parent = document.createElement('div');
+    document.body.appendChild(parent);
+    return parent;
+  }
+
+  const base = {
+    initialCode: 'x = 1\n',
+    canBreak: false,
+    canStep: false,
+    onRun: () => {},
+    onStep: () => {},
+    onDocChanged: () => {},
+  } as const;
+
+  it('upgrades a syntax-only editor in place and marks the syntax', async () => {
+    // Warm the loader so the upgrade lands within the awaited ticks.
+    await loadEditorLanguage('python');
+    const parent = host();
+    const view = createBlockEditor({ ...base, parent, language: null, syntax: 'python' });
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(view.dom.dataset.language).toBe('python');
+    } finally {
+      view.destroy();
+      parent.remove();
+    }
+  });
+
+  it('applies a host language override synchronously with no lazy marker', async () => {
+    const override = EditorView.contentAttributes.of({ 'data-language': 'override' });
+    const parent = host();
+    const view = createBlockEditor({
+      ...base,
+      parent,
+      language: override,
+      syntax: 'python',
+    });
+    try {
+      expect(view.contentDOM.getAttribute('data-language')).toBe('override');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(view.dom.dataset.language).toBeUndefined();
+    } finally {
+      view.destroy();
+      parent.remove();
+    }
   });
 });

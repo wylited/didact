@@ -13,7 +13,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { CLANG_ARGS, COMPILE_BANNER, CppSession } from '../src/session';
-import type { ClangBundle, Tree } from '../src/vendor';
+import { cppKernel, createCppKernel } from '../src/kernel';
+import { loadEngine, setVendorBase, type ClangBundle, type Tree } from '../src/vendor';
 
 // ────────────────────────── wasm assembly helpers ──────────────────────────
 
@@ -360,5 +361,30 @@ describe('CppSession: lifecycle', () => {
     await session.run();
     session.dispose();
     expect(session.state()).toEqual([]);
+  });
+});
+
+describe('cppKernel & createCppKernel', () => {
+  it('declares explicit features and creates a C++ kernel', () => {
+    expect(cppKernel.id).toBe('cpp');
+    expect(cppKernel.label).toBe('C++ · clang wasm');
+    expect(cppKernel.editorSyntax).toBe('cpp');
+    expect(cppKernel.features).toEqual({ breakpoints: false, stepping: false });
+
+    const custom = createCppKernel();
+    expect(custom.id).toBe('cpp');
+    expect(custom.features).toEqual({ breakpoints: false, stepping: false });
+  });
+
+  it('reports vendor-c/clang/ and setVendorBase hint on missing bundle and clears cache on setVendorBase', async () => {
+    createCppKernel({ vendorBase: 'file:///nonexistent-didact-cpp-v1/' });
+    await expect(loadEngine()).rejects.toThrow(
+      /file:\/\/\/nonexistent-didact-cpp-v1\/clang\/bundle\.js.*vendor-c\/clang\/.*setVendorBase/,
+    );
+
+    setVendorBase('file:///nonexistent-didact-cpp-v2');
+    await expect(loadEngine()).rejects.toThrow(
+      /file:\/\/\/nonexistent-didact-cpp-v2\/clang\/bundle\.js.*vendor-c\/clang\/.*setVendorBase/,
+    );
   });
 });

@@ -28,7 +28,19 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .typst-cache
+            apps/site/node_modules/.vite/didact-typst
+          key: typst-cache-${{ runner.os }}-${{ hashFiles('apps/site/src/pages/*.org') }}
+          restore-keys: |
+            typst-cache-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm check
+      - run: pnpm typst:check
       - run: pnpm build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

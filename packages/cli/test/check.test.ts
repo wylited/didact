@@ -1,9 +1,9 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { checkPages, pythonRunner } from '../src/check';
-import { parseCliArgs } from '../src/cli';
+import { defaultPagesDir, parseCliArgs } from '../src/cli';
 
 const dirs: string[] = [];
 
@@ -846,14 +846,36 @@ describe('checkPages: --run', () => {
 });
 
 describe('checkPages: page selection', () => {
-  it('throws when no pages match', async () => {
+  it('throws when the pages directory has no .org files', async () => {
     const empty = pages({});
     await expect(checkPages({ pagesDir: empty })).rejects.toThrow('no pages matched');
+  });
 
+  it('throws a clear error naming unknown requested page stems', async () => {
     const dir = pages({ 'one.org': '#+TITLE: One\n' });
     await expect(checkPages({ pagesDir: dir, pages: ['two'] })).rejects.toThrow(
-      'no pages matched',
+      'page not found: two',
     );
+    await expect(
+      checkPages({ pagesDir: dir, pages: ['one', 'two', 'three', 'two'] }),
+    ).rejects.toThrow('pages not found: two, three');
+  });
+
+  it('ignores *.org subdirectories cleanly', async () => {
+    const dir = pages({ 'one.org': '#+TITLE: One\n' });
+    mkdirSync(join(dir, 'nested.org'));
+
+    const report = await checkPages({ pagesDir: dir });
+
+    expect(report.pages).toBe(1);
+    expect(report.diagnostics).toEqual([]);
+    await expect(checkPages({ pagesDir: dir, pages: ['nested'] })).rejects.toThrow(
+      'page not found: nested',
+    );
+
+    const onlySubdir = pages({});
+    mkdirSync(join(onlySubdir, 'folder.org'));
+    await expect(checkPages({ pagesDir: onlySubdir })).rejects.toThrow('no pages matched');
   });
 
   it('filters by file stem', async () => {
@@ -928,13 +950,47 @@ describe('parseCliArgs', () => {
 
   it('accepts help forms', () => {
     expect(parseCliArgs(['--help']).help).toBe(true);
+    expect(parseCliArgs(['-h']).help).toBe(true);
     expect(parseCliArgs(['help']).help).toBe(true);
     expect(parseCliArgs(['check', '--help']).help).toBe(true);
+    expect(parseCliArgs(['check', '-h']).help).toBe(true);
+  });
+
+  it('parses equals-form options', () => {
+    expect(parseCliArgs(['check', '--pages=lessons', '--python=python3.12', 'intro'])).toEqual({
+      pagesDir: 'lessons',
+      run: false,
+      python: 'python3.12',
+      stems: ['intro'],
+      help: false,
+    });
+  });
+
+  it('rejects missing option values and unknown flags', () => {
+    expect(() => parseCliArgs(['check', '--pages'])).toThrow('--pages requires a value');
+    expect(() => parseCliArgs(['check', '--pages='])).toThrow('--pages requires a value');
+    expect(() => parseCliArgs(['check', '--python'])).toThrow('--python requires a value');
+    expect(() => parseCliArgs(['check', '--python='])).toThrow('--python requires a value');
+    expect(() => parseCliArgs(['check', '--bogus'])).toThrow('unknown option: --bogus');
+    expect(() => parseCliArgs(['check', '-x'])).toThrow('unknown option: -x');
   });
 
   it('rejects a missing or unknown subcommand', () => {
     expect(() => parseCliArgs([])).toThrow('missing command');
     expect(() => parseCliArgs(['lint'])).toThrow('unknown command: lint');
     expect(() => parseCliArgs(['--run'])).toThrow('unknown command: --run');
+  });
+});
+
+describe('defaultPagesDir', () => {
+  it('prefers src/pages when present and falls back to apps/site/src/pages', () => {
+    const consumer = mkdtempSync(join(tmpdir(), 'didact-consumer-'));
+    dirs.push(consumer);
+    mkdirSync(join(consumer, 'src', 'pages'), { recursive: true });
+    expect(defaultPagesDir(consumer)).toBe(join(consumer, 'src', 'pages'));
+
+    const monorepo = mkdtempSync(join(tmpdir(), 'didact-monorepo-'));
+    dirs.push(monorepo);
+    expect(defaultPagesDir(monorepo)).toBe(join(monorepo, 'apps', 'site', 'src', 'pages'));
   });
 });

@@ -108,9 +108,17 @@ const BUILTIN_NAMES = [
   'disp', 'fprintf', 'error', 'rand',
 ];
 
+/** Session-persistent state shared across org `:session` blocks. */
+export interface SharedState {
+  ws: Map<string, Mat>;
+  funcs: Map<string, FunctionDecl>;
+}
+
 // ─── interpreter ───────────────────────────────────────────────────────────
 
 export class Interpreter {
+  /** Shared base workspace + user functions (for `:session` resume). */
+  readonly shared: SharedState;
   /** Call stack: frame 0 is the script (base workspace); each function
    *  call pushes a frame with a private workspace. */
   frames: Frame[] = [];
@@ -124,15 +132,17 @@ export class Interpreter {
   loopSource: { name: string | null; rows: number; cols: number } | null = null;
 
   private program: Program;
-  private funcs = new Map<string, FunctionDecl>();
+  private funcs: Map<string, FunctionDecl>;
   private done = false;
   /** Set when the LAST executed statement was a base-workspace write. */
   private touch: WriteMark | null = null;
 
-  constructor(program: Program) {
+  constructor(program: Program, shared?: SharedState) {
     this.program = program;
+    this.shared = shared ?? { ws: new Map(), funcs: new Map() };
+    this.funcs = this.shared.funcs;
     for (const f of program.functions) this.funcs.set(f.name, f);
-    this.frames.push({ name: 'script', ws: new Map(), line: 1 });
+    this.frames.push({ name: 'script', ws: this.shared.ws, line: 1 });
   }
 
   *runAll(): Generator<YieldInfo, void> {

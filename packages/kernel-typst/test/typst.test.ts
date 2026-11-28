@@ -95,17 +95,15 @@ describe('TypstSession.load', () => {
     const session = new TypstSession();
     expect(await session.load('Hello')).toEqual({
       ok: false,
-      line: 0,
       message: 'engine unavailable: no WebAssembly JSPI in this browser',
     });
   });
 
-  it('reports non-diagnostic engine throws as failures', async () => {
+  it('reports non-diagnostic engine throws as failures without a source line', async () => {
     fakeEngine({ boom: new Error('wasm trap') });
     const session = new TypstSession();
     expect(await session.load('Hello')).toEqual({
       ok: false,
-      line: 0,
       message: 'engine failure: wasm trap',
     });
   });

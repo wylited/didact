@@ -2,9 +2,9 @@
 
 The engine is the `@yowasp/clang@22.0.0-git20542-10` npm dependency
 (pinned in `package.json` and `pnpm-lock.yaml`) — the same toolchain as
-`@didact/kernel-c`, same pinned version. `scripts/sync-vendors.mjs`
-therefore serves ONE shared copy from `node_modules/` under the app's
-`public/vendor-c/clang/`; this kernel's `src/vendor.ts` imports
+`@didact/kernel-c`, same pinned version. `didactVendors()`
+therefore serves ONE shared copy from `node_modules/` in dev and emits it
+under `vendor-c/clang/` in the build output; this kernel's `src/vendor.ts` imports
 `<vendor-base>/clang/bundle.js` from there (the bundle resolves every
 sibling asset relative to its own URL — no CDN is contacted at runtime).
 Loading is lazy: nothing is fetched until the first C++ block runs.

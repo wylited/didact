@@ -4,7 +4,8 @@
 //   @yowasp/clang 22.0.0-git20542-10 (real clang++ + wasm-ld + wasi-libc and
 //   libc++ sysroots, built for WebAssembly by the YoWASP project), an npm
 //   dependency of this package. kernel-c and kernel-cpp pin the same
-//   version, so sync-vendors serves ONE copy under public/vendor-c/clang/
+//   version, so @didact/vite (didactVendors()) serves ONE copy at
+//   vendor-c/clang/ (from node_modules in dev, emitted into dist/ on build)
 //   and this loader points at it — no duplicate ~105 MB download.
 //
 // How the engine finds its assets (verified by reading bundle.js): every
@@ -49,11 +50,22 @@ export function setVendorBase(url: string): void {
   enginePromise = null; // re-resolve on the next load
 }
 
-/** The bundle's URL: served copy in the browser, npm copy headless. */
+/** The bundle's URL: served copy in the browser, npm copy headless (unless overridden). */
 function bundleUrl(): string {
-  if (typeof document !== 'undefined') return `${vendorBase}clang/bundle.js`;
-  // Headless (bun): the engine is the @yowasp/clang npm dependency. Built
-  // from parts so Vite cannot rewrite it into a dead emitted asset.
+  if (typeof document !== 'undefined' || vendorBase !== '') {
+    return `${vendorBase}clang/bundle.js`;
+  }
+  // Headless (Node/Bun): resolve @yowasp/clang via import.meta.resolve so
+  // hoisted node_modules layouts work, falling back to the package-local
+  // node_modules path. Built from parts so Vite cannot rewrite it into a
+  // dead emitted asset.
+  if (typeof import.meta.resolve === 'function') {
+    try {
+      return import.meta.resolve(['@yowasp', 'clang'].join('/'));
+    } catch {
+      // fall back to sibling node_modules layout below
+    }
+  }
   const dir = '../node_modules/@yowasp/clang/gen/';
   return new URL(dir + 'bundle.js', import.meta.url).href;
 }
@@ -62,16 +74,25 @@ function bundleUrl(): string {
 export function loadEngine(): Promise<ClangBundle> {
   if (!enginePromise) {
     const url = bundleUrl();
-    enginePromise = import(/* @vite-ignore */ url).then(
+    const pending = import(/* @vite-ignore */ url).then(
       (mod: { runClang?: unknown }) => {
         if (typeof mod.runClang !== 'function') {
-          throw new Error(`clang bundle at ${url} does not export runClang`);
+          throw new Error(
+            `clang bundle at ${url} does not export runClang — verify vendor-c/clang/ assets or call setVendorBase()`,
+          );
         }
         return mod as ClangBundle;
       },
+      (cause: unknown) => {
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        throw new Error(
+          `failed to load clang bundle at ${url}: ${detail} — serve the vendored toolchain under vendor-c/clang/ or call setVendorBase()`,
+        );
+      },
     );
-    enginePromise.catch(() => {
-      enginePromise = null; // allow a retry after a transient fetch failure
+    enginePromise = pending;
+    pending.catch(() => {
+      if (enginePromise === pending) enginePromise = null; // allow a retry after a transient fetch failure
     });
   }
   return enginePromise;

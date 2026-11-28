@@ -1,8 +1,9 @@
 # `didact check`
 
-`didact check` lints the org lesson pages and, with `--run`, verifies that
-each block's `#+RESULTS:` block and `#+CHECK:` expected output still match
-what the code prints.
+`didact check` (`@didact/cli`) lints `.org` lesson pages and, with `--run`,
+verifies that each block's `#+RESULTS:` block and `#+CHECK:` expected output
+still match what the code prints. It runs natively on **Node 24+**
+(`#!/usr/bin/env node`) — no Bun installation is required.
 
 ```sh
 pnpm check                    # lint every page
@@ -17,16 +18,18 @@ didact check --run python      # only the python page
 didact check [--pages DIR] [--run] [--python CMD] [page-stem ...]
 ```
 
-- `--pages DIR` — directory of `*.org` pages (default:
-  `apps/site/src/pages` under the current directory).
-- `--run` — execute blocks and compare their stdout with the canned
+- `--pages DIR` — directory of `*.org` pages. When omitted, `didact check`
+  defaults to `src/pages` under the current working directory and falls back
+  to `apps/site/src/pages` (for monorepo root invocations).
+- `--run` — execute blocks and compare their stdout with both canned
   `#+RESULTS:` and any `#+CHECK:` expected output.
 - `--python CMD` — interpreter for `--run` (default `python3`).
 - `page-stem ...` — restrict the run to the named pages.
 - `-h`, `--help` — print usage.
 
-Pages are sorted by filename; a filter that matches nothing is an error
-(`no pages matched`).
+Pages are sorted by filename; passing an unknown `page-stem` is an error
+(`page not found: <stem>` / `pages not found: …`), and an empty pages
+directory fails with `no pages matched`.
 
 ## Syntax diagnostics
 
@@ -42,9 +45,9 @@ drops or misrenders:
 - `:` output lines outside a `#+RESULTS` block;
 - a missing `#+TITLE:`.
 
-Each diagnostic prints as `line N: message`. Diagnostics currently come
-from the core parser rather than a duplicated linter, so they stay in sync
-with what the site actually renders.
+Each diagnostic prints as `line N [warning|error]: message`. Diagnostics
+currently come from the core parser rather than a duplicated linter, so they
+stay in sync with what the site actually renders.
 
 ## `--run`: RESULTS and CHECK verification
 

@@ -2,8 +2,8 @@
 
 The engine is the `pyodide@314.0.7` npm dependency (Pyodide's CPython 3.14
 build, pinned in `package.json` and `pnpm-lock.yaml`);
-`scripts/sync-vendors.mjs` copies the payload from `node_modules/` into the
-app's `public/vendor-python/`. These are exactly the five files the browser
+`didactVendors()` serves the payload from `node_modules/` in dev and emits it
+under `vendor-python/` in the build output. These are exactly the five files the browser
 fetches when the engine boots (verified against the shipped `pyodide.js`
 loader); nothing else is requested at runtime and no CDN is ever contacted.
 

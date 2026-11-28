@@ -24,6 +24,8 @@ export class JsSession implements Session {
   /** Error that crashed the current run; sticky until reset() (house pattern
    *  from kernel-lisp: a crashed program must not report exit(0) on re-run). */
   private runError: string | null = null;
+  /** Line we last paused on, so a resumed run executes it first. */
+  private pausedLine: number | null = null;
 
   async load(src: string): Promise<LoadResult> {
     try {
@@ -31,11 +33,35 @@ export class JsSession implements Session {
     } catch (e) {
       this.program = null;
       this.interp = null;
+      this.gen = null;
+      this.pending = null;
+      this.runError = null;
+      this.pausedLine = null;
       if (e instanceof ParseError) return { ok: false, line: e.line, message: e.message };
       return { ok: false, message: e instanceof Error ? e.message : String(e) };
     }
     this.reset();
     return { ok: true, summary: `loaded · ${this.program.body.length} top-level statements` };
+  }
+
+  /** Continue this session's global scope with another block's source. */
+  async resume(src: string): Promise<LoadResult> {
+    if (this.interp === null) return this.load(src);
+    let program: Program;
+    try {
+      program = parse(src);
+    } catch (e) {
+      if (e instanceof ParseError) return { ok: false, line: e.line, message: e.message };
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+    this.program = program;
+    this.interp = new Interpreter(program, this.interp.global);
+    this.gen = null;
+    this.pending = null;
+    this.prevScope = new Map();
+    this.runError = null;
+    this.pausedLine = null;
+    return { ok: true, summary: `resumed · ${program.body.length} top-level statements` };
   }
 
   reset(): void {
@@ -45,6 +71,7 @@ export class JsSession implements Session {
     this.pending = null;
     this.prevScope = new Map();
     this.runError = null;
+    this.pausedLine = null;
   }
 
   // -- driver -----------------------------------------------------------
@@ -61,6 +88,7 @@ export class JsSession implements Session {
 
   /** Consume the peeked unit (execute one statement or one whole task). */
   private consume(): void {
+    this.pausedLine = null;
     this.pending = null;
     // A task marker runs its whole invocation; the statements inside it
     // yield too and are consumed here as part of the same unit.
@@ -85,6 +113,17 @@ export class JsSession implements Session {
     if (this.runError !== null) return this.result({ finished: false, error: this.runError });
     const bps = breakpoints ?? [];
     this.snapshotScopes(); // `changed` flags diff across this run segment
+    // Resuming after a pause first executes the paused statement itself
+    // (otherwise the same pending line would re-trip its breakpoint).
+    if (this.pending !== null && !this.pending.done
+      && this.pending.value.task === undefined
+      && this.pausedLine !== null && this.pausedLine === this.pending.value.line) {
+      try {
+        this.consume();
+      } catch (e) {
+        return this.fail(e);
+      }
+    }
     for (;;) {
       let next: IteratorResult<YieldInfo, void>;
       try {
@@ -99,6 +138,7 @@ export class JsSession implements Session {
       // Tasks are never breakpointed; statements on a bp line pause before
       // executing (and re-trip on every later iteration through that line).
       if (info.task === undefined && bps.includes(info.line)) {
+        this.pausedLine = info.line;
         return this.result({ pausedAt: info.line });
       }
       try {
@@ -205,6 +245,9 @@ export class JsSession implements Session {
     this.interp = null;
     this.gen = null;
     this.pending = null;
+    this.prevScope = new Map();
+    this.runError = null;
+    this.pausedLine = null;
   }
 }
 

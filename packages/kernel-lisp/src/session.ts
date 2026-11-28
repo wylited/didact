@@ -8,7 +8,7 @@
 //   Output        — display/newline text.
 
 import { makeBuiltins } from './builtins';
-import { Machine } from './machine';
+import { Machine, type SharedState } from './machine';
 import { readProgram } from './reader';
 import type { Field, ListingRow, LoadResult, Panel, RunResult, Session } from './types';
 import { Builtin, Env, Form, LispError, Sym, renderWrite, withHeap } from './value';
@@ -34,26 +34,61 @@ export class LispSession implements Session {
   private machine: Machine | null = null;
   /** Previous binding snapshot per env frame — drives `changed` flags. */
   private prevSnapshot = new WeakMap<Env, Map<string, string>>();
+  /** Line we already paused at: resuming runs past this occurrence. */
+  private resumeLine: number | null = null;
 
-  private buildMachine(forms: Form[]): Machine {
+  private buildMachine(forms: Form[], shared?: SharedState): Machine {
     let machine!: Machine;
     // The one impure builtin (macroexpand-1) delegates back into the
     // machine it belongs to, so wire the table before constructing it.
     const builtins = makeBuiltins((formValue, env) => machine.macroExpandOnce(formValue, env));
-    machine = new Machine(forms, builtins);
+    machine = new Machine(forms, builtins, shared);
     return machine;
   }
 
+  private discard(): void {
+    this.forms = null;
+    this.machine = null;
+    this.prevSnapshot = new WeakMap();
+    this.resumeLine = null;
+  }
+
   async load(src: string): Promise<LoadResult> {
+    let forms: Form[];
     try {
-      this.forms = readProgram(src);
+      forms = readProgram(src);
+    } catch (e) {
+      this.discard();
+      if (e instanceof LispError) return { ok: false, line: e.line, message: e.message };
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+    if (forms.length === 0) {
+      this.discard();
+      return { ok: false, line: 1, message: 'no forms to evaluate' };
+    }
+    this.forms = forms;
+    this.prevSnapshot = new WeakMap();
+    this.resumeLine = null;
+    this.machine = this.buildMachine(this.forms);
+    return { ok: true, summary: `loaded · ${this.forms.length} forms` };
+  }
+
+  /** Continue this session's heap and global environment with another block's forms. */
+  async resume(src: string): Promise<LoadResult> {
+    if (this.machine === null) return this.load(src);
+    let forms: Form[];
+    try {
+      forms = readProgram(src);
     } catch (e) {
       if (e instanceof LispError) return { ok: false, line: e.line, message: e.message };
       return { ok: false, message: e instanceof Error ? e.message : String(e) };
     }
-    if (this.forms.length === 0) return { ok: false, line: 1, message: 'no forms to evaluate' };
-    this.machine = this.buildMachine(this.forms);
-    return { ok: true, summary: `loaded · ${this.forms.length} forms` };
+    if (forms.length === 0) return { ok: false, line: 1, message: 'no forms to evaluate' };
+    this.forms = forms;
+    this.prevSnapshot = new WeakMap();
+    this.resumeLine = null;
+    this.machine = this.buildMachine(forms, { heap: this.machine.heap, global: this.machine.global });
+    return { ok: true, summary: `resumed · ${forms.length} forms` };
   }
 
   async run(breakpoints?: number[]): Promise<RunResult> {
@@ -62,12 +97,17 @@ export class LispSession implements Session {
     const bps = breakpoints !== undefined ? new Set(breakpoints) : null;
     while (!m.finished && m.error === null) {
       const line = m.currentLine();
-      // Stop *before* reducing a form whose source line is a breakpoint.
-      if (bps !== null && line !== null && bps.has(line)) {
-        return { ...runResult(m), pausedAt: line };
+      if (line !== this.resumeLine) {
+        // Stop *before* reducing a form whose source line is a breakpoint.
+        if (bps !== null && line !== null && bps.has(line)) {
+          this.resumeLine = line;
+          return { ...runResult(m), pausedAt: line };
+        }
+        this.resumeLine = null;
       }
       m.step();
     }
+    this.resumeLine = null;
     return runResult(m);
   }
 
@@ -75,12 +115,15 @@ export class LispSession implements Session {
     const m = this.machine;
     if (m === null) return { ran: false, result: { finished: false, steps: 0, error: 'nothing is loaded' } };
     if (m.finished || m.error !== null) return { ran: false, result: runResult(m) };
+    const resume = this.resumeLine;
     m.step();
+    if (resume !== null && m.currentLine() !== resume) this.resumeLine = null;
     return { ran: true, result: runResult(m) };
   }
 
   reset(): void {
     this.prevSnapshot = new WeakMap();
+    this.resumeLine = null;
     if (this.forms !== null) this.machine = this.buildMachine(this.forms);
   }
 
@@ -96,8 +139,7 @@ export class LispSession implements Session {
   }
 
   dispose(): void {
-    this.machine = null;
-    this.forms = null;
+    this.discard();
   }
 
   /** Every cons cell, at its stable address; fresh cells highlighted. */
