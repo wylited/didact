@@ -9,7 +9,7 @@ A proper list like =(1 2)= is just a chain of cons cells ending in ='()=: =(cons
 
 #+CAPTION: Box-and-pointer heap layout of (1 2) versus dotted pair (1 . 2)
 #+BEGIN_SRC typst :results svg
-#set page(margin: 8pt)
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/cetz:0.5.2": canvas, draw
 
@@ -84,7 +84,7 @@ In =fact=, the outer multiplication =(* n ...)= must wait for =(fact (- n 1))= t
 
 #+CAPTION: Non-tail recursion stacks waiting multiply frames; tail recursion reuses one frame
 #+BEGIN_SRC typst :results svg
-#set page(margin: 8pt)
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 

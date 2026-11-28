@@ -9,7 +9,7 @@ Lua has no separate list, dictionary, or object type — every compound structur
 
 #+CAPTION: Anatomy of one Lua table holding both array slots (1..4) and hash keys
 #+BEGIN_SRC typst :results svg
-#set page(margin: 9pt)
+#set page(margin: 12pt)
 #set text(size: 9pt)
 
 #let mono(body, size: 9pt) = text(font: "DejaVu Sans Mono", size: size)[#body]
@@ -128,7 +128,7 @@ Lua builds object-oriented dispatch from one mechanism: if a key lookup misses o
 
 #+CAPTION: Multi-hop __index metatable lookup from rex up to Animal:greet
 #+BEGIN_SRC typst :results svg
-#set page(margin: 9pt)
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 

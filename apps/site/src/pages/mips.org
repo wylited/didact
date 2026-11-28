@@ -9,6 +9,7 @@ MIPS assembly lets you write convenient pseudo-instructions like =la= (load 32-b
 
 #+CAPTION: How the MIPS assembler expands pseudo-instructions into 32-bit machine words
 #+BEGIN_SRC typst :results svg
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 

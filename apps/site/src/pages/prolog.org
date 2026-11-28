@@ -27,7 +27,7 @@ A rule =grandparent(X, Z) :- parent(X, Y), parent(Y, Z).= rewrites one goal into
 
 #+CAPTION: SLD resolution tree for grandparent(tom, G) showing choice points and backtracking
 #+BEGIN_SRC typst :results svg
-#set page(margin: 10pt)
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/cetz:0.5.2" as cetz
 
@@ -127,7 +127,7 @@ The cut operator =!= always succeeds and immediately discards every choice point
 
 #+CAPTION: Cut (!) discards the choice point to clause 2 once X >= Y succeeds
 #+BEGIN_SRC typst :results svg
-#set page(margin: 10pt)
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/cetz:0.5.2" as cetz
 

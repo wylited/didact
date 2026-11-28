@@ -9,7 +9,7 @@ On Linux x86-64, user code asks the kernel to perform I/O through =syscall=. Bef
 
 #+CAPTION: x86-64 Linux syscall register interface and memory layout
 #+BEGIN_SRC typst :results svg
-#set page(margin: 11pt)
+#set page(margin: 12pt)
 #set text(size: 9.5pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
@@ -94,7 +94,7 @@ To print the sum $sum_(i=1)^10 i = 55$ without libc, =div rcx= divides the 128-b
 
 #+CAPTION: Flag-driven loop exit and 128-bit division dataflow
 #+BEGIN_SRC typst :results svg
-#set page(margin: 11pt)
+#set page(margin: 12pt)
 #set text(size: 9pt)
 #import "@preview/fletcher:0.5.8": diagram, node, edge
 
